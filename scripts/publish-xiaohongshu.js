@@ -1,4 +1,11 @@
-#!/usr/bin/env node
+/*
+ * @Author: chan-max jackieontheway666@gmail.com
+ * @Date: 2025-10-15 21:39:12
+ * @LastEditors: chan-max jackieontheway666@gmail.com
+ * @LastEditTime: 2025-10-16 07:08:20
+ * @FilePath: /yishe-scripts/Users/jackie/workspace/yishe-uploader/scripts/publish-xiaohongshu.js
+ * @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
+ */
 
 import {
     PublishService
@@ -25,7 +32,7 @@ async function main() {
         const icon = r.success ? '✅' : '❌';
         console.log(`${icon} xiaohongshu: ${r.message}`);
     } catch (err) {
-        console.error(chalk.red('小红书发布失败:'), err ? .message || err);
+        console.error(chalk.red('小红书发布失败:'), err ? err.message : err);
         process.exitCode = 1;
     } finally {
         // 保持浏览器窗口打开，便于继续操作或上传

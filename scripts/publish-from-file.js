@@ -1,4 +1,12 @@
-#!/usr/bin/env node
+/*
+ * @Author: chan-max jackieontheway666@gmail.com
+ * @Date: 2025-10-15 21:39:12
+ * @LastEditors: chan-max jackieontheway666@gmail.com
+ * @LastEditTime: 2025-10-16 07:11:29
+ * @FilePath: /yishe-scripts/Users/jackie/workspace/yishe-uploader/scripts/publish-from-file.js
+ * @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
+ */
+
 
 /**
  * 从 JS/JSON 文件读取发布配置并执行发布
@@ -32,7 +40,7 @@ async function main() {
         } = await import('url');
         const resolved = resolve(process.cwd(), filePath);
         const mod = await import(pathToFileURL(resolved).href);
-        const data = mod.default ? ? mod.config ? ? mod.publish ? ? mod;
+        const data = mod.default || mod.config || mod.publish || mod;
 
         let platforms = [];
         if (Array.isArray(data)) {
@@ -61,7 +69,7 @@ async function main() {
             console.log(`${icon} ${r.platform}: ${r.message}`);
         }
     } catch (err) {
-        console.error(chalk.red('执行失败:'), err ? .message || err);
+        console.error(chalk.red('执行失败:'), err ? err.message : err);
         process.exitCode = 1;
     } finally {
         // 保持浏览器窗口打开，便于继续操作或上传

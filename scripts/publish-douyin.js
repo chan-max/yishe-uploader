@@ -25,7 +25,7 @@ async function main() {
         const icon = r.success ? '✅' : '❌';
         console.log(`${icon} douyin: ${r.message}`);
     } catch (err) {
-        console.error(chalk.red('抖音发布失败:'), err ? .message || err);
+        console.error(chalk.red('抖音发布失败:'), err ? err.message : err);
         process.exitCode = 1;
     } finally {
         // 保持浏览器窗口打开，便于继续操作或上传

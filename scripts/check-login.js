@@ -1,5 +1,11 @@
-#!/usr/bin/env node
-
+/*
+ * @Author: chan-max jackieontheway666@gmail.com
+ * @Date: 2025-10-15 21:39:12
+ * @LastEditors: chan-max jackieontheway666@gmail.com
+ * @LastEditTime: 2025-10-16 07:08:35
+ * @FilePath: /yishe-scripts/Users/jackie/workspace/yishe-uploader/scripts/check-login.js
+ * @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
+ */
 /**
  * 独立脚本：检查各平台登录状态
  * 用法：npm run check-login  或  node scripts/check-login.js [--force]
@@ -74,7 +80,7 @@ async function main() {
             await new Promise(() => {});
         }
     } catch (err) {
-        console.error(chalk.red('检查登录状态失败:'), err ? .message || err);
+        console.error(chalk.red('检查登录状态失败:'), err ? err.message : err);
         process.exitCode = 1;
     } finally {
         // 仅当全部已登录时才清理
