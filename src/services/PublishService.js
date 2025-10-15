@@ -3,7 +3,8 @@
  */
 
 import {
-    publishToXiaohongshu
+    publishToXiaohongshu,
+    checkXiaohongshuLoginStatus
 } from '../platforms/xiaohongshu.js';
 import {
     publishToDouyin,
@@ -94,7 +95,7 @@ export class PublishService {
      */
     static getPublishStatusDescription(result) {
         if (!result.success) {
-            const loginStatus = result.data?.loginStatus;
+            const loginStatus = result.data ? .loginStatus;
             switch (loginStatus) {
                 case 'not_logged_in':
                     return `${result.platform}: 未登录，请先登录该平台`;
@@ -158,7 +159,7 @@ export class PublishService {
 
             return {
                 platform: platformName,
-                success: result?.success || false,
+                success: result ? .success || false,
                 message: result.message || result.error || '发布完成',
                 data: {
                     ...result.data,
@@ -197,8 +198,30 @@ export class PublishService {
                     name: 'xiaohongshu',
                     url: 'https://creator.xiaohongshu.com/publish/publish?target=image',
                     selectors: {
-                        userElements: ['.user_avatar', '.reds-avatar-border', '.user-avatar', '.creator-header'],
-                        loginElements: ['.login', 'button[data-testid="login-button"]', '.login-btn', '.login-text']
+                        userElements: [
+                            '.user_avatar',
+                            '[class="user_avatar"]',
+                            '.reds-avatar-border',
+                            '.user-avatar',
+                            '.creator-header',
+                            '.header-avatar',
+                            '.user-info',
+                            '.user-profile',
+                            '[data-testid="user-avatar"]',
+                            '.avatar-container',
+                            '.user-container'
+                        ],
+                        loginElements: [
+                            '.login',
+                            'button[data-testid="login-button"]',
+                            '.login-btn',
+                            '.login-text',
+                            '.login-button',
+                            '.login-entry',
+                            '.auth-btn',
+                            '.sign-in-btn',
+                            '[class*="login"]'
+                        ]
                     }
                 },
                 {
@@ -352,7 +375,7 @@ export class PublishService {
                     let isLoggedIn = false;
                     let loginDetails = null;
 
-                    // 为抖音使用专门的检测方法
+                    // 为抖音和小红书使用专门的检测方法
                     if (config.name === 'douyin') {
                         try {
                             const douyinResult = await checkDouyinLoginStatus(page);
@@ -365,6 +388,22 @@ export class PublishService {
                                 isLoggedIn: false,
                                 status: 'error',
                                 message: douyinError instanceof Error ? douyinError.message : '抖音登录检测失败',
+                                timestamp: Date.now()
+                            };
+                            return;
+                        }
+                    } else if (config.name === 'xiaohongshu') {
+                        try {
+                            const xiaohongshuResult = await checkXiaohongshuLoginStatus(page);
+                            isLoggedIn = xiaohongshuResult.isLoggedIn;
+                            loginDetails = xiaohongshuResult.details;
+                            logger.info('小红书登录检测详情:', loginDetails);
+                        } catch (xiaohongshuError) {
+                            logger.error('小红书专门检测失败:', xiaohongshuError);
+                            loginStatus[config.name] = {
+                                isLoggedIn: false,
+                                status: 'error',
+                                message: xiaohongshuError instanceof Error ? xiaohongshuError.message : '小红书登录检测失败',
                                 timestamp: Date.now()
                             };
                             return;
@@ -422,6 +461,24 @@ export class PublishService {
                         } else if (isLoggedIn) {
                             if (loginDetails.hasHeaderAvatar) {
                                 statusMessage = '已登录 (检测到头像元素)';
+                            } else {
+                                statusMessage = '已登录 (检测到用户元素)';
+                            }
+                        } else {
+                            if (loginDetails.hasLoginElement) {
+                                statusMessage = '未登录 (检测到登录按钮)';
+                            } else {
+                                statusMessage = '未登录 (未检测到用户元素)';
+                            }
+                        }
+                    } else if (config.name === 'xiaohongshu' && loginDetails) {
+                        if (loginDetails.reason === 'redirected_to_login_page') {
+                            statusMessage = '被重定向到登录页面';
+                        } else if (loginDetails.reason === 'detection_error') {
+                            statusMessage = '检测过程出错';
+                        } else if (isLoggedIn) {
+                            if (loginDetails.hasUserAvatar) {
+                                statusMessage = '已登录 (检测到user_avatar元素)';
                             } else {
                                 statusMessage = '已登录 (检测到用户元素)';
                             }
