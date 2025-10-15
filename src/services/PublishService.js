@@ -95,7 +95,7 @@ export class PublishService {
      */
     static getPublishStatusDescription(result) {
         if (!result.success) {
-            const loginStatus = result.data ? .loginStatus;
+            const loginStatus = result.data ? result.data.loginStatus : 'unknown';
             switch (loginStatus) {
                 case 'not_logged_in':
                     return `${result.platform}: 未登录，请先登录该平台`;
@@ -159,7 +159,7 @@ export class PublishService {
 
             return {
                 platform: platformName,
-                success: result ? .success || false,
+                success: result ? result.success : false,
                 message: result.message || result.error || '发布完成',
                 data: {
                     ...result.data,
@@ -496,7 +496,7 @@ export class PublishService {
                         status: 'success',
                         message: statusMessage,
                         timestamp: Date.now(),
-                        details: config.name === 'douyin' ? loginDetails : undefined
+                        details: (config.name === 'douyin' || config.name === 'xiaohongshu') ? loginDetails : undefined
                     };
                     logger.info(`${config.name} 检查完成`);
 
