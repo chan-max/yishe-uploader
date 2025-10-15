@@ -128,7 +128,7 @@ export async function publishToXiaohongshu(publishInfo) {
         logger.error('小红书发布过程出错:', error);
         return {
             success: false,
-            message: error ? .message || '未知错误',
+            message: error ? error.message : '未知错误',
             data: error
         };
     }
