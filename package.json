@@ -1,51 +1,53 @@
 {
-  "name": "yishe-uploader",
-  "version": "1.0.0",
-  "description": "多媒体自动发布脚本仓库 - 支持微博、抖音、小红书、快手等平台",
-  "main": "src/index.js",
-  "type": "module",
-  "scripts": {
-    "start": "node src/index.js",
-    "dev": "node src/index.js",
-    "test": "node test/index.js",
-    "check-login": "node scripts/check-login.js",
-    "publish:file": "node scripts/publish-from-file.js",
-    "publish:weibo": "node scripts/publish-weibo.js",
-    "publish:douyin": "node scripts/publish-douyin.js",
-    "publish:xiaohongshu": "node scripts/publish-xiaohongshu.js",
-    "publish:kuaishou": "node scripts/publish-kuaishou.js",
-    "lint": "eslint src --ext .js",
-    "format": "prettier --write src/**/*.js"
-  },
-  "keywords": [
-    "social-media",
-    "automation",
-    "puppeteer",
-    "upload",
-    "weibo",
-    "douyin",
-    "xiaohongshu",
-    "kuaishou"
-  ],
-  "author": "Jc",
-  "license": "MIT",
-  "dependencies": {
-    "puppeteer": "^24.11.1",
-    "puppeteer-extra": "^3.3.6",
-    "puppeteer-extra-plugin-stealth": "^2.11.2",
-    "axios": "^1.10.0",
-    "commander": "^12.0.0",
-    "chalk": "^5.3.0",
-    "ora": "^8.0.1",
-    "inquirer": "^9.2.15",
-    "fs-extra": "^11.2.0",
-    "node-fetch": "^3.3.2"
-  },
-  "devDependencies": {
-    "eslint": "^9.24.0",
-    "prettier": "^3.5.3"
-  },
-  "engines": {
-    "node": ">=18.0.0"
-  }
+    "name": "yishe-uploader",
+    "version": "1.0.0",
+    "description": "多媒体自动发布脚本仓库 - 支持微博、抖音、小红书、快手等平台",
+    "main": "src/index.js",
+    "type": "module",
+    "scripts": {
+        "start": "node src/index.js",
+        "dev": "node src/index.js",
+        "test": "node test/index.js",
+        "check-login": "node scripts/check-login.js",
+        "publish:file": "node scripts/publish-from-file.js",
+        "publish:weibo": "node scripts/publish-weibo.js",
+        "publish:douyin": "node scripts/publish-douyin.js",
+        "publish:xiaohongshu": "node scripts/publish-xiaohongshu.js",
+        "publish:kuaishou": "node scripts/publish-kuaishou.js",
+        "browser:status": "node scripts/browser-status.js",
+        "browser:close": "node scripts/browser-status.js --close",
+        "lint": "eslint src --ext .js",
+        "format": "prettier --write src/**/*.js"
+    },
+    "keywords": [
+        "social-media",
+        "automation",
+        "puppeteer",
+        "upload",
+        "weibo",
+        "douyin",
+        "xiaohongshu",
+        "kuaishou"
+    ],
+    "author": "Jc",
+    "license": "MIT",
+    "dependencies": {
+        "puppeteer": "^24.11.1",
+        "puppeteer-extra": "^3.3.6",
+        "puppeteer-extra-plugin-stealth": "^2.11.2",
+        "axios": "^1.10.0",
+        "commander": "^12.0.0",
+        "chalk": "^5.3.0",
+        "ora": "^8.0.1",
+        "inquirer": "^9.2.15",
+        "fs-extra": "^11.2.0",
+        "node-fetch": "^3.3.2"
+    },
+    "devDependencies": {
+        "eslint": "^9.24.0",
+        "prettier": "^3.5.3"
+    },
+    "engines": {
+        "node": ">=18.0.0"
+    }
 }
