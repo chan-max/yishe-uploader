@@ -18,6 +18,7 @@ async function main() {
   console.log(`强制刷新: ${force ? '是' : '否'}`);
   console.log('============================================\n');
 
+  let shouldCleanup = true;
   try {
     const loginStatus = await PublishService.checkSocialMediaLoginStatus(force);
 
@@ -59,16 +60,20 @@ async function main() {
         console.log(` - 已打开 ${platform} 登录/发布页面: ${targetUrl}`);
       }
       console.log('\n提示: 完成登录后，可重新运行本命令验证登录状态。浏览器将保持开启。');
-      return; // 不清理，保持浏览器与页面开启
+      shouldCleanup = false; // 不清理，保持浏览器与页面开启
+      // 保持进程常驻，直到用户 Ctrl+C 结束
+      await new Promise(() => {});
     }
   } catch (err) {
     console.error(chalk.red('检查登录状态失败:'), err?.message || err);
     process.exitCode = 1;
   } finally {
-    // 如果全部已登录，则清理浏览器；若存在未登录，前面已 return，不会执行到这里
-    try {
-      await BrowserService.cleanup();
-    } catch {}
+    // 仅当全部已登录时才清理
+    if (shouldCleanup) {
+      try {
+        await BrowserService.cleanup();
+      } catch {}
+    }
   }
 }
 

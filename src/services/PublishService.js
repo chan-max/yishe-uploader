@@ -112,18 +112,6 @@ export class PublishService {
   static async publishSingle(publishInfo) {
     const platformName = publishInfo.platform;
     try {
-      const loginStatus = await this.checkSocialMediaLoginStatus();
-      const platformLoginStatus = loginStatus[platformName];
-      if (!platformLoginStatus) {
-        return { platform: platformName, success: false, message: '登录状态未知，无法发布', data: { loginStatus: 'unknown' } };
-      }
-      if (platformLoginStatus.status === 'error') {
-        return { platform: platformName, success: false, message: `登录状态检查失败: ${platformLoginStatus.message}`, data: { loginStatus: 'error', error: platformLoginStatus.message } };
-      }
-      if (!platformLoginStatus.isLoggedIn) {
-        return { platform: platformName, success: false, message: '未登录，无法发布内容', data: { loginStatus: 'not_logged_in' } };
-      }
-
       let result;
       switch (platformName) {
         case 'douyin':
@@ -146,11 +134,11 @@ export class PublishService {
         platform: platformName,
         success: result?.success || false,
         message: result.message || result.error || '发布完成',
-        data: { ...result.data, loginStatus: 'logged_in', publishResult: result }
+        data: { ...result.data, publishResult: result }
       };
     } catch (error) {
       logger.error(`${platformName} 发布失败:`, error);
-      return { platform: platformName, success: false, message: error instanceof Error ? error.message : '发布失败', data: { loginStatus: 'unknown' } };
+      return { platform: platformName, success: false, message: error instanceof Error ? error.message : '发布失败', data: {} };
     }
   }
 

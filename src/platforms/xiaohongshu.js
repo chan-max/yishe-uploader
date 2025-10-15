@@ -45,7 +45,7 @@ export async function publishToXiaohongshu(publishInfo) {
       for (const imageUrl of publishInfo.images) {
         try {
           // 下载图片到临时目录
-          const tempPath = await downloadImageToTemp(imageUrl, `${Date.now()}_xiaohongshu`);
+          const tempPath = await downloadImageToTemp(imageUrl, `xiaohongshu_${Date.now()}`);
 
           // 关键：每次都重新获取 input[type="file"]
           const fileInput = await page.$('input[type="file"]');

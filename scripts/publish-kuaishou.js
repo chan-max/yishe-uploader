@@ -24,7 +24,7 @@ async function main() {
     console.error(chalk.red('快手发布失败:'), err?.message || err);
     process.exitCode = 1;
   } finally {
-    await BrowserService.cleanup();
+    // 不关闭浏览器，便于继续操作或上传
   }
 }
 

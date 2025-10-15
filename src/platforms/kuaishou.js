@@ -34,7 +34,7 @@ export async function publishToKuaishou(publishInfo) {
       const tempPaths = [];
       for (const imageUrl of publishInfo.images) {
         try {
-          const tempPath = await downloadImageToTemp(imageUrl, `${Date.now()}_kuaishou`);
+          const tempPath = await downloadImageToTemp(imageUrl, `kuaishou_${Date.now()}`);
           tempPaths.push(tempPath);
         } catch (error) {
           logger.error(`处理图片 ${imageUrl} 时出错:`, error);

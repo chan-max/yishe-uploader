@@ -116,7 +116,7 @@ program
 
       spinner.text = '正在发布内容...';
       
-      // 执行发布（逐个平台）
+      // 执行发布（逐个平台）。不关闭浏览器，便于继续操作
       const results = [];
       for (const cfg of publishConfigs) {
         const r = await PublishService.publishSingle(cfg);
@@ -142,8 +142,7 @@ program
       logger.error('发布过程出错:', error);
       process.exit(1);
     } finally {
-      // 清理资源
-      await BrowserService.cleanup();
+      // 不清理浏览器，便于继续操作或继续上传
     }
   });
 
@@ -172,7 +171,7 @@ program
       logger.error('检查登录状态出错:', error);
       process.exit(1);
     } finally {
-      await BrowserService.cleanup();
+      // 不清理浏览器，便于继续操作或继续上传
     }
   });
 

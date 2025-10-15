@@ -2,7 +2,7 @@
  * 文件工具函数
  */
 
-import { join as pathJoin } from 'path';
+import { join as pathJoin, extname } from 'path';
 import { existsSync, mkdirSync, writeFileSync, unlinkSync } from 'fs';
 import { logger } from './logger.js';
 
@@ -38,12 +38,30 @@ export async function downloadImageToTemp(imageUrl, filename) {
     }
     
     const buffer = await response.arrayBuffer();
-    
-    // 从 URL 中提取文件扩展名
-    const urlParts = imageUrl.split('.');
-    const extension = urlParts.length > 1 ? urlParts[urlParts.length - 1].split('?')[0] : 'jpg';
-    
-    const tempPath = pathJoin(tempDir, `${filename}.${extension}`);
+
+    // 提取扩展名：优先从 pathname 获取，其次从 content-type 推断，最后默认 jpg
+    let extension = 'jpg';
+    try {
+      const urlObj = new URL(imageUrl);
+      const pathExt = extname(urlObj.pathname).replace('.', '').toLowerCase();
+      if (pathExt && pathExt.length <= 5) {
+        extension = pathExt;
+      }
+    } catch {}
+    if (extension === 'jpg' || extension === '') {
+      const ct = response.headers?.get?.('content-type') || '';
+      if (ct.includes('png')) extension = 'png';
+      else if (ct.includes('jpeg') || ct.includes('jpg')) extension = 'jpg';
+      else if (ct.includes('webp')) extension = 'webp';
+      else if (ct.includes('gif')) extension = 'gif';
+    }
+
+    // 规范化文件名，避免包含非法字符或路径片段
+    const safeName = String(filename || Date.now())
+      .replace(/[^a-zA-Z0-9._-]/g, '_')
+      .slice(0, 80);
+
+    const tempPath = pathJoin(tempDir, `${safeName}.${extension}`);
     writeFileSync(tempPath, Buffer.from(buffer));
     
     logger.debug('图片已下载到:', tempPath);

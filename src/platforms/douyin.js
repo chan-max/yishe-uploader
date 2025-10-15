@@ -49,7 +49,7 @@ export async function publishToDouyin(publishInfo) {
     for (const imageUrl of publishInfo.images) {
       try {
         // 下载图片到临时目录
-        const tempPath = await downloadImageToTemp(imageUrl, `${Date.now()}_douyin`);
+        const tempPath = await downloadImageToTemp(imageUrl, `douyin_${Date.now()}`);
         
         // 上传图片
         await fileInput.uploadFile(tempPath);

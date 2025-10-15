@@ -40,7 +40,7 @@ export async function publishToWeibo(publishInfo) {
           logger.info(`正在上传第 ${i + 1}/${publishInfo.images.length} 张图片: ${imageUrl}`);
           
           // 下载图片到临时目录
-          const tempPath = await downloadImageToTemp(imageUrl, `${Date.now()}_weibo_${i}`);
+          const tempPath = await downloadImageToTemp(imageUrl, `weibo_${Date.now()}_${i}`);
           
           // 重新获取文件选择器（避免DOM变化导致的问题）
           const currentFileInput = await page.$('input[type="file"]');
