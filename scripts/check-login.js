@@ -7,6 +7,7 @@
 
 import { PublishService } from '../src/services/PublishService.js';
 import { BrowserService } from '../src/services/BrowserService.js';
+import { SOCIAL_MEDIA_UPLOAD_URLS } from '../src/config/platforms.js';
 import chalk from 'chalk';
 
 async function main() {
@@ -36,14 +37,38 @@ async function main() {
       console.log(`${icon} ${color(platform)}: ${status.message || ''}`);
     }
 
-    const ok = entries.filter(([, s]) => s.isLoggedIn).length;
+    const notLoggedIn = entries.filter(([, s]) => !s.isLoggedIn);
+    const ok = entries.length - notLoggedIn.length;
     const total = entries.length;
     console.log('\n合计: ', chalk.green(`${ok}`), '/', total);
+
+    // 对于未登录的平台，自动打开对应发布页面并保持浏览器不关闭，便于手动登录
+    if (notLoggedIn.length > 0) {
+      console.log('\n未登录的平台将自动打开发布页面，请在打开的页面中完成登录：');
+      const browser = await BrowserService.getOrCreateBrowser();
+      for (const [platform] of notLoggedIn) {
+        const targetUrl =
+          platform === 'weibo' ? SOCIAL_MEDIA_UPLOAD_URLS.weibo :
+          platform === 'douyin' ? SOCIAL_MEDIA_UPLOAD_URLS.douyin_pic :
+          platform === 'xiaohongshu' ? SOCIAL_MEDIA_UPLOAD_URLS.xiaohongshu_pic :
+          platform === 'kuaishou' ? SOCIAL_MEDIA_UPLOAD_URLS.kuaishou_pic :
+          null;
+        if (!targetUrl) continue;
+        const page = await browser.newPage();
+        await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
+        console.log(` - 已打开 ${platform} 登录/发布页面: ${targetUrl}`);
+      }
+      console.log('\n提示: 完成登录后，可重新运行本命令验证登录状态。浏览器将保持开启。');
+      return; // 不清理，保持浏览器与页面开启
+    }
   } catch (err) {
     console.error(chalk.red('检查登录状态失败:'), err?.message || err);
     process.exitCode = 1;
   } finally {
-    await BrowserService.cleanup();
+    // 如果全部已登录，则清理浏览器；若存在未登录，前面已 return，不会执行到这里
+    try {
+      await BrowserService.cleanup();
+    } catch {}
   }
 }
 
