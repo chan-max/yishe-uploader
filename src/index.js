@@ -22,6 +22,7 @@ program
 program
   .command('publish')
   .description('发布内容到社交媒体平台')
+  .option('--file <file>', '从 JS/JSON 文件加载发布配置对象')
   .option('-p, --platform <platform>', '指定平台 (weibo|douyin|xiaohongshu|kuaishou)')
   .option('-P, --platforms <platforms>', '指定多个平台，用逗号分隔')
   .option('-t, --title <title>', '发布标题')
@@ -34,40 +35,58 @@ program
     const spinner = ora('正在初始化发布服务...').start();
     
     try {
-      // 验证参数
-      if (!options.platform && !options.platforms) {
-        spinner.fail('请指定要发布的平台');
-        process.exit(1);
+      let publishConfigs = [];
+      if (options.file) {
+        // 从文件加载对象
+        const { resolve } = await import('path');
+        const { pathToFileURL } = await import('url');
+        const resolved = resolve(process.cwd(), options.file);
+        const mod = await import(pathToFileURL(resolved).href);
+        const data = mod.default ?? mod.config ?? mod.publish ?? mod;
+        if (Array.isArray(data)) {
+          publishConfigs = data;
+        } else if (data && Array.isArray(data.platforms)) {
+          publishConfigs = data.platforms;
+        } else {
+          spinner.fail('文件格式不正确：应导出数组或包含 platforms 数组的对象');
+          process.exit(1);
+        }
+      } else {
+        // 验证参数（命令行模式）
+        if (!options.platform && !options.platforms) {
+          spinner.fail('请指定要发布的平台，或使用 --file 指定配置文件');
+          process.exit(1);
+        }
+
+        if (!options.title && !options.content) {
+          spinner.fail('请提供标题或内容，或使用 --file 指定配置文件');
+          process.exit(1);
+        }
+
+        // 解析平台列表
+        const platforms = options.platforms 
+          ? options.platforms.split(',').map(p => p.trim())
+          : [options.platform];
+
+        // 解析图片列表
+        const images = options.images 
+          ? options.images.split(',').map(img => img.trim())
+          : [];
+
+        // 解析标签列表
+        const tags = options.tags 
+          ? options.tags.split(',').map(tag => tag.trim())
+          : [];
+
+        // 构建发布配置
+        publishConfigs = platforms.map(platform => ({
+          platform,
+          title: options.title || '',
+          content: options.content || '',
+          images,
+          tags
+        }));
       }
-
-      if (!options.title && !options.content) {
-        spinner.fail('请提供标题或内容');
-        process.exit(1);
-      }
-
-      // 解析平台列表
-      const platforms = options.platforms 
-        ? options.platforms.split(',').map(p => p.trim())
-        : [options.platform];
-
-      // 解析图片列表
-      const images = options.images 
-        ? options.images.split(',').map(img => img.trim())
-        : [];
-
-      // 解析标签列表
-      const tags = options.tags 
-        ? options.tags.split(',').map(tag => tag.trim())
-        : [];
-
-      // 构建发布配置
-      const publishConfigs = platforms.map(platform => ({
-        platform,
-        title: options.title || '',
-        content: options.content || '',
-        images,
-        tags
-      }));
 
       spinner.text = '正在检查登录状态...';
       
@@ -97,8 +116,12 @@ program
 
       spinner.text = '正在发布内容...';
       
-      // 执行发布
-      const results = await PublishService.publishToMultiplePlatforms(publishConfigs);
+      // 执行发布（逐个平台）
+      const results = [];
+      for (const cfg of publishConfigs) {
+        const r = await PublishService.publishSingle(cfg);
+        results.push(r);
+      }
       
       spinner.succeed('发布完成');
       
@@ -171,7 +194,7 @@ program
       };
 
       spinner.text = '正在测试发布...';
-      const results = await PublishService.publishToMultiplePlatforms([testContent], 'test');
+      const results = [await PublishService.publishSingle(testContent)];
       
       spinner.succeed('测试完成');
       

@@ -9,6 +9,11 @@
     "dev": "node src/index.js",
     "test": "node test/index.js",
     "check-login": "node scripts/check-login.js",
+    "publish:file": "node scripts/publish-from-file.js",
+    "publish:weibo": "node scripts/publish-weibo.js",
+    "publish:douyin": "node scripts/publish-douyin.js",
+    "publish:xiaohongshu": "node scripts/publish-xiaohongshu.js",
+    "publish:kuaishou": "node scripts/publish-kuaishou.js",
     "lint": "eslint src --ext .js",
     "format": "prettier --write src/**/*.js"
   },

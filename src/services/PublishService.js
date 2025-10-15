@@ -107,136 +107,51 @@ export class PublishService {
   }
 
   /**
-   * 发布到多个平台
+   * 发布单个平台
    */
-  static async publishToMultiplePlatforms(platforms, productId) {
-    const results = [];
-    
+  static async publishSingle(publishInfo) {
+    const platformName = publishInfo.platform;
     try {
-      // 首先获取所有平台的登录状态（使用缓存）
-      logger.info('检查各平台登录状态...');
       const loginStatus = await this.checkSocialMediaLoginStatus();
-      
-      for (const publishInfo of platforms) {
-        const platformName = publishInfo.platform;
-        
-        try {
-          const platformLoginStatus = loginStatus[platformName];
-          
-          logger.info(`处理平台: ${platformName}, 登录状态:`, platformLoginStatus);
-          
-          // 检查登录状态
-          if (!platformLoginStatus) {
-            logger.info(`${platformName}: 未找到登录状态信息`);
-            results.push({
-              platform: platformName,
-              success: false,
-              message: '登录状态未知，无法发布',
-              data: { loginStatus: 'unknown' }
-            });
-            continue;
-          }
-          
-          if (platformLoginStatus.status === 'error') {
-            logger.info(`${platformName}: 登录状态检查失败`);
-            results.push({
-              platform: platformName,
-              success: false,
-              message: `登录状态检查失败: ${platformLoginStatus.message}`,
-              data: { loginStatus: 'error', error: platformLoginStatus.message }
-            });
-            continue;
-          }
-          
-          if (!platformLoginStatus.isLoggedIn) {
-            logger.info(`${platformName}: 未登录，跳过发布`);
-            results.push({
-              platform: platformName,
-              success: false,
-              message: '未登录，无法发布内容',
-              data: { loginStatus: 'not_logged_in' }
-            });
-            continue;
-          }
-          
-          // 已登录，开始发布
-          logger.info(`开始发布到平台: ${platformName}`);
-          
-          let result;
-          try {
-            switch (platformName) {
-              case 'douyin':
-                result = await publishToDouyin(publishInfo);
-                break;
-              case 'xiaohongshu':
-                result = await publishToXiaohongshu(publishInfo);
-                break;
-              case 'kuaishou':
-                result = await publishToKuaishou(publishInfo);
-                break;
-              case 'weibo':
-                result = await publishToWeibo(publishInfo);
-                break;
-              default:
-                result = {
-                  success: false,
-                  error: `不支持的平台: ${platformName}`
-                };
-            }
-          } catch (publishError) {
-            logger.error(`${platformName} 发布过程出错:`, publishError);
-            result = {
-              success: false,
-              error: publishError instanceof Error ? publishError.message : '发布过程出错'
-            };
-          }
-          
-          const publishResult = {
-            platform: platformName,
-            success: result?.success || false,
-            message: result.message || result.error || '发布完成',
-            data: {
-              ...result.data,
-              loginStatus: 'logged_in',
-              publishResult: result
-            }
-          };
-          
-          results.push(publishResult);
-          logger.info(`${platformName} 发布结果:`, publishResult);
-          
-        } catch (platformError) {
-          logger.error(`${platformName} 处理失败:`, platformError);
-          results.push({
-            platform: platformName,
-            success: false,
-            message: platformError instanceof Error ? platformError.message : '平台处理失败',
-            data: {
-              loginStatus: 'unknown',
-              error: platformError instanceof Error ? platformError.message : '平台处理过程出错'
-            }
-          });
-        }
+      const platformLoginStatus = loginStatus[platformName];
+      if (!platformLoginStatus) {
+        return { platform: platformName, success: false, message: '登录状态未知，无法发布', data: { loginStatus: 'unknown' } };
       }
-      
-    } catch (overallError) {
-      logger.error('多平台发布整体过程出错:', overallError);
-      // 如果整体过程出错，为所有平台返回错误状态
-      for (const publishInfo of platforms) {
-        results.push({
-          platform: publishInfo.platform,
-          success: false,
-          message: overallError instanceof Error ? overallError.message : '发布服务异常',
-          data: {
-            loginStatus: 'unknown',
-            error: overallError instanceof Error ? overallError.message : '发布服务整体异常'
-          }
-        });
+      if (platformLoginStatus.status === 'error') {
+        return { platform: platformName, success: false, message: `登录状态检查失败: ${platformLoginStatus.message}`, data: { loginStatus: 'error', error: platformLoginStatus.message } };
       }
+      if (!platformLoginStatus.isLoggedIn) {
+        return { platform: platformName, success: false, message: '未登录，无法发布内容', data: { loginStatus: 'not_logged_in' } };
+      }
+
+      let result;
+      switch (platformName) {
+        case 'douyin':
+          result = await publishToDouyin(publishInfo);
+          break;
+        case 'xiaohongshu':
+          result = await publishToXiaohongshu(publishInfo);
+          break;
+        case 'kuaishou':
+          result = await publishToKuaishou(publishInfo);
+          break;
+        case 'weibo':
+          result = await publishToWeibo(publishInfo);
+          break;
+        default:
+          result = { success: false, message: `不支持的平台: ${platformName}` };
+      }
+
+      return {
+        platform: platformName,
+        success: result?.success || false,
+        message: result.message || result.error || '发布完成',
+        data: { ...result.data, loginStatus: 'logged_in', publishResult: result }
+      };
+    } catch (error) {
+      logger.error(`${platformName} 发布失败:`, error);
+      return { platform: platformName, success: false, message: error instanceof Error ? error.message : '发布失败', data: { loginStatus: 'unknown' } };
     }
-    
-    logger.info('多平台发布完成，结果汇总:', results);
-    return results;
   }
 
   /**
