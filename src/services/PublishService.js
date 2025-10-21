@@ -22,6 +22,14 @@ import {
     updateBrowserActivity
 } from './BrowserService.js';
 import {
+    DouyinLoginChecker,
+    XiaohongshuLoginChecker,
+    GenericLoginChecker
+} from './LoginChecker.js';
+import {
+    PLATFORM_CONFIGS
+} from '../config/platforms.js';
+import {
     logger
 } from '../utils/logger.js';
 
@@ -194,77 +202,26 @@ export class PublishService {
             logger.info('[登录状态] 开始检查登录状态，缓存已失效或强制刷新');
 
             // 支持多个平台，初始化所有平台的状态
-            const platformConfigs = [{
+            const platformConfigs = [
+                {
                     name: 'xiaohongshu',
-                    url: 'https://creator.xiaohongshu.com/publish/publish?target=image',
-                    selectors: {
-                        userElements: [
-                            '.user_avatar',
-                            '[class="user_avatar"]',
-                            '.reds-avatar-border',
-                            '.user-avatar',
-                            '.creator-header',
-                            '.header-avatar',
-                            '.user-info',
-                            '.user-profile',
-                            '[data-testid="user-avatar"]',
-                            '.avatar-container',
-                            '.user-container'
-                        ],
-                        loginElements: [
-                            '.login',
-                            'button[data-testid="login-button"]',
-                            '.login-btn',
-                            '.login-text',
-                            '.login-button',
-                            '.login-entry',
-                            '.auth-btn',
-                            '.sign-in-btn',
-                            '[class*="login"]'
-                        ]
-                    }
+                    checker: new XiaohongshuLoginChecker(),
+                    config: PLATFORM_CONFIGS.xiaohongshu
                 },
                 {
                     name: 'douyin',
-                    url: 'https://creator.douyin.com/creator-micro/content/upload',
-                    selectors: {
-                        userElements: [
-                            '#header-avatar',
-                            '.user-avatar',
-                            '.user-info',
-                            '.header-user',
-                            '[data-testid="user-avatar"]',
-                            '.creator-header'
-                        ],
-                        loginElements: [
-                            '.login-btn',
-                            '.login-button',
-                            '.login-entry',
-                            'button[data-testid="login-button"]',
-                            '.login-text',
-                            '.login-link',
-                            '.login-prompt',
-                            '[class*="login"]',
-                            '.auth-btn',
-                            '.sign-in-btn'
-                        ]
-                    }
+                    checker: new DouyinLoginChecker(),
+                    config: PLATFORM_CONFIGS.douyin
                 },
                 {
                     name: 'kuaishou',
-                    url: 'https://cp.kuaishou.com/article/publish/video',
-                    selectors: {
-                        userElements: ['.user-info', '.user-avatar', '.header-user'],
-                        loginElements: ['.login-btn', '.login-button', '.login-entry']
-                    }
+                    checker: new GenericLoginChecker('快手', { selectors: PLATFORM_CONFIGS.kuaishou.loginSelectors }),
+                    config: PLATFORM_CONFIGS.kuaishou
                 },
                 {
                     name: 'weibo',
-                    url: 'https://weibo.com',
-                    selectors: {
-                        userElements: ['[class*="Ctrls_avatarItem_"]'],
-                        loginElements: ['.login-btn', '.login-text', '.login-button']
-                    }
+                    checker: new GenericLoginChecker('微博', { selectors: PLATFORM_CONFIGS.weibo.loginSelectors }),
+                    config: PLATFORM_CONFIGS.weibo
                 }
             ];
 
@@ -338,12 +295,12 @@ export class PublishService {
                     page.setDefaultTimeout(30000);
                     page.setDefaultNavigationTimeout(30000);
 
-                    logger.info(`正在访问 ${config.name} 的URL: ${config.url}`);
+                    logger.info(`正在访问 ${config.name} 的URL: ${config.config.uploadUrl}`);
 
                     try {
-                        await page.goto(config.url, {
-                            waitUntil: 'domcontentloaded',
-                            timeout: 30000
+                        await page.goto(config.config.uploadUrl, {
+                            waitUntil: config.config.waitUntil || 'domcontentloaded',
+                            timeout: config.config.timeout || 30000
                         });
                         logger.info(`${config.name} 页面加载成功`);
                     } catch (navigationError) {
@@ -372,131 +329,20 @@ export class PublishService {
 
                     logger.info(`开始检查 ${config.name} 的登录状态...`);
 
-                    let isLoggedIn = false;
-                    let loginDetails = null;
-
-                    // 为抖音和小红书使用专门的检测方法
-                    if (config.name === 'douyin') {
-                        try {
-                            const douyinResult = await checkDouyinLoginStatus(page);
-                            isLoggedIn = douyinResult.isLoggedIn;
-                            loginDetails = douyinResult.details;
-                            logger.info('抖音登录检测详情:', loginDetails);
-                        } catch (douyinError) {
-                            logger.error('抖音专门检测失败:', douyinError);
-                            loginStatus[config.name] = {
-                                isLoggedIn: false,
-                                status: 'error',
-                                message: douyinError instanceof Error ? douyinError.message : '抖音登录检测失败',
-                                timestamp: Date.now()
-                            };
-                            return;
-                        }
-                    } else if (config.name === 'xiaohongshu') {
-                        try {
-                            const xiaohongshuResult = await checkXiaohongshuLoginStatus(page);
-                            isLoggedIn = xiaohongshuResult.isLoggedIn;
-                            loginDetails = xiaohongshuResult.details;
-                            logger.info('小红书登录检测详情:', loginDetails);
-                        } catch (xiaohongshuError) {
-                            logger.error('小红书专门检测失败:', xiaohongshuError);
-                            loginStatus[config.name] = {
-                                isLoggedIn: false,
-                                status: 'error',
-                                message: xiaohongshuError instanceof Error ? xiaohongshuError.message : '小红书登录检测失败',
-                                timestamp: Date.now()
-                            };
-                            return;
-                        }
-                    } else {
-                        // 其他平台使用通用检测方法
-                        try {
-                            isLoggedIn = await page.evaluate((selectors) => {
-                                try {
-                                    if (!selectors || !selectors.userElements || !selectors.loginElements) {
-                                        return false;
-                                    }
-                                    const hasUserElement = selectors.userElements.some(selector => {
-                                        try {
-                                            const element = document.querySelector(selector);
-                                            return !!element;
-                                        } catch {
-                                            return false;
-                                        }
-                                    });
-                                    const hasLoginElement = selectors.loginElements.some(selector => {
-                                        try {
-                                            const element = document.querySelector(selector);
-                                            return !!element;
-                                        } catch {
-                                            return false;
-                                        }
-                                    });
-                                    return hasUserElement && !hasLoginElement;
-                                } catch {
-                                    return false;
-                                }
-                            }, config.selectors);
-                        } catch (evaluateError) {
-                            logger.error(`${config.name} 登录状态检查失败:`, evaluateError);
-                            loginStatus[config.name] = {
-                                isLoggedIn: false,
-                                status: 'error',
-                                message: evaluateError instanceof Error ? evaluateError.message : '登录状态检查失败',
-                                timestamp: Date.now()
-                            };
-                            return;
-                        }
-                    }
-
-                    logger.info(`${config.name} 登录状态检查结果:`, isLoggedIn);
+                    // 使用对应的登录检查器
+                    const loginResult = await config.checker.checkLoginStatus(page);
+                    
+                    logger.info(`${config.name} 登录状态检查结果:`, loginResult);
 
                     // 根据检测结果设置详细消息
-                    let statusMessage = isLoggedIn ? '已登录' : '未登录';
-                    if (config.name === 'douyin' && loginDetails) {
-                        if (loginDetails.reason === 'redirected_to_login_page') {
-                            statusMessage = '被重定向到登录页面';
-                        } else if (loginDetails.reason === 'detection_error') {
-                            statusMessage = '检测过程出错';
-                        } else if (isLoggedIn) {
-                            if (loginDetails.hasHeaderAvatar) {
-                                statusMessage = '已登录 (检测到头像元素)';
-                            } else {
-                                statusMessage = '已登录 (检测到用户元素)';
-                            }
-                        } else {
-                            if (loginDetails.hasLoginElement) {
-                                statusMessage = '未登录 (检测到登录按钮)';
-                            } else {
-                                statusMessage = '未登录 (未检测到用户元素)';
-                            }
-                        }
-                    } else if (config.name === 'xiaohongshu' && loginDetails) {
-                        if (loginDetails.reason === 'redirected_to_login_page') {
-                            statusMessage = '被重定向到登录页面';
-                        } else if (loginDetails.reason === 'detection_error') {
-                            statusMessage = '检测过程出错';
-                        } else if (isLoggedIn) {
-                            if (loginDetails.hasUserAvatar) {
-                                statusMessage = '已登录 (检测到user_avatar元素)';
-                            } else {
-                                statusMessage = '已登录 (检测到用户元素)';
-                            }
-                        } else {
-                            if (loginDetails.hasLoginElement) {
-                                statusMessage = '未登录 (检测到登录按钮)';
-                            } else {
-                                statusMessage = '未登录 (未检测到用户元素)';
-                            }
-                        }
-                    }
+                    const statusMessage = config.checker.getLoginStatusDescription(loginResult);
 
                     loginStatus[config.name] = {
-                        isLoggedIn,
+                        isLoggedIn: loginResult.isLoggedIn,
                         status: 'success',
                         message: statusMessage,
                         timestamp: Date.now(),
-                        details: (config.name === 'douyin' || config.name === 'xiaohongshu') ? loginDetails : undefined
+                        details: loginResult.details
                     };
                     logger.info(`${config.name} 检查完成`);
 
