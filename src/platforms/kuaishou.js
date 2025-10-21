@@ -126,6 +126,25 @@ class KuaishouPublisher {
                 throw error;
             }
         }
+
+        // 等待页面 loading 结束，上传按钮出现
+        logger.info('等待页面 loading 结束...');
+        await page.waitForFunction(() => {
+            // 检查是否有 loading 元素
+            const loadingElements = document.querySelectorAll('[class*="loading"], [class*="Loading"], .loading, .Loading');
+            const hasLoading = Array.from(loadingElements).some(el => {
+                const style = window.getComputedStyle(el);
+                return style.display !== 'none' && style.visibility !== 'hidden';
+            });
+            
+            // 检查上传按钮是否已出现
+            const uploadButtons = document.querySelectorAll('button[class^="_upload-btn_"]');
+            const hasUploadButton = uploadButtons.length > 0;
+            
+            return !hasLoading && hasUploadButton;
+        }, { timeout: 30000 });
+        
+        logger.info('页面 loading 已结束，上传按钮已出现');
         
         // 一次性上传所有图片
         const uploadButtons = await page.$$('button[class^="_upload-btn_"]');
@@ -134,6 +153,7 @@ class KuaishouPublisher {
             throw new Error('未找到上传按钮');
         }
         
+        logger.info('开始上传图片...');
         const [fileChooser] = await Promise.all([
             page.waitForFileChooser(),
             uploadButton.click()
@@ -142,7 +162,8 @@ class KuaishouPublisher {
         await fileChooser.accept(tempPaths);
         logger.info('已上传所有图片:', tempPaths);
         
-        await this.pageOperator.delay(2000);
+        // 等待图片上传完成
+        await this.pageOperator.delay(3000);
         
         // 删除临时文件
         this.imageManager.deleteTempFiles(tempPaths);
