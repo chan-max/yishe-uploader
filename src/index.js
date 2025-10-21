@@ -36,11 +36,7 @@ function convertToUniversalStructure(originalData) {
         title: item.name,
         content: item.description || '',
         tags: item.keywords ? item.keywords.split(',').map(tag => tag.trim()) : [],
-        images: item.images || [],
-        materialId: item.materialId,
-        templateGroupId: item.templateGroup2DId,
-        createdAt: item.createTime,
-        updatedAt: item.updateTime
+        images: item.images || []
     }));
 }
 
