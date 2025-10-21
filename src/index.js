@@ -4,10 +4,13 @@
  * 支持微博、抖音、小红书、快手等平台的自动化发布
  */
 
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+
 import { program } from 'commander';
 import chalk from 'chalk';
 import ora from 'ora';
 import axios from 'axios';
+import inquirer from 'inquirer';
 import { PublishService } from './services/PublishService.js';
 import { BrowserService } from './services/BrowserService.js';
 import { logger } from './utils/logger.js';
@@ -21,6 +24,20 @@ program
 // 解析命令行参数
 const env = process.argv[2] === 'dev' ? 'dev' : 'prod';
 const baseUrl = env === 'dev' ? 'http://localhost:1520' : 'https://1s.design:1520';
+
+// 数据源配置
+const DATA_SOURCES = {
+    PRODUCT_IMAGE_2D: {
+        name: '二维产品图',
+        endpoint: '/api/product-image-2d/find-pending-social-media',
+        description: '从二维产品图数据中获取待发布内容'
+    },
+    CUSTOM_MODEL: {
+        name: '自定义模型',
+        endpoint: '/api/custom-model/find-pending-social-media',
+        description: '从自定义模型数据中获取待发布内容'
+    }
+};
 
 // 创建不超时的 axios 实例
 const axiosNoTimeout = axios.create({
@@ -41,12 +58,37 @@ function convertToUniversalStructure(originalData) {
 }
 
 /**
+ * 选择数据源
+ */
+async function selectDataSource() {
+    const choices = Object.entries(DATA_SOURCES).map(([key, source]) => ({
+        name: `${source.name} - ${source.description}`,
+        value: key,
+        short: source.name
+    }));
+
+    const answers = await inquirer.prompt([
+        {
+            type: 'list',
+            name: 'dataSource',
+            message: '请选择数据源:',
+            choices: choices,
+            default: 'PRODUCT_IMAGE_2D'
+        }
+    ]);
+
+    return answers.dataSource;
+}
+
+/**
  * 获取待发布数据
  */
-async function getPendingData() {
+async function getPendingData(dataSource = 'PRODUCT_IMAGE_2D') {
     try {
-        logger.info('正在获取待发布数据...');
-        const response = await axiosNoTimeout.post(`${baseUrl}/api/product-image-2d/find-pending-social-media`, {
+        const sourceConfig = DATA_SOURCES[dataSource];
+        logger.info(`正在从 ${sourceConfig.name} 获取待发布数据...`);
+        
+        const response = await axiosNoTimeout.post(`${baseUrl}${sourceConfig.endpoint}`, {
             limit: 1000
         });
         
@@ -54,10 +96,10 @@ async function getPendingData() {
         
         if (result.data && result.data.length > 0) {
             const universalData = convertToUniversalStructure(result.data);
-            logger.info(`成功获取 ${universalData.length} 条待发布数据`);
+            logger.info(`成功获取 ${universalData.length} 条待发布数据 (来源: ${sourceConfig.name})`);
             return universalData;
         } else {
-            logger.info('暂无待发布数据');
+            logger.info(`暂无待发布数据 (来源: ${sourceConfig.name})`);
             return [];
         }
         
@@ -164,13 +206,21 @@ async function publishItemToAllPlatforms(item, loggedInPlatforms) {
 /**
  * 主发布流程
  */
-async function mainPublishFlow() {
+async function mainPublishFlow(options = {}) {
     const spinner = ora('正在初始化发布流程...').start();
     
     try {
-        // 1. 获取待发布数据
+        // 1. 选择数据源
+        let dataSource = options.dataSource;
+        if (!dataSource) {
+            spinner.stop();
+            dataSource = await selectDataSource();
+            spinner.start('正在初始化发布流程...');
+        }
+        
+        // 2. 获取待发布数据
         spinner.text = '正在获取待发布数据...';
-        const pendingData = await getPendingData();
+        const pendingData = await getPendingData(dataSource);
         
         if (pendingData.length === 0) {
             spinner.succeed('暂无待发布数据');
@@ -257,8 +307,26 @@ program
   .command('start')
   .description('启动自动发布流程 - 获取服务器数据并发布到各平台')
   .option('--env <env>', '环境选择 (dev|prod)', 'dev')
+  .option('--source <source>', '数据源选择 (product-image-2d|custom-model)', '')
   .action(async (options) => {
-    await mainPublishFlow();
+    // 转换数据源参数
+    let dataSource = '';
+    if (options.source) {
+      switch (options.source.toLowerCase()) {
+        case 'product-image-2d':
+        case 'product':
+          dataSource = 'PRODUCT_IMAGE_2D';
+          break;
+        case 'custom-model':
+        case 'custom':
+          dataSource = 'CUSTOM_MODEL';
+          break;
+        default:
+          logger.warn(`未知的数据源: ${options.source}，将使用交互式选择`);
+      }
+    }
+    
+    await mainPublishFlow({ dataSource });
   });
 
 // 发布命令
@@ -415,6 +483,69 @@ program
       process.exit(1);
     } finally {
       // 不清理浏览器，便于继续操作或继续上传
+    }
+  });
+
+// 数据源查询命令
+program
+  .command('query')
+  .description('查询指定数据源的待发布数据')
+  .option('--source <source>', '数据源选择 (product-image-2d|custom-model)', '')
+  .option('--env <env>', '环境选择 (dev|prod)', 'dev')
+  .action(async (options) => {
+    const spinner = ora('正在查询数据...').start();
+    
+    try {
+      // 选择数据源
+      let dataSource = '';
+      if (options.source) {
+        switch (options.source.toLowerCase()) {
+          case 'product-image-2d':
+          case 'product':
+            dataSource = 'PRODUCT_IMAGE_2D';
+            break;
+          case 'custom-model':
+          case 'custom':
+            dataSource = 'CUSTOM_MODEL';
+            break;
+          default:
+            logger.warn(`未知的数据源: ${options.source}，将使用交互式选择`);
+        }
+      }
+      
+      if (!dataSource) {
+        spinner.stop();
+        dataSource = await selectDataSource();
+        spinner.start('正在查询数据...');
+      }
+      
+      const pendingData = await getPendingData(dataSource);
+      
+      if (pendingData.length === 0) {
+        spinner.succeed('暂无待发布数据');
+        return;
+      }
+      
+      spinner.succeed(`查询完成，共找到 ${pendingData.length} 条待发布数据`);
+      
+      // 显示数据预览
+      console.log('\n📋 数据预览:');
+      pendingData.slice(0, 5).forEach((item, index) => {
+        console.log(`\n${index + 1}. ${chalk.bold(item.title)}`);
+        console.log(`   ID: ${item.id}`);
+        console.log(`   内容: ${item.content.substring(0, 100)}${item.content.length > 100 ? '...' : ''}`);
+        console.log(`   图片: ${item.images.length} 张`);
+        console.log(`   标签: ${item.tags.join(', ')}`);
+      });
+      
+      if (pendingData.length > 5) {
+        console.log(`\n... 还有 ${pendingData.length - 5} 条数据`);
+      }
+      
+    } catch (error) {
+      spinner.fail('查询数据失败');
+      logger.error('查询数据出错:', error);
+      process.exit(1);
     }
   });
 
