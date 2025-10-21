@@ -2,43 +2,89 @@
  * @Author: chan-max jackieontheway666@gmail.com
  * @Date: 2025-10-15 21:39:12
  * @LastEditors: chan-max jackieontheway666@gmail.com
- * @LastEditTime: 2025-10-16 07:09:09
- * @FilePath: /yishe-scripts/Users/jackie/workspace/yishe-uploader/scripts/publish-kuaishou.js
- * @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
+ * @LastEditTime: 2025-01-27 10:00:00
+ * @FilePath: /yishe-uploader/scripts/publish-kuaishou.js
+ * @Description: 快手平台发布脚本 - 兼容通用数据结构
  */
 
-import {
-    PublishService
-} from '../src/services/PublishService.js';
-import {
-    BrowserService
-} from '../src/services/BrowserService.js';
-import chalk from 'chalk';
+import { PublishService } from '../src/services/PublishService.js';
+import { queryPendingSocialMediaData } from './query-pending-social-media.js';
 
-const config = {
-    platform: 'kuaishou',
-    title: '快手 - 自动发布示例',
-    content: '这是一条通过脚本自动发布到快手的示例内容。#自动化 #快手',
-    images: [
-        'https://picsum.photos/800/600?random=2004'
-    ],
-    tags: ['快手', '自动化']
-};
+// 解析命令行参数
+const env = process.argv[2] === 'dev' ? 'dev' : 'prod';
+const dataIndex = parseInt(process.argv[3]) || 0; // 默认使用第一条数据
 
-async function main() {
+/**
+ * 格式化快手内容
+ */
+function formatKuaishouContent(content, tags) {
+    const hashtagStr = (tags || []).map(t => `#${t}`).join(' ').trim();
+    return hashtagStr ? `${content} ${hashtagStr}` : content;
+}
+
+/**
+ * 发布单条快手
+ */
+async function publishKuaishouItem(item) {
     try {
-        console.log(chalk.cyan('开始快手发布...'));
-        const r = await PublishService.publishSingle(config);
-        const icon = r.success ? '✅' : '❌';
-        console.log(`${icon} kuaishou: ${r.message}`);
-    } catch (err) {
-        console.error(chalk.red('快手发布失败:'), err ? err.message : err);
-        process.exitCode = 1;
-    } finally {
-        // 保持浏览器窗口打开，便于继续操作或上传
-        console.log(chalk.green('✅ 快手发布完成，浏览器窗口保持打开状态'));
-        console.log(chalk.yellow('💡 提示：可以继续运行其他平台的发布脚本'));
+        const config = {
+            platform: 'kuaishou',
+            title: item.title,
+            content: formatKuaishouContent(item.content, item.tags),
+            images: item.images,
+            tags: item.tags
+        };
+
+        const result = await PublishService.publishSingle(config);
+        return {
+            success: result.success,
+            message: result.message,
+            itemId: item.id
+        };
+    } catch (error) {
+        return {
+            success: false,
+            message: error.message,
+            itemId: item.id
+        };
     }
 }
 
-main();
+/**
+ * 主函数
+ */
+async function main() {
+    try {
+        // 获取待发布数据
+        const data = await queryPendingSocialMediaData();
+        
+        if (!data || data.length === 0) {
+            console.log('没有可发布的数据');
+            return;
+        }
+
+        // 检查索引是否有效
+        if (dataIndex >= data.length) {
+            console.log(`数据索引 ${dataIndex} 超出范围，总共 ${data.length} 条数据`);
+            return;
+        }
+
+        const item = data[dataIndex];
+        console.log(`发布快手: ${item.title}`);
+        
+        const result = await publishKuaishouItem(item);
+        const icon = result.success ? '✅' : '❌';
+        console.log(`${icon} 快手发布结果: ${result.message}`);
+        
+    } catch (error) {
+        console.error('快手发布失败:', error.message);
+        process.exit(1);
+    }
+}
+
+// 如果直接运行此脚本
+if (import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/'))) {
+    main();
+}
+
+export { publishKuaishouItem };

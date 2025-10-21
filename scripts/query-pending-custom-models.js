@@ -3,8 +3,8 @@
  * @Date: 2025-01-27 10:00:00
  * @LastEditors: chan-max jackieontheway666@gmail.com
  * @LastEditTime: 2025-01-27 10:00:00
- * @FilePath: /yishe-uploader/scripts/query-pending-social-media.js
- * @Description: 查询所有待发布社交媒体的二维产品图数据
+ * @FilePath: /yishe-uploader/scripts/query-pending-custom-models.js
+ * @Description: 查询所有待发布社交媒体的自定义模型数据
  */
 
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
@@ -34,11 +34,11 @@ function convertToUniversalStructure(originalData) {
 }
 
 /**
- * 查询待发布社交媒体的数据
+ * 查询待发布社交媒体的自定义模型数据
  */
-async function queryPendingSocialMediaData() {
+async function queryPendingCustomModelsData() {
     try {
-        const response = await axiosNoTimeout.post(`${baseUrl}/api/product-image-2d/find-pending-social-media`, {
+        const response = await axiosNoTimeout.post(`${baseUrl}/api/custom-model/find-pending-social-media`, {
             limit: 1000
         });
         
@@ -72,7 +72,7 @@ async function queryPendingSocialMediaData() {
  */
 async function main() {
     try {
-        await queryPendingSocialMediaData();
+        await queryPendingCustomModelsData();
     } catch (error) {
         console.error('查询失败:', error.message);
         process.exit(1);
@@ -85,5 +85,5 @@ if (import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/'))) {
 }
 
 export {
-    queryPendingSocialMediaData
+    queryPendingCustomModelsData
 };

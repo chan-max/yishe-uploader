@@ -1,272 +1,236 @@
 /**
- * 小红书发布功能
+ * 小红书发布功能 - 独立实现
  */
 
-import {
-    getOrCreateBrowser,
-    setupAntiDetection
-} from '../services/BrowserService.js';
-import {
-    downloadImageToTemp,
-    deleteTempFile
-} from '../utils/fileUtils.js';
-import {
-    SOCIAL_MEDIA_UPLOAD_URLS
-} from '../config/platforms.js';
-import {
-    logger
-} from '../utils/logger.js';
+import { getOrCreateBrowser } from '../services/BrowserService.js';
+import { ImageManager } from '../services/ImageManager.js';
+import { PageOperator } from '../services/PageOperator.js';
+import { XiaohongshuLoginChecker } from '../services/LoginChecker.js';
+import { PLATFORM_CONFIGS } from '../config/platforms.js';
+import { logger } from '../utils/logger.js';
 
 /**
- * 发布到小红书
+ * 小红书发布器类
  */
-export async function publishToXiaohongshu(publishInfo) {
-    try {
-        logger.info('开始执行小红书发布操作，参数:', publishInfo);
-        const browser = await getOrCreateBrowser();
-        const page = await browser.newPage();
-        logger.info('新页面创建成功');
+class XiaohongshuPublisher {
+    constructor() {
+        this.platformName = '小红书';
+        this.config = PLATFORM_CONFIGS.xiaohongshu;
+        this.imageManager = new ImageManager();
+        this.pageOperator = new PageOperator();
+        this.loginChecker = new XiaohongshuLoginChecker();
+    }
 
-        // 应用反检测脚本
-        await setupAntiDetection(page);
-        logger.info('反检测脚本已应用');
+    /**
+     * 发布到小红书
+     */
+    async publish(publishInfo) {
+        let page = null;
+        try {
+            logger.info(`开始执行${this.platformName}发布操作，参数:`, publishInfo);
+            
+            // 1. 获取浏览器和页面
+            const browser = await getOrCreateBrowser();
+            page = await browser.newPage();
+            logger.info('新页面创建成功');
 
-        await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 1000)));
+            // 2. 应用反检测（如果需要）
+            if (this.config.antiDetection) {
+                await this.pageOperator.setupAntiDetection(page);
+                logger.info('反检测脚本已应用');
+            }
 
-        await page.goto(SOCIAL_MEDIA_UPLOAD_URLS.xiaohongshu_pic, {
-            waitUntil: 'networkidle2'
-        });
-        logger.info('已打开小红书发布页面');
+            // 3. 导航到发布页面
+            await page.goto(this.config.uploadUrl, {
+                waitUntil: this.config.waitUntil || 'domcontentloaded',
+                timeout: this.config.timeout || 30000
+            });
+            logger.info(`已打开${this.platformName}发布页面`);
 
-        // 新增：点击进入第3个tab
-        await page.waitForSelector('.header .creator-tab:nth-of-type(3)');
-        await page.evaluate(() => {
-            const el = document.querySelector('.header .creator-tab:nth-of-type(3)');
-            if (el) el.click();
-        });
-        logger.info('已点击第3个tab');
+            // 4. 检查登录状态
+            if (this.config.checkLogin) {
+                const loginResult = await this.checkLoginStatus(page);
+                if (!loginResult.isLoggedIn) {
+                    return {
+                        success: false,
+                        message: `${this.platformName}未登录: ${loginResult.details?.reason || '未知原因'}`,
+                        data: { loginStatus: loginResult }
+                    };
+                }
+                logger.info(`${this.platformName}已登录，继续发布流程`);
+            }
 
-        // 等待tab切换完成
-        await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 2000)));
+            // 5. 执行平台特定的预处理
+            if (this.config.preProcess) {
+                await this.config.preProcess(page);
+            }
 
-        // 等待文件选择器出现
-        await page.waitForSelector('input[type="file"]');
-        logger.info('找到文件选择器');
+            // 6. 处理图片上传
+            if (publishInfo.images && publishInfo.images.length > 0) {
+                await this.handleImageUpload(page, publishInfo.images);
+            }
 
-        if (publishInfo.images && Array.isArray(publishInfo.images)) {
-            for (const imageUrl of publishInfo.images) {
+            // 7. 填写内容
+            await this.fillContent(page, publishInfo);
+
+            // 8. 执行平台特定的后处理
+            if (this.config.postProcess) {
+                await this.config.postProcess(page);
+            }
+
+            // 9. 点击发布按钮
+            await this.clickPublishButton(page);
+
+            // 10. 等待发布完成
+            await this.waitForPublishComplete(page);
+
+            return { success: true, message: `${this.platformName}发布成功` };
+
+        } catch (error) {
+            logger.error(`${this.platformName}发布过程出错:`, error);
+            return {
+                success: false,
+                message: error?.message || '未知错误',
+                data: error
+            };
+        } finally {
+            if (page) {
                 try {
-                    // 下载图片到临时目录
-                    const tempPath = await downloadImageToTemp(imageUrl, `xiaohongshu_${Date.now()}`);
-
-                    // 关键：每次都重新获取 input[type="file"]
-                    const fileInput = await page.$('input[type="file"]');
-                    if (!fileInput) {
-                        throw new Error('未找到文件选择器');
-                    }
-
-                    await fileInput.uploadFile(tempPath);
-                    logger.info('已上传图片:', imageUrl);
-
-                    await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 999)));
-
-                    deleteTempFile(tempPath);
-                } catch (error) {
-                    logger.error(`处理图片 ${imageUrl} 时出错:`, error);
-                    throw error;
+                    await page.close();
+                    logger.info(`${this.platformName}页面已关闭`);
+                } catch (closeError) {
+                    logger.warn(`${this.platformName}关闭页面时出错:`, closeError);
                 }
             }
         }
+    }
 
+    /**
+     * 处理图片上传
+     */
+    async handleImageUpload(page, images) {
+        logger.info(`开始上传 ${images.length} 张图片...`);
+        
+        for (let i = 0; i < images.length; i++) {
+            const imageUrl = images[i];
+            try {
+                logger.info(`正在上传第 ${i + 1}/${images.length} 张图片: ${imageUrl}`);
+                
+                // 下载图片到临时目录
+                const tempPath = await this.imageManager.downloadImage(imageUrl, `${this.platformName}_${Date.now()}_${i}`);
+                
+                // 上传图片
+                await this.uploadSingleImage(page, tempPath, i);
+                
+                // 删除临时文件
+                this.imageManager.deleteTempFile(tempPath);
+                
+                // 图片间间隔
+                if (i < images.length - 1) {
+                    await this.pageOperator.delay(1000);
+                }
+                
+            } catch (error) {
+                logger.error(`处理图片 ${imageUrl} 时出错:`, error);
+                throw error;
+            }
+        }
+        
+        logger.info(`所有图片上传完成，共 ${images.length} 张`);
+    }
+
+    /**
+     * 上传单张图片
+     */
+    async uploadSingleImage(page, tempPath, imageIndex) {
+        const fileInput = await page.$('input[type="file"]');
+        if (!fileInput) {
+            throw new Error('未找到文件选择器');
+        }
+        
+        await fileInput.uploadFile(tempPath);
+        logger.info(`已上传图片 ${imageIndex + 1}`);
+        
         // 等待图片上传完成
-        await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 3000)));
+        await this.waitForImageUploadComplete(page, imageIndex);
+    }
 
+    /**
+     * 等待图片上传完成
+     */
+    async waitForImageUploadComplete(page, imageIndex) {
+        await this.pageOperator.delay(2000);
+    }
+
+    /**
+     * 填写内容
+     */
+    async fillContent(page, publishInfo) {
         // 填写标题
-        const titleSelector = 'input[placeholder*="标题"]';
-        await page.waitForSelector(titleSelector);
-
-        // 模拟真实用户输入行为
-        await page.type(titleSelector, publishInfo.title || '', {
-            delay: 100
-        });
-        logger.info('已填写标题');
+        if (publishInfo.title) {
+            await this.pageOperator.fillInput(page, this.config.selectors.titleInput, publishInfo.title, {
+                delay: 100
+            });
+            logger.info('已填写标题');
+        }
 
         // 填写正文内容
-        const contentSelector = '.ql-editor';
-        await page.waitForSelector(contentSelector);
-
-        // 模拟真实用户输入行为
-        await page.type(contentSelector, publishInfo.content || '', {
-            delay: 50
-        });
-        logger.info('已填写正文内容');
+        if (publishInfo.content) {
+            await this.pageOperator.fillInput(page, this.config.selectors.contentInput, publishInfo.content, {
+                delay: 50
+            });
+            logger.info('已填写正文内容');
+        }
 
         // 等待内容填写完成
-        await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 2000)));
+        await this.pageOperator.delay(2000);
+    }
 
-        // 点击发布按钮
-        const submitButton = await page.waitForSelector('.submit button');
+    /**
+     * 点击发布按钮
+     */
+    async clickPublishButton(page) {
+        const submitButton = await page.waitForSelector(this.config.selectors.submitButton);
         if (!submitButton) {
             throw new Error('未找到发布按钮');
         }
 
         // 模拟真实用户点击行为
         await submitButton.hover();
-        await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 500)));
+        await this.pageOperator.delay(500);
         await submitButton.click();
         logger.info('已点击发布按钮');
+    }
 
-        // 等待发布完成
-        await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 5000)));
+    /**
+     * 等待发布完成
+     */
+    async waitForPublishComplete(page) {
+        await this.pageOperator.delay(5000);
+    }
 
-        // 发布成功，返回结果
-        return {
-            success: true,
-            message: '发布成功'
-        };
-    } catch (error) {
-        logger.error('小红书发布过程出错:', error);
-        return {
-            success: false,
-            message: error ? error.message : '未知错误',
-            data: error
-        };
+    /**
+     * 检查登录状态
+     */
+    async checkLoginStatus(page) {
+        return await this.loginChecker.checkLoginStatus(page);
     }
 }
 
+// 创建单例实例
+const xiaohongshuPublisher = new XiaohongshuPublisher();
+
 /**
- * 专门检测小红书登录状态的方法
+ * 发布到小红书
+ */
+export async function publishToXiaohongshu(publishInfo) {
+    return await xiaohongshuPublisher.publish(publishInfo);
+}
+
+/**
+ * 专门检测小红书登录状态的方法（保持向后兼容）
  */
 export async function checkXiaohongshuLoginStatus(page) {
-    try {
-        // 等待页面完全加载
-        await new Promise(resolve => setTimeout(resolve, 3000));
-
-        // 获取当前URL，检查是否被重定向到登录页面
-        const currentUrl = page.url();
-        logger.info('小红书当前URL:', currentUrl);
-
-        // 检查是否在登录页面
-        const isOnLoginPage = currentUrl.includes('login') ||
-            currentUrl.includes('auth') ||
-            currentUrl.includes('signin') ||
-            currentUrl.includes('passport') ||
-            currentUrl.includes('signup');
-
-        if (isOnLoginPage) {
-            logger.info('检测到在登录页面，未登录');
-            return {
-                isLoggedIn: false,
-                details: {
-                    reason: 'redirected_to_login_page',
-                    currentUrl: currentUrl
-                }
-            };
-        }
-
-        // 执行页面内的登录状态检测
-        const loginStatus = await page.evaluate(() => {
-            // 检查用户相关元素 - 重点检测 class="user_avatar"
-            const userElements = [
-                '.user_avatar',
-                '[class="user_avatar"]',
-                '.reds-avatar-border',
-                '.user-avatar',
-                '.creator-header',
-                '.header-avatar',
-                '.user-info',
-                '.user-profile',
-                '[data-testid="user-avatar"]',
-                '.avatar-container',
-                '.user-container',
-                '.user-menu',
-                '.profile-avatar'
-            ];
-
-            // 检查登录相关元素
-            const loginElements = [
-                '.login',
-                'button[data-testid="login-button"]',
-                '.login-btn',
-                '.login-text',
-                '.login-button',
-                '.login-entry',
-                '.auth-btn',
-                '.sign-in-btn',
-                '[class*="login"]',
-                '.login-prompt',
-                '.login-link',
-                '.sign-up-btn',
-                '.register-btn'
-            ];
-
-            // 查找用户元素
-            const foundUserElements = [];
-            let hasUserElement = false;
-            let hasUserAvatar = false;
-
-            userElements.forEach(selector => {
-                try {
-                    const element = document.querySelector(selector);
-                    if (element) {
-                        foundUserElements.push(selector);
-                        hasUserElement = true;
-                        // 特别检查 class="user_avatar"
-                        if (selector === '.user_avatar' || selector === '[class="user_avatar"]') {
-                            hasUserAvatar = true;
-                        }
-                    }
-                } catch (e) {
-                    // 忽略无效选择器
-                }
-            });
-
-            // 查找登录元素
-            const foundLoginElements = [];
-            let hasLoginElement = false;
-            loginElements.forEach(selector => {
-                try {
-                    const element = document.querySelector(selector);
-                    if (element) {
-                        foundLoginElements.push(selector);
-                        hasLoginElement = true;
-                    }
-                } catch (e) {
-                    // 忽略无效选择器
-                }
-            });
-
-            // 判断登录状态：有用户元素且没有登录元素
-            const isLoggedIn = hasUserElement && !hasLoginElement;
-
-            const details = {
-                userElementsFound: foundUserElements,
-                loginElementsFound: foundLoginElements,
-                pageTitle: document.title,
-                currentUrl: window.location.href,
-                hasUserElement,
-                hasLoginElement,
-                hasUserAvatar,
-                hasUserRelatedText: false
-            };
-
-            return {
-                isLoggedIn,
-                details
-            };
-        });
-
-        logger.info('小红书登录状态检测结果:', loginStatus);
-        return loginStatus;
-
-    } catch (error) {
-        logger.error('小红书登录状态检测失败:', error);
-        return {
-            isLoggedIn: false,
-            details: {
-                error: error instanceof Error ? error.message : '检测失败',
-                reason: 'detection_error'
-            }
-        };
-    }
+    const xiaohongshuChecker = new XiaohongshuLoginChecker();
+    return await xiaohongshuChecker.checkLoginStatus(page);
 }
