@@ -5,6 +5,7 @@
 import puppeteer from 'puppeteer-core';
 import puppeteerExtra from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
+import { spawn } from 'child_process';
 import {
     join as pathJoin
 } from 'path';
@@ -20,6 +21,40 @@ import {
 // 使用 stealth 插件
 puppeteerExtra.use(StealthPlugin());
 
+// Chrome浏览器配置
+const CHROME_PATH = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+const CHROME_ARGS = [
+    '--start-maximized',
+    '--no-sandbox',
+    '--disable-setuid-sandbox',
+    '--disable-dev-shm-usage',
+    '--disable-blink-features=AutomationControlled',
+    '--disable-web-security',
+    '--disable-features=VizDisplayCompositor',
+    '--disable-extensions-except',
+    '--disable-plugins-discovery',
+    '--disable-default-apps',
+    '--no-first-run',
+    '--no-default-browser-check',
+    '--disable-background-timer-throttling',
+    '--disable-backgrounding-occluded-windows',
+    '--disable-renderer-backgrounding',
+    '--disable-features=TranslateUI',
+    '--disable-ipc-flooding-protection',
+    '--disable-hang-monitor',
+    '--disable-prompt-on-repost',
+    '--disable-domain-reliability',
+    '--disable-component-extensions-with-background-pages',
+    '--disable-background-networking',
+    '--disable-sync',
+    '--metrics-recording-only',
+    '--no-report-upload',
+    '--remote-debugging-port=9222',
+    '--remote-debugging-address=0.0.0.0',
+    '--disable-automation',
+    '--disable-infobars'
+];
+
 // 全局浏览器实例
 let browserInstance = null;
 // 浏览器状态管理
@@ -29,6 +64,49 @@ let browserStatus = {
     lastActivity: null,
     pageCount: 0
 };
+
+/**
+ * 启动本地Chrome浏览器
+ */
+async function startLocalChrome() {
+    return new Promise((resolve, reject) => {
+        logger.info('正在启动本地Chrome浏览器...');
+        
+        // 检查Chrome是否存在
+        if (!existsSync(CHROME_PATH)) {
+            const error = new Error(`Chrome浏览器不存在于指定路径: ${CHROME_PATH}`);
+            logger.error('❌ Chrome浏览器检查失败:', error.message);
+            reject(error);
+            return;
+        }
+
+        // 启动Chrome进程
+        const chromeProcess = spawn(CHROME_PATH, CHROME_ARGS, {
+            detached: true,
+            stdio: 'ignore'
+        });
+
+        chromeProcess.on('error', (error) => {
+            logger.error('❌ 启动Chrome失败:', error.message);
+            reject(error);
+        });
+
+        chromeProcess.on('spawn', () => {
+            logger.info('✅ Chrome浏览器启动成功！');
+            logger.info(`   - Chrome路径: ${CHROME_PATH}`);
+            logger.info(`   - 进程ID: ${chromeProcess.pid}`);
+            logger.info(`   - 调试端口: 9222`);
+            
+            // 分离进程，让Chrome独立运行
+            chromeProcess.unref();
+            
+            // 等待一下让Chrome完全启动
+            setTimeout(() => {
+                resolve(chromeProcess);
+            }, 3000);
+        });
+    });
+}
 
 /**
  * 检查浏览器是否可用
@@ -79,7 +157,7 @@ export async function detectExistingBrowser() {
 
             // 尝试连接到现有浏览器
             const browser = await puppeteerExtra.connect({
-                browserURL: 'http://localhost:9222', // 默认调试端口
+                browserWSEndpoint: 'ws://localhost:9222/devtools/browser',
                 defaultViewport: null
             });
 
@@ -111,65 +189,86 @@ export async function getOrCreateBrowser() {
         return existingBrowser;
     }
 
-    // 创建新的浏览器实例
     logger.info('启动新的浏览器实例...');
-    logger.info('使用Chrome浏览器路径:', 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe');
+    logger.info('使用本地Chrome浏览器启动方式');
 
     try {
-        // 不指定用户数据目录，使用Chrome默认目录
+        // 检查Chrome是否存在
+        if (!existsSync(CHROME_PATH)) {
+            throw new Error(`Chrome浏览器不存在于指定路径: ${CHROME_PATH}`);
+        }
 
-        // 首先尝试连接到可能已经运行的浏览器
+        logger.info('正在启动本地Chrome浏览器...');
+        logger.info(`Chrome路径: ${CHROME_PATH}`);
+
+        // 首先尝试连接到可能已经运行的Chrome实例（带调试端口）
         try {
-            const existingBrowser = await puppeteerExtra.connect({
-                browserURL: 'http://localhost:9222',
+            logger.info('尝试连接到现有Chrome实例（调试端口9222）...');
+            browserInstance = await puppeteerExtra.connect({
+                browserWSEndpoint: 'ws://localhost:9222/devtools/browser',
                 defaultViewport: null
             });
-
-            logger.info('成功连接到现有浏览器实例');
-            browserInstance = existingBrowser;
+            
+            logger.info('✅ 成功连接到现有Chrome实例');
+            
+            // 更新浏览器状态
             browserStatus.isInitialized = true;
             browserStatus.isConnected = true;
             browserStatus.lastActivity = Date.now();
+            browserStatus.pageCount = 0;
 
-            return existingBrowser;
+            // 获取浏览器版本信息进行确认
+            const version = await browserInstance.version();
+            logger.info('浏览器版本信息:', version);
+
+            logger.info('✅ 使用现有Chrome实例，保留您的个人信息和登录状态');
+            logger.info('浏览器状态已更新:', browserStatus);
+            return browserInstance;
+            
         } catch (connectError) {
-            logger.debug('无法连接到现有浏览器，将创建新实例');
+            logger.debug('无法连接到现有Chrome实例，将启动新的Chrome实例');
         }
 
-        browserInstance = await puppeteerExtra.launch({
-            headless: false, // 设置为false以显示浏览器窗口
-            defaultViewport: null, // 使用默认视口大小
-            executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe', // 使用指定的Chrome浏览器
-            ignoreDefaultArgs: ['--enable-automation'], // 忽略默认的自动化参数
-            args: [
-                '--start-maximized',
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-blink-features=AutomationControlled', // 隐藏自动化标识
-                '--disable-web-security',
-                '--disable-features=VizDisplayCompositor',
-                '--disable-extensions-except',
-                '--disable-plugins-discovery',
-                '--disable-default-apps',
-                '--no-first-run',
-                '--no-default-browser-check',
-                '--disable-background-timer-throttling',
-                '--disable-backgrounding-occluded-windows',
-                '--disable-renderer-backgrounding',
-                '--disable-features=TranslateUI',
-                '--disable-ipc-flooding-protection',
-                '--disable-hang-monitor',
-                '--disable-prompt-on-repost',
-                '--disable-domain-reliability',
-                '--disable-component-extensions-with-background-pages',
-                '--disable-background-networking',
-                '--disable-sync',
-                '--metrics-recording-only',
-                '--no-report-upload',
-                '--remote-debugging-port=9222' // 添加调试端口，便于连接
-            ]
-        });
+        // 获取Chrome默认用户数据目录
+        const userDataDir = process.platform === 'win32' 
+            ? `${process.env.USERPROFILE}\\AppData\\Local\\Google\\Chrome\\User Data`
+            : `${process.env.HOME}/.config/google-chrome`;
+
+        logger.info(`使用Chrome用户数据目录: ${userDataDir}`);
+
+        try {
+            // 直接使用puppeteer启动Chrome，使用本地用户数据目录
+            browserInstance = await puppeteerExtra.launch({
+                headless: false,
+                defaultViewport: null,
+                executablePath: CHROME_PATH,
+                userDataDir: userDataDir, // 使用Chrome默认用户数据目录
+                args: CHROME_ARGS,
+                ignoreDefaultArgs: ['--enable-automation']
+            });
+        } catch (launchError) {
+            if (launchError.message.includes('already running')) {
+                logger.info('检测到Chrome已在运行，将使用临时用户数据目录启动新实例...');
+                
+                // 使用临时用户数据目录启动新的Chrome实例
+                const tempUserDataDir = process.platform === 'win32' 
+                    ? 'C:\\temp\\puppeteer-chrome-data'
+                    : '/tmp/puppeteer-chrome-data';
+                
+                browserInstance = await puppeteerExtra.launch({
+                    headless: false,
+                    defaultViewport: null,
+                    executablePath: CHROME_PATH,
+                    userDataDir: tempUserDataDir, // 使用临时用户数据目录
+                    args: CHROME_ARGS,
+                    ignoreDefaultArgs: ['--enable-automation']
+                });
+                
+                logger.info(`使用临时用户数据目录: ${tempUserDataDir}`);
+            } else {
+                throw launchError;
+            }
+        }
 
         // 更新浏览器状态
         browserStatus.isInitialized = true;
@@ -181,7 +280,7 @@ export async function getOrCreateBrowser() {
         const version = await browserInstance.version();
         logger.info('浏览器版本信息:', version);
 
-        logger.info('新浏览器实例启动成功，使用Chrome默认用户数据目录');
+        logger.info('✅ 新浏览器实例启动成功，使用本地Chrome浏览器');
         logger.info('浏览器状态已更新:', browserStatus);
         return browserInstance;
 

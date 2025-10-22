@@ -19,6 +19,7 @@
         "browser:status": "node scripts/browser-status.js",
         "browser:close": "node scripts/browser-status.js --close",
         "chrome:local": "node scripts/start-local-chrome.js",
+        "chrome:debug": "node scripts/start-chrome-with-debug.js",
         "lint": "eslint src --ext .js",
         "format": "prettier --write src/**/*.js"
     },
