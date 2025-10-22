@@ -36,30 +36,30 @@ const PUPPETEER_CONFIG = {
     defaultViewport: null,
     userDataDir: USER_DATA_DIR,
     args: [
-        '--start-maximized',
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-blink-features=AutomationControlled',
-        '--disable-web-security',
-        '--disable-features=VizDisplayCompositor',
-        '--no-first-run',
-        '--no-default-browser-check',
-        '--disable-background-timer-throttling',
-        '--disable-backgrounding-occluded-windows',
-        '--disable-renderer-backgrounding',
-        '--disable-features=TranslateUI',
-        '--disable-ipc-flooding-protection',
-        '--disable-hang-monitor',
-        '--disable-prompt-on-repost',
-        '--disable-domain-reliability',
-        '--disable-component-extensions-with-background-pages',
-        '--disable-background-networking',
-        '--disable-sync',
-        '--metrics-recording-only',
-        '--no-report-upload',
-        '--remote-debugging-port=9222',
-        '--disable-automation',
+    '--start-maximized',
+    '--no-sandbox',
+    '--disable-setuid-sandbox',
+    '--disable-dev-shm-usage',
+    '--disable-blink-features=AutomationControlled',
+    '--disable-web-security',
+    '--disable-features=VizDisplayCompositor',
+    '--no-first-run',
+    '--no-default-browser-check',
+    '--disable-background-timer-throttling',
+    '--disable-backgrounding-occluded-windows',
+    '--disable-renderer-backgrounding',
+    '--disable-features=TranslateUI',
+    '--disable-ipc-flooding-protection',
+    '--disable-hang-monitor',
+    '--disable-prompt-on-repost',
+    '--disable-domain-reliability',
+    '--disable-component-extensions-with-background-pages',
+    '--disable-background-networking',
+    '--disable-sync',
+    '--metrics-recording-only',
+    '--no-report-upload',
+    '--remote-debugging-port=9222',
+    '--disable-automation',
         '--disable-infobars'
     ]
 };
@@ -221,6 +221,63 @@ async function startLocalChrome(useIndependentMode = false) {
                 )
             ]);
             
+            // 添加网络请求拦截功能
+            await page.route('**/*', async (route) => {
+                const url = route.request().url();
+                const method = route.request().method();
+                
+                // 检查是否是小红书的目标接口
+                if (url.includes('fe.xiaohongshu.com/faas/proto/json-to-proto-json-to-proto/proxy')) {
+                    console.log(`%c🎭 拦截小红书接口: ${method} ${url}`, 'color: #ff6b6b; font-size: 12px; font-weight: bold;');
+                    
+                    const mockResponse = {
+                        status: 200,
+                        data: [],
+                        msg: "success"
+                    };
+                    
+                    console.log(`%c📦 返回模拟数据:`, 'color: #51cf66; font-size: 12px;', mockResponse);
+                    
+                    await route.fulfill({
+                        status: 200,
+                        contentType: 'application/json',
+                        body: JSON.stringify(mockResponse)
+                    });
+                    return;
+                }
+                
+                // 获取页面中的模拟配置
+                const apiMocks = await page.evaluate(() => window.apiMocks || []);
+                
+                // 检查是否有匹配的模拟配置
+                let matchedMock = null;
+                for (const mock of apiMocks) {
+                    if (url.includes(mock.pattern) || new RegExp(mock.pattern).test(url)) {
+                        matchedMock = mock;
+                        break;
+                    }
+                }
+                
+                if (matchedMock) {
+                    console.log(`%c🎭 拦截请求: ${method} ${url}`, 'color: #ffd43b; font-size: 12px;');
+                    console.log(`%c📦 返回模拟数据:`, 'color: #51cf66; font-size: 12px;', matchedMock.data);
+                    
+                    // 添加延迟（如果有配置）
+                    if (matchedMock.options.delay > 0) {
+                        await new Promise(resolve => setTimeout(resolve, matchedMock.options.delay));
+                    }
+                    
+                    await route.fulfill({
+                        status: matchedMock.options.status,
+                        contentType: matchedMock.options.contentType,
+                        body: JSON.stringify(matchedMock.data)
+                    });
+                } else {
+                    // 其他请求正常通过
+                    await route.continue();
+                }
+            });
+            
             // 注入自动化检测脚本
             await page.evaluate(() => {
                 // 定义全局检测函数
@@ -313,6 +370,54 @@ async function startLocalChrome(useIndependentMode = false) {
                     };
                 };
                 
+                // 添加接口模拟功能
+                window.mockApi = function(urlPattern, mockData, options = {}) {
+                    const defaultOptions = {
+                        status: 200,
+                        contentType: 'application/json',
+                        delay: 0
+                    };
+                    const config = { ...defaultOptions, ...options };
+                    
+                    console.log(`%c🔧 接口模拟配置`, 'color: #339af0; font-size: 14px; font-weight: bold;');
+                    console.log(`URL模式: ${urlPattern}`);
+                    console.log(`模拟数据:`, mockData);
+                    console.log(`配置:`, config);
+                    
+                    // 存储模拟配置
+                    if (!window.apiMocks) {
+                        window.apiMocks = [];
+                    }
+                    window.apiMocks.push({
+                        pattern: urlPattern,
+                        data: mockData,
+                        options: config
+                    });
+                    
+                    return '接口模拟配置已添加';
+                };
+                
+                // 清除所有模拟配置
+                window.clearApiMocks = function() {
+                    window.apiMocks = [];
+                    console.log('%c🧹 已清除所有接口模拟配置', 'color: #ff6b6b; font-size: 14px; font-weight: bold;');
+                };
+                
+                // 显示当前模拟配置
+                window.showApiMocks = function() {
+                    if (!window.apiMocks || window.apiMocks.length === 0) {
+                        console.log('%c📋 当前没有接口模拟配置', 'color: #868e96; font-size: 14px;');
+                        return;
+                    }
+                    
+                    console.log('%c📋 当前接口模拟配置:', 'color: #51cf66; font-size: 14px; font-weight: bold;');
+                    window.apiMocks.forEach((mock, index) => {
+                        console.log(`%c${index + 1}. ${mock.pattern}`, 'color: #339af0; font-weight: bold;');
+                        console.log('   数据:', mock.data);
+                        console.log('   配置:', mock.options);
+                    });
+                };
+                
                 // 自动运行一次检测
                 return window.detectAutomation();
             });
@@ -324,16 +429,16 @@ async function startLocalChrome(useIndependentMode = false) {
             console.log(chalk.yellow('⚠️  页面加载跳过，但浏览器已正常启动'));
             console.log(chalk.gray(`   提示: 你可以手动在浏览器中打开 https://www.baidu.com`));
         }
-        
-        console.log(chalk.green('\n🎉 本地Chrome浏览器已启动！'));
-        console.log(chalk.blue('📋 启动信息:'));
-        console.log(`   - Chrome路径: ${CHROME_PATH}`);
+            
+            console.log(chalk.green('\n🎉 本地Chrome浏览器已启动！'));
+            console.log(chalk.blue('📋 启动信息:'));
+            console.log(`   - Chrome路径: ${CHROME_PATH}`);
         console.log(`   - 用户数据目录: ${userDataDir}`);
-        console.log(`   - 调试端口: 9222`);
+            console.log(`   - 调试端口: 9222`);
         console.log(`   - 已打开: https://www.baidu.com`);
-        
-        console.log(chalk.yellow('\n💡 使用说明:'));
-        console.log('   - 浏览器将保持打开状态');
+            
+            console.log(chalk.yellow('\n💡 使用说明:'));
+            console.log('   - 浏览器将保持打开状态');
         if (useBackupDir) {
             console.log('   - 使用备用用户数据目录（独立环境）');
             console.log('   - 需要重新登录各平台账号');
@@ -342,36 +447,44 @@ async function startLocalChrome(useIndependentMode = false) {
             console.log('   - 可以直接使用已登录的账号');
         }
         console.log('   - 可以手动操作浏览器');
-        console.log('   - 按 Ctrl+C 可以退出此脚本（浏览器会保持打开）');
-        
-        console.log(chalk.cyan('\n🔗 可用的平台链接:'));
-        console.log('   - 微博: https://weibo.com');
-        console.log('   - 抖音: https://creator.douyin.com/creator-micro/content/upload?default-tab=3');
-        console.log('   - 小红书: https://creator.xiaohongshu.com/publish/publish?target=image');
-        console.log('   - 快手: https://cp.kuaishou.com/article/publish/video?tabType=2');
-        
+            console.log('   - 按 Ctrl+C 可以退出此脚本（浏览器会保持打开）');
+            
+            console.log(chalk.cyan('\n🔗 可用的平台链接:'));
+            console.log('   - 微博: https://weibo.com');
+            console.log('   - 抖音: https://creator.douyin.com/creator-micro/content/upload?default-tab=3');
+            console.log('   - 小红书: https://creator.xiaohongshu.com/publish/publish?target=image');
+            console.log('   - 快手: https://cp.kuaishou.com/article/publish/video?tabType=2');
+            
         console.log(chalk.magenta('\n🔍 自动化检测:'));
         console.log('   - 在浏览器控制台中查看自动化检测报告');
         console.log('   - 手动检测: 在控制台输入 detectAutomation()');
         console.log('   - 检测结果会显示在控制台中');
         
-        // 保持脚本运行
-        console.log(chalk.green('\n✅ Chrome浏览器已独立运行'));
-        console.log(chalk.yellow('💡 提示：按 Ctrl+C 可以退出此脚本'));
-        
-        // 处理退出信号
+        console.log(chalk.cyan('\n🎭 接口模拟功能:'));
+        console.log('   - 小红书接口已自动拦截: fe.xiaohongshu.com/faas/proto/json-to-proto-json-to-proto/proxy');
+        console.log('   - 返回数据: {"status":200,"data":[],"msg":"success"}');
+        console.log('   - 模拟接口: mockApi("api/user", {status:200, data:[], msg:"success"})');
+        console.log('   - 查看配置: showApiMocks()');
+        console.log('   - 清除配置: clearApiMocks()');
+        console.log('   - 支持正则表达式匹配和延迟响应');
+            
+            // 保持脚本运行
+            console.log(chalk.green('\n✅ Chrome浏览器已独立运行'));
+            console.log(chalk.yellow('💡 提示：按 Ctrl+C 可以退出此脚本'));
+            
+            // 处理退出信号
         process.on('SIGINT', async () => {
-            console.log(chalk.yellow('\n🛑 收到退出信号，正在退出脚本...'));
+                console.log(chalk.yellow('\n🛑 收到退出信号，正在退出脚本...'));
             try {
                 await browser.close();
                 console.log(chalk.green('✅ Chrome浏览器已关闭'));
             } catch (error) {
                 console.log(chalk.green('✅ Chrome浏览器将继续运行'));
             }
-            process.exit(0);
-        });
-        
-        // 保持进程运行
+                process.exit(0);
+            });
+            
+            // 保持进程运行
         const keepAliveInterval = setInterval(async () => {
             try {
                 // 检查浏览器是否还在运行
@@ -383,9 +496,9 @@ async function startLocalChrome(useIndependentMode = false) {
             } catch (error) {
                 console.log(chalk.red('❌ Chrome进程已结束'));
                 clearInterval(keepAliveInterval);
-                process.exit(1);
-            }
-        }, 5000);
+                    process.exit(1);
+                }
+            }, 5000);
 
     } catch (error) {
         spinner.fail('启动Chrome失败');
