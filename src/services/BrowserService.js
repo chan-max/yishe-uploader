@@ -2,7 +2,8 @@
  * 浏览器服务 - 管理 Puppeteer 浏览器实例
  */
 
-import puppeteer from 'puppeteer-extra';
+import puppeteer from 'puppeteer-core';
+import puppeteerExtra from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import {
     join as pathJoin
@@ -17,7 +18,7 @@ import {
 } from '../utils/logger.js';
 
 // 使用 stealth 插件
-puppeteer.use(StealthPlugin());
+puppeteerExtra.use(StealthPlugin());
 
 // 全局浏览器实例
 let browserInstance = null;
@@ -77,7 +78,7 @@ export async function detectExistingBrowser() {
                 '/tmp/puppeteer-user-data';
 
             // 尝试连接到现有浏览器
-            const browser = await puppeteer.connect({
+            const browser = await puppeteerExtra.connect({
                 browserURL: 'http://localhost:9222', // 默认调试端口
                 defaultViewport: null
             });
@@ -112,16 +113,14 @@ export async function getOrCreateBrowser() {
 
     // 创建新的浏览器实例
     logger.info('启动新的浏览器实例...');
+    logger.info('使用Chrome浏览器路径:', 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe');
 
     try {
-        // 设置用户数据目录，用于保存登录信息
-        const userDataDir = process.platform === 'win32' ?
-            'C:\\temp\\puppeteer-user-data' :
-            '/tmp/puppeteer-user-data';
+        // 不指定用户数据目录，使用Chrome默认目录
 
         // 首先尝试连接到可能已经运行的浏览器
         try {
-            const existingBrowser = await puppeteer.connect({
+            const existingBrowser = await puppeteerExtra.connect({
                 browserURL: 'http://localhost:9222',
                 defaultViewport: null
             });
@@ -137,10 +136,11 @@ export async function getOrCreateBrowser() {
             logger.debug('无法连接到现有浏览器，将创建新实例');
         }
 
-        browserInstance = await puppeteer.launch({
+        browserInstance = await puppeteerExtra.launch({
             headless: false, // 设置为false以显示浏览器窗口
             defaultViewport: null, // 使用默认视口大小
-            userDataDir: userDataDir, // 保存用户数据，包括登录信息
+            executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe', // 使用指定的Chrome浏览器
+            ignoreDefaultArgs: ['--enable-automation'], // 忽略默认的自动化参数
             args: [
                 '--start-maximized',
                 '--no-sandbox',
@@ -177,7 +177,11 @@ export async function getOrCreateBrowser() {
         browserStatus.lastActivity = Date.now();
         browserStatus.pageCount = 0;
 
-        logger.info('新浏览器实例启动成功，用户数据目录:', userDataDir);
+        // 获取浏览器版本信息进行确认
+        const version = await browserInstance.version();
+        logger.info('浏览器版本信息:', version);
+
+        logger.info('新浏览器实例启动成功，使用Chrome默认用户数据目录');
         logger.info('浏览器状态已更新:', browserStatus);
         return browserInstance;
 
