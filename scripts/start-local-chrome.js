@@ -88,6 +88,19 @@ async function checkChromeProcess() {
     }
 }
 
+/**
+ * 检查用户数据目录是否被占用
+ */
+async function checkUserDataDirLocked(userDataDir) {
+    try {
+        // 尝试检查Chrome是否真的在使用这个用户数据目录
+        const { stdout } = await execAsync('wmic process where "name=\'chrome.exe\'" get commandline /format:list');
+        return stdout.includes(userDataDir.replace(/\\/g, '\\\\'));
+    } catch (error) {
+        return false;
+    }
+}
+
 
 /**
  * 创建Puppeteer配置
@@ -131,7 +144,7 @@ function createPuppeteerConfig(userDataDir) {
 /**
  * 启动本地Chrome浏览器并打开百度
  */
-async function startLocalChrome() {
+async function startLocalChrome(useIndependentMode = false) {
     const spinner = ora('正在启动本地Chrome浏览器...').start();
     
     try {
@@ -146,13 +159,30 @@ async function startLocalChrome() {
         // 检查Chrome是否在运行
         const isChromeRunning = await checkChromeProcess();
         let userDataDir = USER_DATA_DIR;
+        let useBackupDir = false;
         
-        if (isChromeRunning) {
-            spinner.text = '检测到Chrome正在运行，使用备用用户数据目录...';
+        if (useIndependentMode) {
+            // 独立模式：直接使用备用目录
+            console.log(chalk.blue('\n🔧 独立模式：使用独立用户数据目录'));
+            console.log(chalk.gray(`   目录: ${BACKUP_USER_DATA_DIR}`));
             userDataDir = BACKUP_USER_DATA_DIR;
+            useBackupDir = true;
+        } else if (isChromeRunning) {
             console.log(chalk.yellow('\n⚠️  检测到Chrome浏览器正在运行'));
-            console.log(chalk.blue('💡 将使用备用用户数据目录以避免冲突'));
-            console.log(chalk.gray(`   备用目录: ${userDataDir}`));
+            
+            // 检查是否真的在使用主用户数据目录
+            const isMainDirLocked = await checkUserDataDirLocked(USER_DATA_DIR);
+            
+            if (isMainDirLocked) {
+                console.log(chalk.blue('💡 主用户数据目录被占用，使用备用目录'));
+                console.log(chalk.gray(`   备用目录: ${BACKUP_USER_DATA_DIR}`));
+                userDataDir = BACKUP_USER_DATA_DIR;
+                useBackupDir = true;
+            } else {
+                console.log(chalk.green('✅ 主用户数据目录可用，将保留登录状态'));
+            }
+        } else {
+            console.log(chalk.green('✅ 将使用本地用户数据，保留登录状态'));
         }
 
         spinner.text = '正在启动Chrome浏览器...';
@@ -186,6 +216,102 @@ async function startLocalChrome() {
                 )
             ]);
             
+            // 注入自动化检测脚本
+            await page.evaluate(() => {
+                // 定义全局检测函数
+                window.detectAutomation = function() {
+                    // 检测自动化特征
+                    const automationChecks = {
+                        // 检查 webdriver 属性
+                        webdriver: !!navigator.webdriver,
+                        
+                        // 检查自动化相关的属性
+                        automation: !!window.chrome && !!window.chrome.runtime && !!window.chrome.runtime.onConnect,
+                        
+                        // 检查 puppeteer 特征
+                        puppeteer: !!window.__puppeteer || !!window.__nightmare || !!window.__webdriver_evaluate,
+                        
+                        // 检查 selenium 特征
+                        selenium: !!window.domAutomation || !!window.domAutomationController,
+                        
+                        // 检查插件
+                        plugins: navigator.plugins.length === 0,
+                        
+                        // 检查语言
+                        languages: navigator.languages.length === 0,
+                        
+                        // 检查权限
+                        permissions: !navigator.permissions || !navigator.permissions.query,
+                        
+                        // 检查自动化标识
+                        automationId: !!document.querySelector('[data-automation-id]'),
+                        
+                        // 检查用户代理
+                        userAgent: navigator.userAgent.includes('HeadlessChrome') || 
+                                  navigator.userAgent.includes('Chrome-Lighthouse'),
+                        
+                        // 检查窗口大小
+                        windowSize: window.screen.width === 0 || window.screen.height === 0,
+                        
+                        // 检查自动化控制标识
+                        automationControlled: !!window.navigator.webdriver || 
+                                            !!window.chrome && window.chrome.runtime && 
+                                            window.chrome.runtime.id === 'nmmhkkegccagdldgiimedpiccmgmieda',
+                        
+                        // 检查额外的自动化特征
+                        chromeRuntime: !!window.chrome && !!window.chrome.runtime && !!window.chrome.runtime.id,
+                        
+                        // 检查自动化扩展
+                        automationExtension: !!window.chrome && window.chrome.runtime && 
+                                           window.chrome.runtime.id === 'nmmhkkegccagdldgiimedpiccmgmieda',
+                        
+                        // 检查自动化标识符
+                        automationMarker: !!document.querySelector('meta[name="automation"]') ||
+                                        !!document.querySelector('[data-automation="true"]'),
+                        
+                        // 检查自动化事件监听器
+                        automationListeners: !!window.addEventListener.toString().includes('native code') === false
+                    };
+                    
+                    // 计算自动化概率
+                    const totalChecks = Object.keys(automationChecks).length;
+                    const positiveChecks = Object.values(automationChecks).filter(Boolean).length;
+                    const automationProbability = (positiveChecks / totalChecks * 100).toFixed(1);
+                    
+                    // 输出检测结果
+                    console.log('%c🤖 自动化检测报告', 'color: #ff6b6b; font-size: 16px; font-weight: bold;');
+                    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+                    
+                    Object.entries(automationChecks).forEach(([key, value]) => {
+                        const status = value ? '❌ 检测到' : '✅ 正常';
+                        const color = value ? '#ff6b6b' : '#51cf66';
+                        console.log(`%c${key}: ${status}`, `color: ${color}; font-weight: bold;`);
+                    });
+                    
+                    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+                    console.log(`%c自动化概率: ${automationProbability}%`, 'color: #339af0; font-size: 14px; font-weight: bold;');
+                    
+                    if (automationProbability > 30) {
+                        console.log('%c⚠️  警告: 当前窗口可能被识别为自动化操作', 'color: #ff6b6b; font-size: 14px; font-weight: bold;');
+                        console.log('%c💡 建议: 使用 --no-user-data 参数启动独立模式', 'color: #ffd43b; font-size: 12px;');
+                    } else {
+                        console.log('%c✅ 当前窗口看起来像正常用户操作', 'color: #51cf66; font-size: 14px; font-weight: bold;');
+                    }
+                    
+                    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+                    
+                    // 返回检测结果
+                    return {
+                        automationChecks,
+                        automationProbability: parseFloat(automationProbability),
+                        isAutomation: automationProbability > 30
+                    };
+                };
+                
+                // 自动运行一次检测
+                return window.detectAutomation();
+            });
+            
             spinner.succeed('百度页面加载成功！');
         } catch (pageError) {
             // 如果页面加载失败，但浏览器已启动，继续执行
@@ -203,10 +329,12 @@ async function startLocalChrome() {
         
         console.log(chalk.yellow('\n💡 使用说明:'));
         console.log('   - 浏览器将保持打开状态');
-        if (userDataDir === USER_DATA_DIR) {
-            console.log('   - 使用本地用户数据，保留登录状态');
-        } else {
+        if (useBackupDir) {
             console.log('   - 使用备用用户数据目录（独立环境）');
+            console.log('   - 需要重新登录各平台账号');
+        } else {
+            console.log('   - 使用本地用户数据，保留登录状态');
+            console.log('   - 可以直接使用已登录的账号');
         }
         console.log('   - 可以手动操作浏览器');
         console.log('   - 按 Ctrl+C 可以退出此脚本（浏览器会保持打开）');
@@ -216,6 +344,11 @@ async function startLocalChrome() {
         console.log('   - 抖音: https://creator.douyin.com/creator-micro/content/upload?default-tab=3');
         console.log('   - 小红书: https://creator.xiaohongshu.com/publish/publish?target=image');
         console.log('   - 快手: https://cp.kuaishou.com/article/publish/video?tabType=2');
+        
+        console.log(chalk.magenta('\n🔍 自动化检测:'));
+        console.log('   - 在浏览器控制台中查看自动化检测报告');
+        console.log('   - 手动检测: 在控制台输入 detectAutomation()');
+        console.log('   - 检测结果会显示在控制台中');
         
         // 保持脚本运行
         console.log(chalk.green('\n✅ Chrome浏览器已独立运行'));
@@ -276,16 +409,24 @@ function showHelp() {
     
     console.log(chalk.blue('\n📖 使用方法:'));
     console.log('   node scripts/start-local-chrome.js');
+    console.log('   node scripts/start-local-chrome.js --no-user-data');
+    console.log('   node scripts/start-local-chrome.js --independent');
     console.log('   npm run chrome:local');
+    console.log('   npm run chrome:local -- --no-user-data');
     
     console.log(chalk.blue('\n💡 注意事项:'));
     console.log('   - 确保Chrome已正确安装');
     console.log('   - 确保已安装puppeteer-core依赖');
-    console.log('   - 如果Chrome正在运行，会使用备用用户数据目录');
-    console.log('   - 固定使用9222调试端口');
-    console.log('   - 主目录保留完整用户数据，备用目录为独立环境');
+    console.log('   - 默认使用本地用户数据，保留登录状态');
+    console.log('   - 使用 --no-user-data 或 --independent 参数启用独立模式');
+    console.log('   - 独立模式下使用备用用户数据目录，需要重新登录');
     console.log('   - 浏览器会保持打开状态');
     console.log('   - 可以手动操作浏览器');
+    
+    console.log(chalk.blue('\n🔧 参数说明:'));
+    console.log('   --no-user-data    使用独立用户数据目录（不保留登录状态）');
+    console.log('   --independent     同上，使用独立用户数据目录');
+    console.log('   --help, -h        显示帮助信息');
 }
 
 // 主函数
@@ -297,7 +438,10 @@ async function main() {
         return;
     }
     
-    await startLocalChrome();
+    // 检查是否使用独立环境（不使用本地用户数据）
+    const useIndependentMode = args.includes('--no-user-data') || args.includes('--independent');
+    
+    await startLocalChrome(useIndependentMode);
 }
 
 // 如果直接运行此脚本
