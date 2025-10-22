@@ -134,6 +134,11 @@ function createPuppeteerConfig(userDataDir) {
             '--disable-sync',
             '--metrics-recording-only',
             '--no-report-upload',
+            '--disable-features=ResourceTiming',
+            '--disable-features=PerformanceObserver',
+            '--disable-features=WorkerRouterEvaluation',
+            '--disable-features=BrowserResourceTiming',
+            '--disable-features=WebWorkerTiming',
             '--remote-debugging-port=9222',
             '--disable-automation',
             '--disable-infobars'
