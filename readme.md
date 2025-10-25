@@ -4,13 +4,13 @@
 
 ## 功能特性
 
-- 🚀 **多平台支持**: 微博、抖音、小红书、快手
-- 🤖 **自动化发布**: 基于 Puppeteer 的浏览器自动化
-- 🛡️ **反检测机制**: 内置反爬虫检测规避
-- 🔄 **网络恢复**: 自动处理网络连接问题
+- 🚀 **多平台支持**: 微博、抖音、小红书、快手一键发布
+- 🤖 **智能自动化**: 基于 Puppeteer 的浏览器自动化，无需手动操作
+- 🛡️ **反检测机制**: 内置反爬虫检测规避，稳定可靠
+- 🎯 **批量发布**: 支持多平台同时发布，小红书优先
 - 📊 **状态监控**: 实时监控发布状态和登录状态
-- 🎯 **批量发布**: 支持多平台同时发布
-- 📝 **CLI 工具**: 命令行界面，易于使用
+- 🔄 **网络恢复**: 自动处理网络连接问题
+- 📝 **简单易用**: 一行命令完成发布
 
 ## 支持的平台
 
@@ -32,28 +32,55 @@ cd yishe-uploader
 npm install
 ```
 
-## 使用方法
+## 快速开始
 
-### 命令行使用
+### 常用脚本命令
 
 ```bash
-# 发布到单个平台
-node src/index.js publish --platform weibo --title "标题" --content "内容" --images "image1.jpg,image2.jpg"
+# 🔍 检查登录状态
+npm run check-login
 
-# 发布到多个平台
-node src/index.js publish --platforms weibo,douyin,xiaohongshu --title "标题" --content "内容" --images "image1.jpg"
+# 📱 单平台发布
+npm run publish:xiaohongshu    # 小红书发布
+npm run publish:weibo          # 微博发布  
+npm run publish:douyin         # 抖音发布
+npm run publish:kuaishou       # 快手发布
 
-# 检查登录状态
-node src/index.js check-login
+# 🚀 批量发布（小红书优先）
+node scripts/publish-all-platforms.js
 
-# 测试发布
-node src/index.js test
+# 🧪 测试发布
+node scripts/test-publish.js
 
-# 浏览器管理
-node src/index.js browser --status
-node src/index.js browser --close
-node src/index.js browser --clear-data
+# 🌐 浏览器管理
+npm run browser:start          # 启动浏览器
+npm run browser:status         # 检查状态
+npm run browser:close          # 关闭浏览器
 ```
+
+### 高级使用
+
+```bash
+# 指定数据索引和平台
+node scripts/publish-all-platforms.js prod 0 xiaohongshu,weibo
+
+# 从文件发布
+npm run publish:file
+
+# 同步小红书认证
+npm run sync:xiaohongshu
+
+# 使用真实认证测试
+npm run test:real-auth
+```
+
+## 使用流程
+
+1. **检查登录状态** → `npm run check-login`
+2. **选择发布方式**：
+   - 单平台：`npm run publish:xiaohongshu`
+   - 批量发布：`node scripts/publish-all-platforms.js`
+3. **查看发布结果** → 控制台显示成功/失败状态
 
 ### 编程方式使用
 
