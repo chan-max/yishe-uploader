@@ -1,0 +1,87 @@
+Request URL
+https://edith.xiaohongshu.com/web_api/sns/v5/creator/topic/template/list
+Request Method
+GET
+Status Code
+200 OK
+Remote Address
+127.0.0.1:7890
+Referrer Policy
+strict-origin-when-cross-origin
+access-control-allow-credentials
+true
+access-control-allow-origin
+https://creator.xiaohongshu.com
+alt-svc
+h3=":443"; ma=2592000, h3-29=":443"; ma=2592000, h3-27=":443"; ma=2592000, h3-Q050=":443"; ma=2592000, h3-Q046=":443"; ma=2592000, h3-Q043=":443"; ma=2592000, h3-Q039=":443"; ma=2592000, quic=":443"; ma=2592000; v="39,43,46"
+cat-msg-id
+karen-gateway-snsdefault-0a0fdef6.18892-489269-7379890
+content-length
+65
+content-type
+application/json; charset=utf-8
+date
+Sat, 25 Oct 2025 08:06:55 GMT
+request-id
+496c7aabb8dc22d5
+server
+nginx
+x-kong-sign
+0
+xhs-real-ip
+165.84.145.189
+xhs-request-time
+0.017
+xhs-request-time
+0.065
+:authority
+edith.xiaohongshu.com
+:method
+GET
+:path
+/web_api/sns/v5/creator/topic/template/list
+:scheme
+https
+accept
+application/json, text/plain, */*
+accept-encoding
+gzip, deflate, br, zstd
+accept-language
+zh-CN,zh;q=0.9
+authorization
+cache-control
+no-cache
+cookie
+abRequestId=35328789-b536-51f7-952d-7867750a6dd4; a1=199dad7771a8rzviphr8p5q1kiv1ezy9cig6fvf8p30000125998; webId=5be556998523bb3cea465804755c0551; gid=yjjf0fWj4dS4yjjf0fWWW3hiy0YFuh3UxFYUkYU2AyT3hKq8yduvji888yJ2jjY8Dqi240SY; web_session=040069b674b14d2468cc1a77d93a4b56c3ba5c; xsecappid=ugc; customer-sso-sid=68c517565058608251437058hxpaclpo5lt28ue0; x-user-id-creator.xiaohongshu.com=6700f205000000001d02389a; customerClientId=177768468521187; access-token-creator.xiaohongshu.com=customer.creator.AT-68c517565058608251437059eudli7beb6egewuq; galaxy_creator_session_id=ffusSv4aGlsaeWmW2KdcOp6L4IGgXEX21CUM; galaxy.creator.beaker.session.id=1761377465550066229511; websectiga=3633fe24d49c7dd0eb923edc8205740f10fdb18b25d424d2a2322c6196d2a4ad; loadts=1761379591896; sec_poison_id=58366717-1d2d-4342-b8e0-b50d7b939770; acw_tc=0a4a8a3717613795963032135e8ed9b9fc2d361b23e59045593b939ca39fc9
+origin
+https://creator.xiaohongshu.com
+pragma
+no-cache
+priority
+u=1, i
+referer
+https://creator.xiaohongshu.com/
+sec-ch-ua
+"Google Chrome";v="141", "Not?A_Brand";v="8", "Chromium";v="141"
+sec-ch-ua-mobile
+?0
+sec-ch-ua-platform
+"macOS"
+sec-fetch-dest
+empty
+sec-fetch-mode
+cors
+sec-fetch-site
+same-site
+user-agent
+Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36
+x-b3-traceid
+496c7aabb8dc22d5
+x-s
+XYS_2UQhPsHCH0c1PjhhHjIj2erjwjQM89PjNsQhPjHCHDMYGUmOLUHVHdWAH0ijJnEAPerIPpuInBihad4/+BbyJfzV/dSBpepOt9+9P0pMnSQ6+gcAPfpHLA+0cSHEGdY1p7kd+Srh87YFPfhALnMs+fzD2BzGPnGM+pQCG/px8bYtyMQYGDEcpMYyaAYfa7LU+b+L/fD78dmyJ9zHPBReqepB8FW3wBpLnePhnDEsN7SM8aVU+LlocSDE2jTFz7GI+/zDP7mMLrzk/FRTG04VcfYd4BELHjIj2ecjwjHjKc==
+x-s-common
+2UQAPsHCPUIjqArjwjHjNsQhPsHCH0rjNsQhPaHCH0c1PjhhHjIj2eHjwjQ+GnPW/MPjNsQhPUHCHdpdGUHVHdWFH0ijPshEPUh7HjIj2eLjwjHlw/SDGnc7+AqlG/YU2d8kqBYUwoZMq/b3ygGl8gkEwn+k8A8f4fGhqePIPeZIP/HMw/DhHjIj2eGjwjHjNsQh+UHCHjHVHdWhH0ija/PhqDYD87+xJ7mdag8Sq9zn494QcUT6aLpPJLQy+nLApd4G/B4BprShLA+jqg4bqD8S8gYDPBp3Jf+m2DMBnnEl4BYQyrkSL9E+zrTM4bQQPFTAnnRUpFYc4r4UGSGILeSg8DSkN9pgGA8SngbF2pbmqbmQPA4Sy9Ma+SbPtApQy/8A8BES8p+fqpSHqg4VPdbF+LHIzrQQ2sV3zFzkN7+n4BTQ2BzA2op7q0zl4BSQyopYaLLA8/+Pp0mQPM8LaLP78/mM4BIUcLzTqFl98Lz/a7+/LoqMaLp9q9Sn4rkOqgqhcdp78SmI8BpLzS4OagWFprSk4/8yLo4ULopF+LS9JBbPGf4AP7bF2rSh8gPlpd4HanTMJLS3agSSyf4AnaRgpB4S+9p/qgzSNFc7qFz0qBSI8nzSngQr4rSe+fprpdqUaLpwqM+l4Bl1Jb+M/fkn4rS9J9p3qgcAGMi7qM86+B4Qzp+EanYbqaVEzbpQ4dkE+rDh/FSkGA4yLo4mag8kL0z6N7+r/BzA+Sm7pDSe+9p/8e4Sy0S/+rSb4dPAapm+4b87pLSk8oPAqURA2bkw8nSn4BQ0pnpSnp87yrS9zaRC8npS8db74Dls/7+fLo4UagYV4rShnS+64g4O8M87qo+U+BYSpaRS+Dl98Lzc4F8Q4f4APgQ6qAbrnfSQy/4AyfQ6qA+dqD8Qz/mAzob7arS9JpkYpdzfJdp7GLSb+7+rqg4hanSwqA+M4ApQy78A8obFJo4M4Fl6pdzgagWF8rSe/nLF8FYmtFSw8nSl4BkQyoQFanVI8nkl49R1npbCG9bSqFzspSpQzLMjt7bFJ7Sn4rlQcFTA2bm7yAzV8nLlqrRAyLMT/rSkcg+h+9RApopF2n+c49RQ404S8S878DS387P9Pb46aL+N8nz6N9pgpdcAa/P78p8l4APhcSSUanYHtFSe+d+hanRS+0S98nzU/7+8Lo4naLpVyFSezFp0pd4lanTHLFSk89phnSbyaASd8pSM4A8Qy9PhJdp7yozP8Bpka/mAL7pFq9El4e+QPF4OaLpz+Bpc4ob74g4Ta/P6q9k8PBLApd4M+obF2rSeG0bF4gzcanSop7z8yL8QPApA2B8OqAZE89pk4gqh/dbFJDSkp9MQy9RAPpmF4LSb/9pfzSQnaL+b/fpTzgSQcMSyag8N8p8n4ApPLozMGSmFqrSkG9+QcFRA8bqM8nkn4Mmo8bk1aLpo+URc4BYwqgz+anSPJLS3G04Q2BlTagGI8pSf4d+DJfQHcS87zrS9G9pj4g4j2S8FwLSk+7P9J7H6aLpHyfpx8oPILozM/obF4UHVHdWEH0iTP/GMwecI+AcU+aIj2erIH0iINsQhP/rjwjQ1J7QTGnIjKc==
+x-t
+1761379614411
+x-xray-traceid
+cd0d33ff447fc06c4d361da526e2594e

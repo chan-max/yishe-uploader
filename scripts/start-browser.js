@@ -17,6 +17,7 @@
 import {
     BrowserService
 } from '../src/services/BrowserService.js';
+import { xiaohongshuAuth } from '../src/utils/xiaohongshuAuth.js';
 import chalk from 'chalk';
 
 async function main() {
@@ -44,6 +45,75 @@ async function main() {
         const page = await browser.newPage();
         await page.goto('about:blank');
         console.log(chalk.blue('📄 已打开默认页面'));
+
+        // 应用小红书认证
+        console.log(chalk.cyan('🔐 正在应用小红书认证...'));
+        try {
+            const authSuccess = await xiaohongshuAuth.applyAuth(page);
+            if (authSuccess) {
+                console.log(chalk.green('✅ 小红书认证应用成功'));
+                
+                // 验证登录状态
+                await page.goto('https://creator.xiaohongshu.com/', {
+                    waitUntil: 'domcontentloaded',
+                    timeout: 30000
+                });
+                
+                await new Promise(resolve => setTimeout(resolve, 3000));
+                
+                // 检查登录状态
+                const isLoggedIn = await page.evaluate(() => {
+                    // 多种方式检查登录状态
+                    const avatarSelectors = [
+                        '.user_avatar', '[class="user_avatar"]', '.reds-avatar-border',
+                        '.avatar', '.user-info', '.user-profile',
+                        '[data-testid="user-avatar"]', '.user-menu'
+                    ];
+                    
+                    for (const selector of avatarSelectors) {
+                        if (document.querySelector(selector)) {
+                            return true;
+                        }
+                    }
+                    
+                    // 检查是否有登录相关的文本
+                    const loginTexts = ['登录', '注册', 'Sign in', 'Login'];
+                    const hasLoginText = loginTexts.some(text => 
+                        document.body.innerText.includes(text)
+                    );
+                    
+                    return !hasLoginText; // 如果没有登录文本，可能已经登录
+                });
+                
+                if (isLoggedIn) {
+                    console.log(chalk.green('✅ 小红书登录状态验证成功'));
+                } else {
+                    console.log(chalk.yellow('⚠️ 小红书可能未登录，请检查认证数据'));
+                    
+                    // 输出页面信息用于调试
+                    const pageInfo = await page.evaluate(() => {
+                        return {
+                            url: window.location.href,
+                            title: document.title,
+                            hasLoginText: document.body.innerText.includes('登录'),
+                            hasRegisterText: document.body.innerText.includes('注册'),
+                            bodyText: document.body.innerText.substring(0, 200)
+                        };
+                    });
+                    
+                    console.log(chalk.blue('🔍 页面调试信息:'));
+                    console.log(`- URL: ${pageInfo.url}`);
+                    console.log(`- 标题: ${pageInfo.title}`);
+                    console.log(`- 包含登录文本: ${pageInfo.hasLoginText}`);
+                    console.log(`- 包含注册文本: ${pageInfo.hasRegisterText}`);
+                    console.log(`- 页面内容预览: ${pageInfo.bodyText}...`);
+                }
+            } else {
+                console.log(chalk.red('❌ 小红书认证应用失败'));
+            }
+        } catch (error) {
+            console.log(chalk.red('❌ 应用小红书认证时出错:'), error.message);
+        }
 
         const status = BrowserService.getStatus();
         console.log('\n浏览器状态:');

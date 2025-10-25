@@ -8,6 +8,7 @@ import { PageOperator } from '../services/PageOperator.js';
 import { XiaohongshuLoginChecker } from '../services/LoginChecker.js';
 import { PLATFORM_CONFIGS } from '../config/platforms.js';
 import { logger } from '../utils/logger.js';
+import { xiaohongshuAuth } from '../utils/xiaohongshuAuth.js';
 
 /**
  * 小红书发布器类
@@ -39,6 +40,17 @@ class XiaohongshuPublisher {
                 await this.pageOperator.setupAntiDetection(page);
                 logger.info('反检测脚本已应用');
             }
+
+            // 2.5. 应用小红书真实认证
+            const authSuccess = await xiaohongshuAuth.applyAuth(page);
+            if (!authSuccess) {
+                return {
+                    success: false,
+                    message: '小红书认证设置失败',
+                    data: { error: '认证失败' }
+                };
+            }
+            logger.info('小红书认证已应用');
 
             // 3. 导航到发布页面
             await page.goto(this.config.uploadUrl, {
@@ -111,28 +123,51 @@ class XiaohongshuPublisher {
     async handleImageUpload(page, images) {
         logger.info(`开始上传 ${images.length} 张图片...`);
         
+        // 等待页面完全加载
+        await this.pageOperator.delay(3000);
+        
+        // 检查页面是否已进入图片上传状态
+        const currentUrl = page.url();
+        logger.info(`当前页面URL: ${currentUrl}`);
+        
         for (let i = 0; i < images.length; i++) {
             const imageUrl = images[i];
-            try {
-                logger.info(`正在上传第 ${i + 1}/${images.length} 张图片: ${imageUrl}`);
-                
-                // 下载图片到临时目录
-                const tempPath = await this.imageManager.downloadImage(imageUrl, `${this.platformName}_${Date.now()}_${i}`);
-                
-                // 上传图片
-                await this.uploadSingleImage(page, tempPath, i);
-                
-                // 删除临时文件
-                this.imageManager.deleteTempFile(tempPath);
-                
-                // 图片间间隔
-                if (i < images.length - 1) {
-                    await this.pageOperator.delay(1000);
+            let retryCount = 0;
+            const maxRetries = 3;
+            
+            while (retryCount < maxRetries) {
+                try {
+                    logger.info(`正在上传第 ${i + 1}/${images.length} 张图片: ${imageUrl} (尝试 ${retryCount + 1}/${maxRetries})`);
+                    
+                    // 下载图片到临时目录
+                    const tempPath = await this.imageManager.downloadImage(imageUrl, `${this.platformName}_${Date.now()}_${i}`);
+                    
+                    // 上传图片
+                    await this.uploadSingleImage(page, tempPath, i);
+                    
+                    // 删除临时文件
+                    this.imageManager.deleteTempFile(tempPath);
+                    
+                    logger.info(`第 ${i + 1} 张图片上传成功`);
+                    break; // 成功则跳出重试循环
+                    
+                } catch (error) {
+                    retryCount++;
+                    logger.error(`处理图片 ${imageUrl} 时出错 (尝试 ${retryCount}/${maxRetries}):`, error.message);
+                    
+                    if (retryCount >= maxRetries) {
+                        logger.error(`图片 ${imageUrl} 上传失败，已达到最大重试次数`);
+                        throw error;
+                    } else {
+                        logger.info(`等待 ${retryCount * 2} 秒后重试...`);
+                        await this.pageOperator.delay(retryCount * 2000);
+                    }
                 }
-                
-            } catch (error) {
-                logger.error(`处理图片 ${imageUrl} 时出错:`, error);
-                throw error;
+            }
+            
+            // 图片间间隔
+            if (i < images.length - 1) {
+                await this.pageOperator.delay(2000);
             }
         }
         
@@ -143,23 +178,156 @@ class XiaohongshuPublisher {
      * 上传单张图片
      */
     async uploadSingleImage(page, tempPath, imageIndex) {
-        const fileInput = await page.$('input[type="file"]');
-        if (!fileInput) {
-            throw new Error('未找到文件选择器');
+        try {
+            // 等待页面加载完成
+            await this.pageOperator.delay(2000);
+            
+            // 查找文件输入框，尝试多种选择器
+            const fileInputSelectors = [
+                'input[type="file"]',
+                'input[accept*="image"]',
+                '.upload input[type="file"]',
+                '.file-upload input[type="file"]',
+                '[data-testid="file-input"]',
+                '.upload-area input',
+                '.drag-upload input'
+            ];
+            
+            let fileInput = null;
+            for (const selector of fileInputSelectors) {
+                try {
+                    fileInput = await page.$(selector);
+                    if (fileInput) {
+                        logger.info(`找到文件输入框: ${selector}`);
+                        break;
+                    }
+                } catch (error) {
+                    logger.debug(`选择器 ${selector} 未找到文件输入框`);
+                }
+            }
+            
+            if (!fileInput) {
+                // 如果找不到文件输入框，尝试点击上传区域
+                const uploadAreaSelectors = [
+                    '.upload-area',
+                    '.drag-upload',
+                    '.upload-btn',
+                    '.add-image',
+                    '[data-testid="upload-area"]',
+                    '.upload-zone'
+                ];
+                
+                for (const selector of uploadAreaSelectors) {
+                    try {
+                        const uploadArea = await page.$(selector);
+                        if (uploadArea) {
+                            logger.info(`点击上传区域: ${selector}`);
+                            await uploadArea.click();
+                            await this.pageOperator.delay(1000);
+                            
+                            // 再次尝试查找文件输入框
+                            fileInput = await page.$('input[type="file"]');
+                            if (fileInput) break;
+                        }
+                    } catch (error) {
+                        logger.debug(`上传区域 ${selector} 点击失败`);
+                    }
+                }
+            }
+            
+            if (!fileInput) {
+                throw new Error('未找到文件选择器，请检查页面是否已加载完成');
+            }
+            
+            // 上传文件
+            await fileInput.uploadFile(tempPath);
+            logger.info(`已上传图片 ${imageIndex + 1}`);
+            
+            // 等待图片上传完成
+            await this.waitForImageUploadComplete(page, imageIndex);
+            
+        } catch (error) {
+            logger.error(`上传图片 ${imageIndex + 1} 失败:`, error);
+            throw error;
         }
-        
-        await fileInput.uploadFile(tempPath);
-        logger.info(`已上传图片 ${imageIndex + 1}`);
-        
-        // 等待图片上传完成
-        await this.waitForImageUploadComplete(page, imageIndex);
     }
 
     /**
      * 等待图片上传完成
      */
     async waitForImageUploadComplete(page, imageIndex) {
-        await this.pageOperator.delay(2000);
+        try {
+            // 等待图片上传完成，检查多种可能的完成状态
+            const uploadCompleteSelectors = [
+                '.upload-success',
+                '.image-preview',
+                '.uploaded-image',
+                '.image-item',
+                '[data-testid="upload-success"]',
+                '.upload-complete'
+            ];
+            
+            let uploadComplete = false;
+            const maxWaitTime = 10000; // 10秒超时
+            const startTime = Date.now();
+            
+            while (!uploadComplete && (Date.now() - startTime) < maxWaitTime) {
+                for (const selector of uploadCompleteSelectors) {
+                    try {
+                        const element = await page.$(selector);
+                        if (element) {
+                            logger.info(`图片上传完成，检测到: ${selector}`);
+                            uploadComplete = true;
+                            break;
+                        }
+                    } catch (error) {
+                        // 继续检查其他选择器
+                    }
+                }
+                
+                if (!uploadComplete) {
+                    // 检查是否还有loading状态
+                    const loadingSelectors = [
+                        '.upload-loading',
+                        '.loading',
+                        '.spinner',
+                        '[data-testid="loading"]'
+                    ];
+                    
+                    let hasLoading = false;
+                    for (const selector of loadingSelectors) {
+                        try {
+                            const loading = await page.$(selector);
+                            if (loading) {
+                                hasLoading = true;
+                                break;
+                            }
+                        } catch (error) {
+                            // 继续检查
+                        }
+                    }
+                    
+                    if (!hasLoading) {
+                        // 没有loading状态，可能已经完成
+                        uploadComplete = true;
+                        logger.info('未检测到loading状态，假设上传完成');
+                    } else {
+                        await this.pageOperator.delay(500);
+                    }
+                }
+            }
+            
+            if (!uploadComplete) {
+                logger.warn(`图片 ${imageIndex + 1} 上传超时，但继续执行`);
+            }
+            
+            // 额外等待确保页面稳定
+            await this.pageOperator.delay(1000);
+            
+        } catch (error) {
+            logger.warn(`等待图片上传完成时出错: ${error.message}`);
+            // 即使出错也继续执行
+        }
     }
 
     /**

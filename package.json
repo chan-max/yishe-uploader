@@ -18,6 +18,8 @@
         "browser:start:keep": "node scripts/start-browser.js --keep-open",
         "browser:status": "node scripts/browser-status.js",
         "browser:close": "node scripts/browser-status.js --close",
+        "test:real-auth": "node scripts/use-real-auth.js",
+        "sync:xiaohongshu": "node scripts/sync-xiaohongshu-cookies.js",
         "lint": "eslint src --ext .js",
         "format": "prettier --write src/**/*.js"
     },
