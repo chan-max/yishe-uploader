@@ -16,7 +16,7 @@ import { publishKuaishouItem } from './publish-kuaishou.js';
 // 解析命令行参数
 const env = process.argv[2] === 'dev' ? 'dev' : 'prod';
 const testIndex = parseInt(process.argv[3]) || 0; // 默认使用第一个测试数据
-const platforms = process.argv[4] ? process.argv[4].split(',') : ['weibo', 'xiaohongshu']; // 默认测试微博和小红书
+const platforms = process.argv[4] ? process.argv[4].split(',') : ['xiaohongshu', 'weibo']; // 默认测试小红书和微博，小红书优先
 
 /**
  * 测试数据结构

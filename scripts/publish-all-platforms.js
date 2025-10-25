@@ -16,7 +16,7 @@ import { publishKuaishouItem } from './publish-kuaishou.js';
 // 解析命令行参数
 const env = process.argv[2] === 'dev' ? 'dev' : 'prod';
 const dataIndex = parseInt(process.argv[3]) || 0; // 默认使用第一条数据
-const platforms = process.argv[4] ? process.argv[4].split(',') : ['weibo', 'xiaohongshu', 'douyin', 'kuaishou']; // 默认所有平台
+const platforms = process.argv[4] ? process.argv[4].split(',') : ['xiaohongshu', 'weibo', 'douyin', 'kuaishou']; // 默认所有平台，小红书优先
 
 /**
  * 发布到指定平台
