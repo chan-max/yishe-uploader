@@ -147,52 +147,120 @@ class XiaohongshuPublisher {
         // 等待页面完全加载
         await this.pageOperator.delay(3000);
 
+        // 滚动到页面顶部，确保上传区域可见
+        await page.evaluate(() => window.scrollTo(0, 0));
+        await this.pageOperator.delay(1000);
+
         // 检查页面是否已进入图片上传状态
         const currentUrl = page.url();
         logger.info(`当前页面URL: ${currentUrl}`);
 
+        const uploadResults = [];
+
         for (let i = 0; i < images.length; i++) {
             const imageUrl = images[i];
             let retryCount = 0;
-            const maxRetries = 3;
+            const maxRetries = 5; // 增加到5次重试
+            let uploadSuccess = false;
 
-            while (retryCount < maxRetries) {
+            while (retryCount < maxRetries && !uploadSuccess) {
+                let tempPath = null;
                 try {
                     logger.info(`正在上传第 ${i + 1}/${images.length} 张图片: ${imageUrl} (尝试 ${retryCount + 1}/${maxRetries})`);
 
                     // 下载图片到临时目录
-                    const tempPath = await this.imageManager.downloadImage(imageUrl, `${this.platformName}_${Date.now()}_${i}`);
+                    tempPath = await this.imageManager.downloadImage(imageUrl, `${this.platformName}_${Date.now()}_${i}`);
+
+                    // 检查图片大小
+                    const fs = await import('fs');
+                    const stats = fs.statSync(tempPath);
+                    const fileSizeInMB = stats.size / (1024 * 1024);
+                    logger.info(`图片大小: ${fileSizeInMB.toFixed(2)} MB`);
+
+                    if (fileSizeInMB > 20) {
+                        logger.warn('图片过大，可能导致上传失败');
+                    }
 
                     // 上传图片
                     await this.uploadSingleImage(page, tempPath, i);
 
-                    // 删除临时文件
-                    this.imageManager.deleteTempFile(tempPath);
-
+                    uploadSuccess = true;
+                    uploadResults.push({
+                        index: i,
+                        success: true,
+                        url: imageUrl
+                    });
                     logger.info(`第 ${i + 1} 张图片上传成功`);
-                    break; // 成功则跳出重试循环
 
                 } catch (error) {
                     retryCount++;
                     logger.error(`处理图片 ${imageUrl} 时出错 (尝试 ${retryCount}/${maxRetries}):`, error.message);
 
+                    // 清理临时文件
+                    if (tempPath) {
+                        try {
+                            this.imageManager.deleteTempFile(tempPath);
+                        } catch (e) {
+                            logger.warn('清理临时文件失败:', e.message);
+                        }
+                    }
+
                     if (retryCount >= maxRetries) {
                         logger.error(`图片 ${imageUrl} 上传失败，已达到最大重试次数`);
-                        throw error;
+                        uploadResults.push({
+                            index: i,
+                            success: false,
+                            url: imageUrl,
+                            error: error.message
+                        });
+                        // 不要抛出错误，继续上传其他图片
+                        logger.warn(`跳过第 ${i + 1} 张图片，继续上传其他图片`);
+                        break;
                     } else {
-                        logger.info(`等待 ${retryCount * 2} 秒后重试...`);
-                        await this.pageOperator.delay(retryCount * 2000);
+                        const waitTime = Math.min(retryCount * 2, 10); // 最长等待10秒
+                        logger.info(`等待 ${waitTime} 秒后重试...`);
+                        await this.pageOperator.delay(waitTime * 1000);
+
+                        // 刷新页面到上传页面
+                        try {
+                            await page.goto(currentUrl, {
+                                waitUntil: 'domcontentloaded',
+                                timeout: 30000
+                            });
+                            await this.pageOperator.delay(2000);
+                        } catch (refreshError) {
+                            logger.warn('刷新页面失败，继续尝试:', refreshError.message);
+                        }
                     }
                 }
             }
 
-            // 图片间间隔
+            // 图片间间隔，让服务器有时间处理
             if (i < images.length - 1) {
-                await this.pageOperator.delay(2000);
+                await this.pageOperator.delay(3000); // 增加到3秒
             }
         }
 
-        logger.info(`所有图片上传完成，共 ${images.length} 张`);
+        // 检查上传结果
+        const successCount = uploadResults.filter(r => r.success).length;
+        const failCount = uploadResults.filter(r => !r.success).length;
+
+        logger.info(`图片上传完成统计: 成功 ${successCount}/${images.length}，失败 ${failCount}/${images.length}`);
+
+        if (failCount > 0) {
+            logger.warn('部分图片上传失败:');
+            uploadResults.filter(r => !r.success).forEach(r => {
+                logger.warn(`  图片 ${r.index + 1}: ${r.error || '未知错误'}`);
+            });
+        }
+
+        if (successCount === 0) {
+            throw new Error('所有图片上传失败');
+        }
+
+        if (failCount > 0 && successCount > 0) {
+            logger.warn(`${failCount} 张图片上传失败，但有 ${successCount} 张图片上传成功，继续发布流程`);
+        }
     }
 
     /**
@@ -202,6 +270,10 @@ class XiaohongshuPublisher {
         try {
             // 等待页面加载完成
             await this.pageOperator.delay(2000);
+
+            // 滚动到页面顶部，确保上传区域可见
+            await page.evaluate(() => window.scrollTo(0, 0));
+            await this.pageOperator.delay(1000);
 
             // 查找文件输入框，尝试多种选择器
             const fileInputSelectors = [
@@ -217,41 +289,73 @@ class XiaohongshuPublisher {
             let fileInput = null;
             for (const selector of fileInputSelectors) {
                 try {
-                    fileInput = await page.$(selector);
-                    if (fileInput) {
-                        logger.info(`找到文件输入框: ${selector}`);
-                        break;
+                    const elements = await page.$$(selector);
+                    if (elements && elements.length > 0) {
+                        // 如果有多个，优先选择可见的
+                        for (let element of elements) {
+                            const isVisible = await element.evaluate(el => {
+                                return el.offsetParent !== null;
+                            });
+                            if (isVisible) {
+                                fileInput = element;
+                                logger.info(`找到可见的文件输入框: ${selector}`);
+                                break;
+                            }
+                        }
+                        if (!fileInput && elements.length > 0) {
+                            fileInput = elements[0];
+                            logger.info(`找到文件输入框: ${selector} (使用第一个)`);
+                        }
+                        if (fileInput) break;
                     }
                 } catch (error) {
-                    logger.debug(`选择器 ${selector} 未找到文件输入框`);
+                    logger.debug(`选择器 ${selector} 未找到文件输入框: ${error.message}`);
                 }
             }
 
             if (!fileInput) {
                 // 如果找不到文件输入框，尝试点击上传区域
+                logger.info('尝试点击上传区域');
                 const uploadAreaSelectors = [
                     '.upload-area',
                     '.drag-upload',
                     '.upload-btn',
                     '.add-image',
                     '[data-testid="upload-area"]',
-                    '.upload-zone'
+                    '.upload-zone',
+                    '.reds-btn',
+                    'button[type="button"]'
                 ];
 
                 for (const selector of uploadAreaSelectors) {
                     try {
-                        const uploadArea = await page.$(selector);
-                        if (uploadArea) {
-                            logger.info(`点击上传区域: ${selector}`);
-                            await uploadArea.click();
-                            await this.pageOperator.delay(1000);
+                        const elements = await page.$$(selector);
+                        for (let uploadArea of elements) {
+                            try {
+                                const text = await uploadArea.evaluate(el => el.textContent || el.innerText);
+                                // 检查是否是上传按钮
+                                if (text && (text.includes('上传') || text.includes('选择') || text.includes('添加'))) {
+                                    logger.info(`点击上传按钮: ${selector}, 文本: ${text}`);
+                                    await uploadArea.click({
+                                        delay: 100
+                                    });
+                                    await this.pageOperator.delay(1500);
 
-                            // 再次尝试查找文件输入框
-                            fileInput = await page.$('input[type="file"]');
-                            if (fileInput) break;
+                                    // 再次尝试查找文件输入框
+                                    const inputs = await page.$$('input[type="file"]');
+                                    if (inputs && inputs.length > 0) {
+                                        fileInput = inputs[inputs.length - 1]; // 使用最后一个（通常是新出现的）
+                                        logger.info('找到文件输入框');
+                                        break;
+                                    }
+                                }
+                            } catch (e) {
+                                logger.debug(`检查元素失败: ${e.message}`);
+                            }
                         }
+                        if (fileInput) break;
                     } catch (error) {
-                        logger.debug(`上传区域 ${selector} 点击失败`);
+                        logger.debug(`上传区域 ${selector} 点击失败: ${error.message}`);
                     }
                 }
             }
@@ -261,8 +365,9 @@ class XiaohongshuPublisher {
             }
 
             // 上传文件
+            logger.info(`开始上传文件: ${tempPath}`);
             await fileInput.uploadFile(tempPath);
-            logger.info(`已上传图片 ${imageIndex + 1}`);
+            logger.info(`文件已选择，等待上传...`);
 
             // 等待图片上传完成
             await this.waitForImageUploadComplete(page, imageIndex);
@@ -285,19 +390,23 @@ class XiaohongshuPublisher {
                 '.uploaded-image',
                 '.image-item',
                 '[data-testid="upload-success"]',
-                '.upload-complete'
+                '.upload-complete',
+                '.reds-uploader__img',
+                '.uploader-img'
             ];
 
             let uploadComplete = false;
-            const maxWaitTime = 10000; // 10秒超时
+            const maxWaitTime = 20000; // 增加到20秒超时
             const startTime = Date.now();
+            let lastLoadingState = false;
 
             while (!uploadComplete && (Date.now() - startTime) < maxWaitTime) {
+                // 检查完成状态
                 for (const selector of uploadCompleteSelectors) {
                     try {
-                        const element = await page.$(selector);
-                        if (element) {
-                            logger.info(`图片上传完成，检测到: ${selector}`);
+                        const elements = await page.$$(selector);
+                        if (elements && elements.length > imageIndex + 1) {
+                            logger.info(`图片上传完成，检测到 ${elements.length} 个已上传图片`);
                             uploadComplete = true;
                             break;
                         }
@@ -312,7 +421,8 @@ class XiaohongshuPublisher {
                         '.upload-loading',
                         '.loading',
                         '.spinner',
-                        '[data-testid="loading"]'
+                        '[data-testid="loading"]',
+                        '.reds-uploader__progress'
                     ];
 
                     let hasLoading = false;
@@ -320,30 +430,47 @@ class XiaohongshuPublisher {
                         try {
                             const loading = await page.$(selector);
                             if (loading) {
-                                hasLoading = true;
-                                break;
+                                const isVisible = await loading.evaluate(el => {
+                                    const style = window.getComputedStyle(el);
+                                    return style.display !== 'none' && style.visibility !== 'hidden';
+                                });
+                                if (isVisible) {
+                                    hasLoading = true;
+                                    lastLoadingState = true;
+                                    break;
+                                }
                             }
                         } catch (error) {
                             // 继续检查
                         }
                     }
 
-                    if (!hasLoading) {
-                        // 没有loading状态，可能已经完成
+                    // 如果之前有loading状态，现在没有了，认为上传完成
+                    if (lastLoadingState && !hasLoading) {
+                        logger.info('检测到loading状态消失，上传可能已完成');
+                        uploadComplete = true;
+                        break;
+                    }
+
+                    if (!hasLoading && (Date.now() - startTime) > 3000) {
+                        // 3秒后如果没有loading状态，假设已完成
                         uploadComplete = true;
                         logger.info('未检测到loading状态，假设上传完成');
-                    } else {
-                        await this.pageOperator.delay(500);
+                        break;
                     }
+
+                    await this.pageOperator.delay(500);
                 }
             }
 
             if (!uploadComplete) {
                 logger.warn(`图片 ${imageIndex + 1} 上传超时，但继续执行`);
+            } else {
+                logger.info(`图片 ${imageIndex + 1} 上传完成确认`);
             }
 
             // 额外等待确保页面稳定
-            await this.pageOperator.delay(1000);
+            await this.pageOperator.delay(1500);
 
         } catch (error) {
             logger.warn(`等待图片上传完成时出错: ${error.message}`);
