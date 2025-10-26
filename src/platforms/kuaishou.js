@@ -2,12 +2,27 @@
  * 快手发布功能 - 独立实现
  */
 
-import { getOrCreateBrowser } from '../services/BrowserService.js';
-import { ImageManager } from '../services/ImageManager.js';
-import { PageOperator } from '../services/PageOperator.js';
-import { GenericLoginChecker } from '../services/LoginChecker.js';
-import { PLATFORM_CONFIGS } from '../config/platforms.js';
-import { logger } from '../utils/logger.js';
+import {
+    getOrCreateBrowser
+} from '../services/BrowserService.js';
+import {
+    ImageManager
+} from '../services/ImageManager.js';
+import {
+    PageOperator
+} from '../services/PageOperator.js';
+import {
+    GenericLoginChecker
+} from '../services/LoginChecker.js';
+import {
+    PLATFORM_CONFIGS
+} from '../config/platforms.js';
+import {
+    logger
+} from '../utils/logger.js';
+import {
+    kuaishouAuth
+} from '../utils/kuaishouAuth.js';
 
 /**
  * 快手发布器类
@@ -30,7 +45,7 @@ class KuaishouPublisher {
         let page = null;
         try {
             logger.info(`开始执行${this.platformName}发布操作，参数:`, publishInfo);
-            
+
             // 1. 获取浏览器和页面
             const browser = await getOrCreateBrowser();
             page = await browser.newPage();
@@ -41,6 +56,9 @@ class KuaishouPublisher {
                 await this.pageOperator.setupAntiDetection(page);
                 logger.info('反检测脚本已应用');
             }
+
+            // 2.5. 应用快手认证
+            await kuaishouAuth.applyAuth(page);
 
             // 3. 导航到发布页面
             await page.goto(this.config.uploadUrl, {
@@ -56,7 +74,9 @@ class KuaishouPublisher {
                     return {
                         success: false,
                         message: `${this.platformName}未登录: ${loginResult.details?.reason || '未知原因'}`,
-                        data: { loginStatus: loginResult }
+                        data: {
+                            loginStatus: loginResult
+                        }
                     };
                 }
                 logger.info(`${this.platformName}已登录，继续发布流程`);
@@ -86,13 +106,16 @@ class KuaishouPublisher {
             // 10. 等待发布完成
             await this.waitForPublishComplete(page);
 
-            return { success: true, message: `${this.platformName}发布成功` };
+            return {
+                success: true,
+                message: `${this.platformName}发布成功`
+            };
 
         } catch (error) {
             logger.error(`${this.platformName}发布过程出错:`, error);
             return {
                 success: false,
-                message: error?.message || '未知错误',
+                message: error ? error.message : '未知错误',
                 data: error
             };
         } finally {
@@ -112,9 +135,9 @@ class KuaishouPublisher {
      */
     async handleImageUpload(page, images) {
         logger.info(`开始上传 ${images.length} 张图片...`);
-        
+
         if (images.length === 0) return;
-        
+
         // 下载所有图片到本地
         const tempPaths = [];
         for (const imageUrl of images) {
@@ -136,35 +159,37 @@ class KuaishouPublisher {
                 const style = window.getComputedStyle(el);
                 return style.display !== 'none' && style.visibility !== 'hidden';
             });
-            
+
             // 检查上传按钮是否已出现
             const uploadButtons = document.querySelectorAll('button[class^="_upload-btn_"]');
             const hasUploadButton = uploadButtons.length > 0;
-            
+
             return !hasLoading && hasUploadButton;
-        }, { timeout: 30000 });
-        
+        }, {
+            timeout: 30000
+        });
+
         logger.info('页面 loading 已结束，上传按钮已出现');
-        
+
         // 一次性上传所有图片
         const uploadButtons = await page.$$('button[class^="_upload-btn_"]');
         const uploadButton = uploadButtons[1];
         if (!uploadButton) {
             throw new Error('未找到上传按钮');
         }
-        
+
         logger.info('开始上传图片...');
         const [fileChooser] = await Promise.all([
             page.waitForFileChooser(),
             uploadButton.click()
         ]);
-        
+
         await fileChooser.accept(tempPaths);
         logger.info('已上传所有图片:', tempPaths);
-        
+
         // 等待图片上传完成
         await this.pageOperator.delay(3000);
-        
+
         // 删除临时文件
         this.imageManager.deleteTempFiles(tempPaths);
     }
@@ -196,15 +221,17 @@ class KuaishouPublisher {
             throw new Error('未配置发布按钮选择器');
         }
 
-        await page.waitForSelector(this.config.selectors.submitButton, { timeout: 10000 });
-        
+        await page.waitForSelector(this.config.selectors.submitButton, {
+            timeout: 10000
+        });
+
         // 检查按钮是否可用
         const isButtonEnabled = await this.pageOperator.isButtonEnabled(page, this.config.selectors.submitButton);
         if (!isButtonEnabled) {
             logger.info('发布按钮不可用，等待...');
             await this.pageOperator.waitForButtonEnabled(page, this.config.selectors.submitButton);
         }
-        
+
         await page.click(this.config.selectors.submitButton);
         logger.info('已点击发布按钮');
     }

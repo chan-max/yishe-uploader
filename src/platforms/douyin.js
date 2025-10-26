@@ -2,12 +2,27 @@
  * 抖音发布功能 - 独立实现
  */
 
-import { getOrCreateBrowser } from '../services/BrowserService.js';
-import { ImageManager } from '../services/ImageManager.js';
-import { PageOperator } from '../services/PageOperator.js';
-import { DouyinLoginChecker } from '../services/LoginChecker.js';
-import { PLATFORM_CONFIGS } from '../config/platforms.js';
-import { logger } from '../utils/logger.js';
+import {
+    getOrCreateBrowser
+} from '../services/BrowserService.js';
+import {
+    ImageManager
+} from '../services/ImageManager.js';
+import {
+    PageOperator
+} from '../services/PageOperator.js';
+import {
+    DouyinLoginChecker
+} from '../services/LoginChecker.js';
+import {
+    PLATFORM_CONFIGS
+} from '../config/platforms.js';
+import {
+    logger
+} from '../utils/logger.js';
+import {
+    douyinAuth
+} from '../utils/douyinAuth.js';
 
 /**
  * 抖音发布器类
@@ -28,7 +43,7 @@ class DouyinPublisher {
         let page = null;
         try {
             logger.info(`开始执行${this.platformName}发布操作，参数:`, publishInfo);
-            
+
             // 1. 获取浏览器和页面
             const browser = await getOrCreateBrowser();
             page = await browser.newPage();
@@ -39,6 +54,9 @@ class DouyinPublisher {
                 await this.pageOperator.setupAntiDetection(page);
                 logger.info('反检测脚本已应用');
             }
+
+            // 2.5. 应用抖音认证
+            await douyinAuth.applyAuth(page);
 
             // 3. 导航到发布页面
             await page.goto(this.config.uploadUrl, {
@@ -54,7 +72,9 @@ class DouyinPublisher {
                     return {
                         success: false,
                         message: `${this.platformName}未登录: ${loginResult.details?.reason || '未知原因'}`,
-                        data: { loginStatus: loginResult }
+                        data: {
+                            loginStatus: loginResult
+                        }
                     };
                 }
                 logger.info(`${this.platformName}已登录，继续发布流程`);
@@ -84,13 +104,16 @@ class DouyinPublisher {
             // 10. 等待发布完成
             await this.waitForPublishComplete(page);
 
-            return { success: true, message: `${this.platformName}发布成功` };
+            return {
+                success: true,
+                message: `${this.platformName}发布成功`
+            };
 
         } catch (error) {
             logger.error(`${this.platformName}发布过程出错:`, error);
             return {
                 success: false,
-                message: error?.message || '未知错误',
+                message: error ? error.message : '未知错误',
                 data: error
             };
         } finally {
@@ -110,32 +133,32 @@ class DouyinPublisher {
      */
     async handleImageUpload(page, images) {
         logger.info(`开始上传 ${images.length} 张图片...`);
-        
+
         for (let i = 0; i < images.length; i++) {
             const imageUrl = images[i];
             try {
                 logger.info(`正在上传第 ${i + 1}/${images.length} 张图片: ${imageUrl}`);
-                
+
                 // 下载图片到临时目录
                 const tempPath = await this.imageManager.downloadImage(imageUrl, `${this.platformName}_${Date.now()}_${i}`);
-                
+
                 // 上传图片
                 await this.uploadSingleImage(page, tempPath, i);
-                
+
                 // 删除临时文件
                 this.imageManager.deleteTempFile(tempPath);
-                
+
                 // 图片间间隔
                 if (i < images.length - 1) {
                     await this.pageOperator.delay(1000);
                 }
-                
+
             } catch (error) {
                 logger.error(`处理图片 ${imageUrl} 时出错:`, error);
                 throw error;
             }
         }
-        
+
         logger.info(`所有图片上传完成，共 ${images.length} 张`);
     }
 
@@ -147,10 +170,10 @@ class DouyinPublisher {
         if (!fileInput) {
             throw new Error('未找到文件选择器');
         }
-        
+
         await fileInput.uploadFile(tempPath);
         logger.info(`已上传图片 ${imageIndex + 1}`);
-        
+
         // 等待图片上传完成
         await this.waitForImageUploadComplete(page, imageIndex);
     }
@@ -192,9 +215,11 @@ class DouyinPublisher {
     async clickPublishButton(page) {
         try {
             const buttonSelector = this.config.selectors.submitButton;
-            await page.waitForSelector(buttonSelector, { timeout: 5000 });
+            await page.waitForSelector(buttonSelector, {
+                timeout: 5000
+            });
             const publishButton = await page.$(buttonSelector);
-            
+
             if (!publishButton) {
                 throw new Error('未找到发布按钮：' + buttonSelector);
             }

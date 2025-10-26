@@ -20,6 +20,9 @@ import {
 import {
     logger
 } from '../utils/logger.js';
+import {
+    weiboAuth
+} from '../utils/weiboAuth.js';
 
 /**
  * 微博发布器类
@@ -53,6 +56,9 @@ class WeiboPublisher {
                 await this.pageOperator.setupAntiDetection(page);
                 logger.info('反检测脚本已应用');
             }
+
+            // 2.5. 应用微博认证
+            await weiboAuth.applyAuth(page);
 
             // 3. 导航到发布页面
             await page.goto(this.config.uploadUrl, {
