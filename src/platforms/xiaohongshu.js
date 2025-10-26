@@ -2,13 +2,27 @@
  * 小红书发布功能 - 独立实现
  */
 
-import { getOrCreateBrowser } from '../services/BrowserService.js';
-import { ImageManager } from '../services/ImageManager.js';
-import { PageOperator } from '../services/PageOperator.js';
-import { XiaohongshuLoginChecker } from '../services/LoginChecker.js';
-import { PLATFORM_CONFIGS } from '../config/platforms.js';
-import { logger } from '../utils/logger.js';
-import { xiaohongshuAuth } from '../utils/xiaohongshuAuth.js';
+import {
+    getOrCreateBrowser
+} from '../services/BrowserService.js';
+import {
+    ImageManager
+} from '../services/ImageManager.js';
+import {
+    PageOperator
+} from '../services/PageOperator.js';
+import {
+    XiaohongshuLoginChecker
+} from '../services/LoginChecker.js';
+import {
+    PLATFORM_CONFIGS
+} from '../config/platforms.js';
+import {
+    logger
+} from '../utils/logger.js';
+import {
+    xiaohongshuAuth
+} from '../utils/xiaohongshuAuth.js';
 
 /**
  * 小红书发布器类
@@ -29,7 +43,7 @@ class XiaohongshuPublisher {
         let page = null;
         try {
             logger.info(`开始执行${this.platformName}发布操作，参数:`, publishInfo);
-            
+
             // 1. 获取浏览器和页面
             const browser = await getOrCreateBrowser();
             page = await browser.newPage();
@@ -47,7 +61,9 @@ class XiaohongshuPublisher {
                 return {
                     success: false,
                     message: '小红书认证设置失败',
-                    data: { error: '认证失败' }
+                    data: {
+                        error: '认证失败'
+                    }
                 };
             }
             logger.info('小红书认证已应用');
@@ -66,7 +82,9 @@ class XiaohongshuPublisher {
                     return {
                         success: false,
                         message: `${this.platformName}未登录: ${loginResult.details?.reason || '未知原因'}`,
-                        data: { loginStatus: loginResult }
+                        data: {
+                            loginStatus: loginResult
+                        }
                     };
                 }
                 logger.info(`${this.platformName}已登录，继续发布流程`);
@@ -96,13 +114,16 @@ class XiaohongshuPublisher {
             // 10. 等待发布完成
             await this.waitForPublishComplete(page);
 
-            return { success: true, message: `${this.platformName}发布成功` };
+            return {
+                success: true,
+                message: `${this.platformName}发布成功`
+            };
 
         } catch (error) {
             logger.error(`${this.platformName}发布过程出错:`, error);
             return {
                 success: false,
-                message: error?.message || '未知错误',
+                message: error ? error.message : '未知错误',
                 data: error
             };
         } finally {
@@ -122,39 +143,39 @@ class XiaohongshuPublisher {
      */
     async handleImageUpload(page, images) {
         logger.info(`开始上传 ${images.length} 张图片...`);
-        
+
         // 等待页面完全加载
         await this.pageOperator.delay(3000);
-        
+
         // 检查页面是否已进入图片上传状态
         const currentUrl = page.url();
         logger.info(`当前页面URL: ${currentUrl}`);
-        
+
         for (let i = 0; i < images.length; i++) {
             const imageUrl = images[i];
             let retryCount = 0;
             const maxRetries = 3;
-            
+
             while (retryCount < maxRetries) {
                 try {
                     logger.info(`正在上传第 ${i + 1}/${images.length} 张图片: ${imageUrl} (尝试 ${retryCount + 1}/${maxRetries})`);
-                    
+
                     // 下载图片到临时目录
                     const tempPath = await this.imageManager.downloadImage(imageUrl, `${this.platformName}_${Date.now()}_${i}`);
-                    
+
                     // 上传图片
                     await this.uploadSingleImage(page, tempPath, i);
-                    
+
                     // 删除临时文件
                     this.imageManager.deleteTempFile(tempPath);
-                    
+
                     logger.info(`第 ${i + 1} 张图片上传成功`);
                     break; // 成功则跳出重试循环
-                    
+
                 } catch (error) {
                     retryCount++;
                     logger.error(`处理图片 ${imageUrl} 时出错 (尝试 ${retryCount}/${maxRetries}):`, error.message);
-                    
+
                     if (retryCount >= maxRetries) {
                         logger.error(`图片 ${imageUrl} 上传失败，已达到最大重试次数`);
                         throw error;
@@ -164,13 +185,13 @@ class XiaohongshuPublisher {
                     }
                 }
             }
-            
+
             // 图片间间隔
             if (i < images.length - 1) {
                 await this.pageOperator.delay(2000);
             }
         }
-        
+
         logger.info(`所有图片上传完成，共 ${images.length} 张`);
     }
 
@@ -181,7 +202,7 @@ class XiaohongshuPublisher {
         try {
             // 等待页面加载完成
             await this.pageOperator.delay(2000);
-            
+
             // 查找文件输入框，尝试多种选择器
             const fileInputSelectors = [
                 'input[type="file"]',
@@ -192,7 +213,7 @@ class XiaohongshuPublisher {
                 '.upload-area input',
                 '.drag-upload input'
             ];
-            
+
             let fileInput = null;
             for (const selector of fileInputSelectors) {
                 try {
@@ -205,7 +226,7 @@ class XiaohongshuPublisher {
                     logger.debug(`选择器 ${selector} 未找到文件输入框`);
                 }
             }
-            
+
             if (!fileInput) {
                 // 如果找不到文件输入框，尝试点击上传区域
                 const uploadAreaSelectors = [
@@ -216,7 +237,7 @@ class XiaohongshuPublisher {
                     '[data-testid="upload-area"]',
                     '.upload-zone'
                 ];
-                
+
                 for (const selector of uploadAreaSelectors) {
                     try {
                         const uploadArea = await page.$(selector);
@@ -224,7 +245,7 @@ class XiaohongshuPublisher {
                             logger.info(`点击上传区域: ${selector}`);
                             await uploadArea.click();
                             await this.pageOperator.delay(1000);
-                            
+
                             // 再次尝试查找文件输入框
                             fileInput = await page.$('input[type="file"]');
                             if (fileInput) break;
@@ -234,18 +255,18 @@ class XiaohongshuPublisher {
                     }
                 }
             }
-            
+
             if (!fileInput) {
                 throw new Error('未找到文件选择器，请检查页面是否已加载完成');
             }
-            
+
             // 上传文件
             await fileInput.uploadFile(tempPath);
             logger.info(`已上传图片 ${imageIndex + 1}`);
-            
+
             // 等待图片上传完成
             await this.waitForImageUploadComplete(page, imageIndex);
-            
+
         } catch (error) {
             logger.error(`上传图片 ${imageIndex + 1} 失败:`, error);
             throw error;
@@ -266,11 +287,11 @@ class XiaohongshuPublisher {
                 '[data-testid="upload-success"]',
                 '.upload-complete'
             ];
-            
+
             let uploadComplete = false;
             const maxWaitTime = 10000; // 10秒超时
             const startTime = Date.now();
-            
+
             while (!uploadComplete && (Date.now() - startTime) < maxWaitTime) {
                 for (const selector of uploadCompleteSelectors) {
                     try {
@@ -284,7 +305,7 @@ class XiaohongshuPublisher {
                         // 继续检查其他选择器
                     }
                 }
-                
+
                 if (!uploadComplete) {
                     // 检查是否还有loading状态
                     const loadingSelectors = [
@@ -293,7 +314,7 @@ class XiaohongshuPublisher {
                         '.spinner',
                         '[data-testid="loading"]'
                     ];
-                    
+
                     let hasLoading = false;
                     for (const selector of loadingSelectors) {
                         try {
@@ -306,7 +327,7 @@ class XiaohongshuPublisher {
                             // 继续检查
                         }
                     }
-                    
+
                     if (!hasLoading) {
                         // 没有loading状态，可能已经完成
                         uploadComplete = true;
@@ -316,14 +337,14 @@ class XiaohongshuPublisher {
                     }
                 }
             }
-            
+
             if (!uploadComplete) {
                 logger.warn(`图片 ${imageIndex + 1} 上传超时，但继续执行`);
             }
-            
+
             // 额外等待确保页面稳定
             await this.pageOperator.delay(1000);
-            
+
         } catch (error) {
             logger.warn(`等待图片上传完成时出错: ${error.message}`);
             // 即使出错也继续执行
@@ -358,15 +379,64 @@ class XiaohongshuPublisher {
      * 点击发布按钮
      */
     async clickPublishButton(page) {
-        const submitButton = await page.waitForSelector(this.config.selectors.submitButton);
-        if (!submitButton) {
-            throw new Error('未找到发布按钮');
+        // 等待页面稳定
+        await this.pageOperator.delay(2000);
+
+        // 先点击页面空白处，让输入框失去焦点
+        logger.info('点击页面空白处，让输入框失去焦点');
+        await page.evaluate(() => {
+            document.body.click();
+        });
+
+        await this.pageOperator.delay(500);
+
+        // 尝试多种方式点击发布按钮
+        try {
+            // 方式1: 使用JavaScript直接点击
+            logger.info('尝试方式1: 使用JavaScript点击');
+            const clickResult = await page.evaluate(() => {
+                // 查找所有可能的发布按钮
+                const buttons = document.querySelectorAll('button');
+                for (let button of buttons) {
+                    const text = button.textContent || button.innerText;
+                    if (text && (text.includes('发布') || text.includes('Post'))) {
+                        console.log(`找到发布按钮: ${text}`);
+                        button.click();
+                        return true;
+                    }
+                }
+
+                // 尝试使用常见的发布按钮选择器
+                const selectors = [
+                    '.submit button',
+                    '.publish-btn',
+                    '[data-testid="publish-btn"]',
+                    'button[type="button"]'
+                ];
+
+                for (const selector of selectors) {
+                    const button = document.querySelector(selector);
+                    if (button) {
+                        button.click();
+                        return true;
+                    }
+                }
+
+                return false;
+            });
+
+            if (clickResult) {
+                logger.info('成功点击发布按钮');
+            } else {
+                logger.error('未找到发布按钮');
+                throw new Error('未找到发布按钮');
+            }
+
+        } catch (error) {
+            logger.error('点击发布按钮失败:', error.message);
+            throw error;
         }
 
-        // 模拟真实用户点击行为
-        await submitButton.hover();
-        await this.pageOperator.delay(500);
-        await submitButton.click();
         logger.info('已点击发布按钮');
     }
 
