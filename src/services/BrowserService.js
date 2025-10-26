@@ -429,6 +429,7 @@ export async function setupAntiDetection(page) {
             get: () => false,
         });
 
+
         // 伪装 Automation
         Object.defineProperty(window, 'navigator', {
             writable: true,
