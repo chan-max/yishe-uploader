@@ -13,7 +13,7 @@ export const PLATFORM_CONFIGS = {
         selectors: {
             contentInput: 'textarea[class^="Form_input_"]',
             fileInput: 'input[type="file"]',
-            submitButton: '[class^="Tool_check_"] button'
+            submitButton: '[class*="Tool_check_"] button, [class*="send_"] button, button[role="button"]:has-text("发布"), button:has-text("发送"), .tool-bar button[role="button"]'
         },
         loginSelectors: {
             userElements: ['[class*="Ctrls_avatarItem_"]'],
@@ -68,10 +68,10 @@ export const PLATFORM_CONFIGS = {
         antiDetection: true,
         checkLogin: true,
         selectors: {
-            titleInput: 'input[placeholder*="标题"], input[placeholder*="标题"], .title-input, [data-testid="title-input"]',
+            titleInput: 'input[placeholder*="标题"], input[placeholder*="笔记标题"], .title-input, [data-testid="title-input"], input[type="text"][placeholder*="标题"], input.ant-input',
             contentInput: '.tiptap.ProseMirror, .ql-editor, .content-editor, [data-testid="content-editor"]',
             fileInput: 'input[type="file"]',
-            submitButton: '.submit button, .publish-btn, [data-testid="publish-btn"]'
+            submitButton: '.submit button, .publish-btn, [data-testid="publish-btn"], button[type="button"]:has-text("发布")'
         },
         loginSelectors: {
             userElements: [

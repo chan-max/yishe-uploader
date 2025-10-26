@@ -2,12 +2,24 @@
  * 微博发布功能 - 独立实现
  */
 
-import { getOrCreateBrowser } from '../services/BrowserService.js';
-import { ImageManager } from '../services/ImageManager.js';
-import { PageOperator } from '../services/PageOperator.js';
-import { GenericLoginChecker } from '../services/LoginChecker.js';
-import { PLATFORM_CONFIGS } from '../config/platforms.js';
-import { logger } from '../utils/logger.js';
+import {
+    getOrCreateBrowser
+} from '../services/BrowserService.js';
+import {
+    ImageManager
+} from '../services/ImageManager.js';
+import {
+    PageOperator
+} from '../services/PageOperator.js';
+import {
+    GenericLoginChecker
+} from '../services/LoginChecker.js';
+import {
+    PLATFORM_CONFIGS
+} from '../config/platforms.js';
+import {
+    logger
+} from '../utils/logger.js';
 
 /**
  * 微博发布器类
@@ -30,7 +42,7 @@ class WeiboPublisher {
         let page = null;
         try {
             logger.info(`开始执行${this.platformName}发布操作，参数:`, publishInfo);
-            
+
             // 1. 获取浏览器和页面
             const browser = await getOrCreateBrowser();
             page = await browser.newPage();
@@ -56,7 +68,9 @@ class WeiboPublisher {
                     return {
                         success: false,
                         message: `${this.platformName}未登录: ${loginResult.details?.reason || '未知原因'}`,
-                        data: { loginStatus: loginResult }
+                        data: {
+                            loginStatus: loginResult
+                        }
                     };
                 }
                 logger.info(`${this.platformName}已登录，继续发布流程`);
@@ -86,13 +100,16 @@ class WeiboPublisher {
             // 10. 等待发布完成
             await this.waitForPublishComplete(page);
 
-            return { success: true, message: `${this.platformName}发布成功` };
+            return {
+                success: true,
+                message: `${this.platformName}发布成功`
+            };
 
         } catch (error) {
             logger.error(`${this.platformName}发布过程出错:`, error);
             return {
                 success: false,
-                message: error?.message || '未知错误',
+                message: error ? error.message : '未知错误',
                 data: error
             };
         } finally {
@@ -112,32 +129,32 @@ class WeiboPublisher {
      */
     async handleImageUpload(page, images) {
         logger.info(`开始上传 ${images.length} 张图片...`);
-        
+
         for (let i = 0; i < images.length; i++) {
             const imageUrl = images[i];
             try {
                 logger.info(`正在上传第 ${i + 1}/${images.length} 张图片: ${imageUrl}`);
-                
+
                 // 下载图片到临时目录
                 const tempPath = await this.imageManager.downloadImage(imageUrl, `${this.platformName}_${Date.now()}_${i}`);
-                
+
                 // 上传图片
                 await this.uploadSingleImage(page, tempPath, i);
-                
+
                 // 删除临时文件
                 this.imageManager.deleteTempFile(tempPath);
-                
+
                 // 图片间间隔
                 if (i < images.length - 1) {
                     await this.pageOperator.delay(1000);
                 }
-                
+
             } catch (error) {
                 logger.error(`处理图片 ${imageUrl} 时出错:`, error);
                 throw error;
             }
         }
-        
+
         logger.info(`所有图片上传完成，共 ${images.length} 张`);
     }
 
@@ -149,10 +166,10 @@ class WeiboPublisher {
         if (!fileInput) {
             throw new Error('未找到文件选择器');
         }
-        
+
         await fileInput.uploadFile(tempPath);
         logger.info(`已上传图片 ${imageIndex + 1}`);
-        
+
         // 等待图片上传完成
         await this.waitForImageUploadComplete(page, imageIndex);
     }
@@ -164,9 +181,9 @@ class WeiboPublisher {
         const maxWaitTime = 30000; // 最大等待30秒
         const checkInterval = 1000; // 每秒检查一次
         let elapsedTime = 0;
-        
+
         logger.info(`等待第 ${imageIndex + 1} 张图片上传完成...`);
-        
+
         while (elapsedTime < maxWaitTime) {
             try {
                 // 检查是否有 Image_loading_ 开头的class元素（表示正在上传）
@@ -174,22 +191,22 @@ class WeiboPublisher {
                     const loadingElements = document.querySelectorAll('[class*="Image_loading_"]');
                     return loadingElements.length > 0;
                 });
-                
+
                 if (!hasLoadingElement) {
                     logger.info(`第 ${imageIndex + 1} 张图片上传完成（无loading元素）`);
                     return;
                 }
-                
+
                 logger.info(`第 ${imageIndex + 1} 张图片仍在上传中...`);
-                
+
             } catch (error) {
                 logger.warn(`检查图片 ${imageIndex + 1} 上传状态时出错:`, error);
             }
-            
+
             await this.pageOperator.delay(checkInterval);
             elapsedTime += checkInterval;
         }
-        
+
         logger.warn(`第 ${imageIndex + 1} 张图片上传等待超时`);
     }
 
@@ -217,19 +234,48 @@ class WeiboPublisher {
      * 点击发布按钮 - 微博特殊处理
      */
     async clickPublishButton(page) {
-        const sendButtonSelector = this.config.selectors.submitButton;
-        await page.waitForSelector(sendButtonSelector, { timeout: 10000 });
-        
-        // 检查发布按钮是否可用
-        const isButtonEnabled = await this.pageOperator.isButtonEnabled(page, sendButtonSelector);
-        
-        if (!isButtonEnabled) {
-            logger.info('发布按钮不可用，等待图片上传完成...');
-            // 等待按钮变为可用状态
-            await this.pageOperator.waitForButtonEnabled(page, sendButtonSelector);
+        // 先等待页面稳定
+        await this.pageOperator.delay(3000);
+
+        // 先点击页面空白处，让输入框失去焦点
+        logger.info('点击页面空白处，让输入框失去焦点');
+        await page.evaluate(() => {
+            // 点击页面空白区域
+            const blankArea = document.body;
+            blankArea.click();
+        });
+
+        // 等待一下让页面响应
+        await this.pageOperator.delay(500);
+
+        // 使用正确的选择器找到发送按钮
+        try {
+            logger.info('查找发送按钮...');
+
+            const clickResult = await page.evaluate(() => {
+                // 使用正确的选择器查找按钮
+                const button = document.querySelector('[class^="Tool_check_"] button');
+                if (button) {
+                    console.log('找到发送按钮，准备点击');
+                    button.click();
+                    return true;
+                }
+                console.log('未找到发送按钮');
+                return false;
+            });
+
+            if (clickResult) {
+                logger.info('成功点击发送按钮');
+            } else {
+                logger.error('未找到发送按钮');
+                throw new Error('未找到发送按钮');
+            }
+
+        } catch (error) {
+            logger.error('点击发送按钮失败:', error.message);
+            throw error;
         }
-        
-        await page.click(sendButtonSelector);
+
         logger.info('已点击发送按钮');
     }
 

@@ -21,6 +21,8 @@ puppeteer.use(StealthPlugin());
 
 // 全局浏览器实例
 let browserInstance = null;
+// 当前用户数据目录
+let currentUserDataDir = null;
 // 浏览器状态管理
 let browserStatus = {
     isInitialized: false,
@@ -70,29 +72,9 @@ export async function detectExistingBrowser() {
             browserStatus.isConnected = false;
         }
 
-        // 尝试连接到可能已经运行的浏览器实例
-        try {
-            const userDataDir = process.platform === 'win32' ?
-                'C:\\temp\\puppeteer-user-data' :
-                '/tmp/puppeteer-user-data';
-
-            // 尝试连接到现有浏览器
-            const browser = await puppeteer.connect({
-                browserURL: 'http://localhost:9222', // 默认调试端口
-                defaultViewport: null
-            });
-
-            logger.info('成功连接到现有浏览器实例');
-            browserInstance = browser;
-            browserStatus.isInitialized = true;
-            browserStatus.isConnected = true;
-            browserStatus.lastActivity = Date.now();
-
-            return browser;
-        } catch (connectError) {
-            logger.debug('无法连接到现有浏览器，将创建新实例');
-            return null;
-        }
+        // 不再尝试连接到 localhost:9222
+        logger.debug('每次都创建新的浏览器实例');
+        return null;
 
     } catch (error) {
         logger.error('检测现有浏览器失败:', error);
@@ -114,72 +96,164 @@ export async function getOrCreateBrowser() {
     logger.info('启动新的浏览器实例...');
 
     try {
-        // 设置用户数据目录，用于保存登录信息
-        const userDataDir = process.platform === 'win32' ?
+        // 使用固定的用户数据目录，保存登录信息
+        const baseUserDataDir = process.platform === 'win32' ?
             'C:\\temp\\puppeteer-user-data' :
             '/tmp/puppeteer-user-data';
 
-        // 首先尝试连接到可能已经运行的浏览器
+        // 先尝试启动固定目录，如果失败则使用临时目录
+        let userDataDir = baseUserDataDir;
+        let browserLaunched = false;
+
+        // 第一次尝试：使用固定目录
         try {
-            const existingBrowser = await puppeteer.connect({
-                browserURL: 'http://localhost:9222',
-                defaultViewport: null
+            logger.info('尝试使用固定用户数据目录:', baseUserDataDir);
+            currentUserDataDir = userDataDir;
+
+            browserInstance = await puppeteer.launch({
+                headless: false, // 设置为false以显示浏览器窗口
+                defaultViewport: null, // 使用默认视口大小
+                userDataDir: userDataDir, // 保存用户数据，包括登录信息
+                args: [
+                    '--start-maximized',
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox',
+                    '--disable-dev-shm-usage',
+                    '--disable-blink-features=AutomationControlled', // 隐藏自动化标识
+                    '--disable-web-security',
+                    '--disable-features=VizDisplayCompositor',
+                    '--disable-extensions-except',
+                    '--disable-plugins-discovery',
+                    '--disable-default-apps',
+                    '--no-first-run',
+                    '--no-default-browser-check',
+                    '--disable-background-timer-throttling',
+                    '--disable-backgrounding-occluded-windows',
+                    '--disable-renderer-backgrounding',
+                    '--disable-features=TranslateUI',
+                    '--disable-ipc-flooding-protection',
+                    '--disable-hang-monitor',
+                    '--disable-prompt-on-repost',
+                    '--disable-domain-reliability',
+                    '--disable-component-extensions-with-background-pages',
+                    '--disable-background-networking',
+                    '--disable-sync',
+                    '--metrics-recording-only',
+                    '--no-report-upload',
+                    '--disable-infobars', // 禁用信息栏
+                    '--disable-breakpad', // 禁用崩溃报告
+                    '--noerrdialogs', // 不显示错误对话框
+                    '--disable-gpu-sandbox', // 禁用GPU沙箱
+                    '--disable-software-rasterizer', // 禁用软件光栅化
+                    '--disable-profile-resetter' // 禁用配置文件重置
+                ]
             });
 
-            logger.info('成功连接到现有浏览器实例');
-            browserInstance = existingBrowser;
+            // 更新浏览器状态
             browserStatus.isInitialized = true;
             browserStatus.isConnected = true;
             browserStatus.lastActivity = Date.now();
+            browserStatus.pageCount = 0;
 
-            return existingBrowser;
-        } catch (connectError) {
-            logger.debug('无法连接到现有浏览器，将创建新实例');
+            logger.info('新浏览器实例启动成功，用户数据目录:', userDataDir);
+            logger.info('浏览器状态已更新:', browserStatus);
+            browserLaunched = true;
+
+        } catch (firstError) {
+            // 如果固定目录被占用，先尝试清理锁文件，然后重试
+            logger.warn('固定目录被占用，尝试清理锁文件后重试:', firstError.message);
+
+            // macOS/Linux 上可能需要清理多个锁文件
+            const lockFiles = process.platform === 'win32' ? [`${baseUserDataDir}\\SingletonLock`] : [
+                `${baseUserDataDir}/SingletonLock`,
+                `${baseUserDataDir}/SingletonCookie`,
+                `${baseUserDataDir}/SingletonSocket`
+            ];
+
+            let hasLockFiles = false;
+            for (const lockFile of lockFiles) {
+                if (existsSync(lockFile)) {
+                    hasLockFiles = true;
+                    try {
+                        rmSync(lockFile, {
+                            force: true
+                        });
+                        logger.info(`已删除锁文件: ${lockFile}`);
+                    } catch (err) {
+                        logger.warn(`删除锁文件失败: ${lockFile}`, err.message);
+                    }
+                }
+            }
+
+            if (hasLockFiles) {
+                logger.info('所有锁文件已清理，重试启动固定目录...');
+
+                try {
+                    // 等待一小段时间让浏览器进程完全关闭
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+
+                    // 再次尝试启动固定目录
+                    browserInstance = await puppeteer.launch({
+                        headless: false,
+                        defaultViewport: null,
+                        userDataDir: baseUserDataDir,
+                        args: [
+                            '--start-maximized',
+                            '--no-sandbox',
+                            '--disable-setuid-sandbox',
+                            '--disable-dev-shm-usage',
+                            '--disable-blink-features=AutomationControlled',
+                            '--disable-web-security',
+                            '--disable-features=VizDisplayCompositor',
+                            '--disable-extensions-except',
+                            '--disable-plugins-discovery',
+                            '--disable-default-apps',
+                            '--no-first-run',
+                            '--no-default-browser-check',
+                            '--disable-background-timer-throttling',
+                            '--disable-backgrounding-occluded-windows',
+                            '--disable-renderer-backgrounding',
+                            '--disable-features=TranslateUI',
+                            '--disable-ipc-flooding-protection',
+                            '--disable-hang-monitor',
+                            '--disable-prompt-on-repost',
+                            '--disable-domain-reliability',
+                            '--disable-component-extensions-with-background-pages',
+                            '--disable-background-networking',
+                            '--disable-sync',
+                            '--metrics-recording-only',
+                            '--no-report-upload',
+                            '--disable-infobars',
+                            '--disable-breakpad',
+                            '--noerrdialogs',
+                            '--disable-gpu-sandbox',
+                            '--disable-software-rasterizer',
+                            '--disable-profile-resetter'
+                        ]
+                    });
+
+                    browserStatus.isInitialized = true;
+                    browserStatus.isConnected = true;
+                    browserStatus.lastActivity = Date.now();
+                    browserStatus.pageCount = 0;
+
+                    logger.info('重试成功，使用固定目录:', baseUserDataDir);
+                    browserLaunched = true;
+                } catch (retryError) {
+                    logger.error('重试失败，浏览器可能仍在运行:', retryError.message);
+                    logger.info('请手动关闭现有浏览器后重试');
+                    throw new Error(`固定目录被占用，请先关闭现有浏览器: ${retryError.message}`);
+                }
+            } else {
+                // 锁文件不存在，但启动失败，抛出原错误
+                logger.error('锁文件不存在但启动失败:', firstError.message);
+                throw firstError;
+            }
         }
 
-        browserInstance = await puppeteer.launch({
-            headless: false, // 设置为false以显示浏览器窗口
-            defaultViewport: null, // 使用默认视口大小
-            userDataDir: userDataDir, // 保存用户数据，包括登录信息
-            args: [
-                '--start-maximized',
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-blink-features=AutomationControlled', // 隐藏自动化标识
-                '--disable-web-security',
-                '--disable-features=VizDisplayCompositor',
-                '--disable-extensions-except',
-                '--disable-plugins-discovery',
-                '--disable-default-apps',
-                '--no-first-run',
-                '--no-default-browser-check',
-                '--disable-background-timer-throttling',
-                '--disable-backgrounding-occluded-windows',
-                '--disable-renderer-backgrounding',
-                '--disable-features=TranslateUI',
-                '--disable-ipc-flooding-protection',
-                '--disable-hang-monitor',
-                '--disable-prompt-on-repost',
-                '--disable-domain-reliability',
-                '--disable-component-extensions-with-background-pages',
-                '--disable-background-networking',
-                '--disable-sync',
-                '--metrics-recording-only',
-                '--no-report-upload',
-                '--remote-debugging-port=9222' // 添加调试端口，便于连接
-            ]
-        });
-
-        // 更新浏览器状态
-        browserStatus.isInitialized = true;
-        browserStatus.isConnected = true;
-        browserStatus.lastActivity = Date.now();
-        browserStatus.pageCount = 0;
-
-        logger.info('新浏览器实例启动成功，用户数据目录:', userDataDir);
-        logger.info('浏览器状态已更新:', browserStatus);
-        return browserInstance;
+        if (browserLaunched) {
+            return browserInstance;
+        }
 
     } catch (error) {
         logger.error('浏览器启动失败:', error);
@@ -489,6 +563,28 @@ export async function closeBrowser() {
                 browserStatus.isInitialized = false;
                 browserStatus.isConnected = false;
                 browserStatus.pageCount = 0;
+
+                // 只清理临时用户数据目录（包含进程ID和时间戳的目录）
+                // 保留固定的用户数据目录以保存登录信息
+                if (currentUserDataDir && existsSync(currentUserDataDir)) {
+                    // 检查是否为临时目录（包含时间戳格式）
+                    const isTemporaryDir = /puppeteer-user-data-\d+-\d+/.test(currentUserDataDir);
+
+                    if (isTemporaryDir) {
+                        try {
+                            rmSync(currentUserDataDir, {
+                                recursive: true,
+                                force: true
+                            });
+                            logger.info('临时用户数据目录已清理:', currentUserDataDir);
+                        } catch (error) {
+                            logger.warn('清理临时用户数据目录失败:', error.message);
+                        }
+                    } else {
+                        logger.info('保留用户数据目录以保存登录信息:', currentUserDataDir);
+                    }
+                }
+                currentUserDataDir = null;
             }
         }
     } catch (error) {
@@ -504,10 +600,10 @@ export async function clearUserData() {
         // 先关闭浏览器
         await closeBrowser();
 
-        // 设置用户数据目录路径
-        const userDataDir = process.platform === 'win32' ?
+        // 使用当前保存的用户数据目录
+        const userDataDir = currentUserDataDir || (process.platform === 'win32' ?
             'C:\\temp\\puppeteer-user-data' :
-            '/tmp/puppeteer-user-data';
+            '/tmp/puppeteer-user-data');
 
         // 删除用户数据目录
         if (existsSync(userDataDir)) {
@@ -517,6 +613,9 @@ export async function clearUserData() {
             });
             logger.info('用户数据目录已删除:', userDataDir);
         }
+
+        // 重置当前用户数据目录
+        currentUserDataDir = null;
 
         return {
             success: true,

@@ -14,6 +14,7 @@
         "publish:douyin": "node scripts/publish-douyin.js",
         "publish:xiaohongshu": "node scripts/publish-xiaohongshu.js",
         "publish:kuaishou": "node scripts/publish-kuaishou.js",
+        "publish:all": "node scripts/publish-all-platforms.js",
         "browser:start": "node scripts/start-browser.js",
         "browser:start:keep": "node scripts/start-browser.js --keep-open",
         "browser:status": "node scripts/browser-status.js",
