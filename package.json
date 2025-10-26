@@ -23,6 +23,7 @@
         "browser:close": "node scripts/browser-status.js --close",
         "test:real-auth": "node scripts/use-real-auth.js",
         "sync:xiaohongshu": "node scripts/sync-xiaohongshu-cookies.js",
+        "web": "node scripts/web-server.js",
         "lint": "eslint src --ext .js",
         "format": "prettier --write src/**/*.js"
     },
@@ -48,7 +49,10 @@
         "ora": "^8.0.1",
         "inquirer": "^9.2.15",
         "fs-extra": "^11.2.0",
-        "node-fetch": "^3.3.2"
+        "node-fetch": "^3.3.2",
+        "express": "^4.18.2",
+        "cors": "^2.8.5",
+        "open": "^10.0.2"
     },
     "devDependencies": {
         "eslint": "^9.24.0",

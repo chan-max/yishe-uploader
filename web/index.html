@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Yishe Uploader</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <div class="container">
+        <header class="header">
+            <h1>Yishe Uploader</h1>
+            <p>多媒体发布控制台</p>
+        </header>
+
+        <div class="main-content">
+            <!-- 登录状态检查 -->
+            <section class="card">
+                <h2>登录状态</h2>
+                <div class="button-group">
+                    <button id="check-login" class="btn">检查登录</button>
+                    <button id="sync-xiaohongshu" class="btn">同步小红书</button>
+                </div>
+                <div id="login-status" class="result-box"></div>
+            </section>
+
+            <!-- 产品查询 -->
+            <section class="card">
+                <h2>产品查询</h2>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">
+                    <div class="form-group">
+                        <label for="query-env">环境</label>
+                        <select id="query-env" class="form-control">
+                            <option value="prod">生产</option>
+                            <option value="dev">开发</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="product-id">产品ID</label>
+                        <input type="text" id="product-id" class="form-control" placeholder="产品ID">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="product-code">产品代码</label>
+                    <input type="text" id="product-code" class="form-control" placeholder="产品代码">
+                </div>
+                <button id="query-product" class="btn">查询产品</button>
+                <div id="query-result" class="result-box"></div>
+            </section>
+
+            <!-- 单产品发布 -->
+            <section class="card">
+                <h2>单产品发布</h2>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">
+                    <div class="form-group">
+                        <label for="publish-env">环境</label>
+                        <select id="publish-env" class="form-control">
+                            <option value="prod">生产</option>
+                            <option value="dev">开发</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="publish-product-id">产品ID</label>
+                        <input type="text" id="publish-product-id" class="form-control" placeholder="产品ID">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="publish-product-code">产品代码</label>
+                    <input type="text" id="publish-product-code" class="form-control" placeholder="产品代码">
+                </div>
+                <div class="form-group">
+                    <label for="publish-platforms">发布平台</label>
+                    <input type="text" id="publish-platforms" class="form-control" placeholder="xiaohongshu,weibo,douyin,kuaishou" value="xiaohongshu,weibo,douyin,kuaishou">
+                </div>
+                <button id="publish-product" class="btn">发布产品</button>
+                <div id="publish-result" class="result-box"></div>
+            </section>
+
+            <!-- 单平台发布 -->
+            <section class="card">
+                <h2>单平台发布</h2>
+                <div class="form-group">
+                    <label for="platform-env">环境</label>
+                    <select id="platform-env" class="form-control">
+                        <option value="prod">生产</option>
+                        <option value="dev">开发</option>
+                    </select>
+                </div>
+                <div class="platform-buttons">
+                    <button class="btn" data-platform="xiaohongshu">小红书</button>
+                    <button class="btn" data-platform="weibo">微博</button>
+                    <button class="btn" data-platform="douyin">抖音</button>
+                    <button class="btn" data-platform="kuaishou">快手</button>
+                </div>
+                <div id="platform-result" class="result-box"></div>
+            </section>
+
+            <!-- 批量发布 -->
+            <section class="card">
+                <h2>批量发布</h2>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">
+                    <div class="form-group">
+                        <label for="batch-env">环境</label>
+                        <select id="batch-env" class="form-control">
+                            <option value="prod">生产</option>
+                            <option value="dev">开发</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="data-index">数据索引</label>
+                        <input type="number" id="data-index" class="form-control" value="0" min="0">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="batch-platforms">发布平台</label>
+                    <input type="text" id="batch-platforms" class="form-control" placeholder="xiaohongshu,weibo,douyin,kuaishou" value="xiaohongshu,weibo,douyin,kuaishou">
+                </div>
+                <button id="publish-all" class="btn">批量发布</button>
+                <div id="batch-result" class="result-box"></div>
+            </section>
+
+            <!-- 浏览器管理 -->
+            <section class="card">
+                <h2>浏览器管理</h2>
+                <div class="button-group">
+                    <button id="browser-start" class="btn">启动</button>
+                    <button id="browser-start-keep" class="btn">启动(保持)</button>
+                    <button id="browser-status" class="btn">状态</button>
+                    <button id="browser-close" class="btn">关闭</button>
+                </div>
+                <div id="browser-result" class="result-box"></div>
+            </section>
+
+            <!-- 其他功能 -->
+            <section class="card">
+                <h2>其他功能</h2>
+                <div class="button-group">
+                    <button id="publish-from-file" class="btn">从文件发布</button>
+                </div>
+                <div id="other-result" class="result-box"></div>
+            </section>
+        </div>
+
+        <footer class="footer">
+            <p>© 2025 Yishe Uploader - 多媒体自动发布脚本</p>
+        </footer>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+
+</html>
