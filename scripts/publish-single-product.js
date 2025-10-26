@@ -30,9 +30,20 @@ import {
 
 // 解析命令行参数
 const env = process.argv[2] === 'dev' ? 'dev' : 'prod';
-const productId = process.argv[3];
-const productCode = process.argv[4];
-const platforms = process.argv[5] ? process.argv[5].split(',') : ['xiaohongshu', 'weibo', 'douyin', 'kuaishou']; // 默认所有平台
+
+// 智能解析参数：支持两种格式
+// 格式1: node script.js prod <productId> [productCode] [platforms]
+// 格式2: node script.js prod "" bg-66 [platforms] (推荐)
+let productId = process.argv[3];
+let productCode = process.argv[4];
+let platforms = process.argv[5] ? process.argv[5].split(',') : ['xiaohongshu', 'weibo', 'douyin', 'kuaishou']; // 默认所有平台
+
+// 如果 productId 看起来像产品代码（不以数字开头），可能是混淆了参数
+if (productId && !/^\d+$/.test(productId) && !productCode) {
+    // 将 productId 作为 productCode 处理
+    productCode = productId;
+    productId = '';
+}
 
 /**
  * 发布到指定平台
