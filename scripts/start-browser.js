@@ -14,10 +14,16 @@
  * 默认情况下进程会保持运行，按 Ctrl+C 可以退出
  */
 
+// 禁用 TLS 验证以支持自签名证书
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+console.warn('⚠️  TLS 证书验证已禁用');
+
 import {
     BrowserService
 } from '../src/services/BrowserService.js';
-import { xiaohongshuAuth } from '../src/utils/xiaohongshuAuth.js';
+import {
+    xiaohongshuAuth
+} from '../src/utils/xiaohongshuAuth.js';
 import chalk from 'chalk';
 
 async function main() {
@@ -52,15 +58,15 @@ async function main() {
             const authSuccess = await xiaohongshuAuth.applyAuth(page);
             if (authSuccess) {
                 console.log(chalk.green('✅ 小红书认证应用成功'));
-                
+
                 // 验证登录状态
                 await page.goto('https://creator.xiaohongshu.com/', {
                     waitUntil: 'domcontentloaded',
                     timeout: 30000
                 });
-                
+
                 await new Promise(resolve => setTimeout(resolve, 3000));
-                
+
                 // 检查登录状态
                 const isLoggedIn = await page.evaluate(() => {
                     // 多种方式检查登录状态
@@ -69,27 +75,27 @@ async function main() {
                         '.avatar', '.user-info', '.user-profile',
                         '[data-testid="user-avatar"]', '.user-menu'
                     ];
-                    
+
                     for (const selector of avatarSelectors) {
                         if (document.querySelector(selector)) {
                             return true;
                         }
                     }
-                    
+
                     // 检查是否有登录相关的文本
                     const loginTexts = ['登录', '注册', 'Sign in', 'Login'];
-                    const hasLoginText = loginTexts.some(text => 
+                    const hasLoginText = loginTexts.some(text =>
                         document.body.innerText.includes(text)
                     );
-                    
+
                     return !hasLoginText; // 如果没有登录文本，可能已经登录
                 });
-                
+
                 if (isLoggedIn) {
                     console.log(chalk.green('✅ 小红书登录状态验证成功'));
                 } else {
                     console.log(chalk.yellow('⚠️ 小红书可能未登录，请检查认证数据'));
-                    
+
                     // 输出页面信息用于调试
                     const pageInfo = await page.evaluate(() => {
                         return {
@@ -100,7 +106,7 @@ async function main() {
                             bodyText: document.body.innerText.substring(0, 200)
                         };
                     });
-                    
+
                     console.log(chalk.blue('🔍 页面调试信息:'));
                     console.log(`- URL: ${pageInfo.url}`);
                     console.log(`- 标题: ${pageInfo.title}`);

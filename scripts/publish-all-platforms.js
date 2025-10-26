@@ -7,11 +7,25 @@
  * @Description: 批量发布到所有自媒体平台
  */
 
-import { queryPendingSocialMediaData } from './query-pending-social-media.js';
-import { publishWeiboItem } from './publish-weibo.js';
-import { publishXiaohongshuItem } from './publish-xiaohongshu.js';
-import { publishDouyinItem } from './publish-douyin.js';
-import { publishKuaishouItem } from './publish-kuaishou.js';
+// 禁用 TLS 验证以支持自签名证书
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+console.warn('⚠️  TLS 证书验证已禁用');
+
+import {
+    queryPendingSocialMediaData
+} from './query-pending-social-media.js';
+import {
+    publishWeiboItem
+} from './publish-weibo.js';
+import {
+    publishXiaohongshuItem
+} from './publish-xiaohongshu.js';
+import {
+    publishDouyinItem
+} from './publish-douyin.js';
+import {
+    publishKuaishouItem
+} from './publish-kuaishou.js';
 
 // 解析命令行参数
 const env = process.argv[2] === 'dev' ? 'dev' : 'prod';
@@ -60,21 +74,21 @@ async function publishToPlatform(platform, item) {
  */
 async function publishToAllPlatforms(item, targetPlatforms) {
     const results = [];
-    
+
     for (const platform of targetPlatforms) {
         console.log(`正在发布到 ${platform}...`);
         const result = await publishToPlatform(platform, item);
         results.push(result);
-        
+
         const icon = result.success ? '✅' : '❌';
         console.log(`${icon} ${platform}: ${result.message}`);
-        
+
         // 平台间发布间隔
         if (platform !== targetPlatforms[targetPlatforms.length - 1]) {
             await new Promise(resolve => setTimeout(resolve, 2000));
         }
     }
-    
+
     return results;
 }
 
@@ -85,7 +99,7 @@ async function main() {
     try {
         // 获取待发布数据
         const data = await queryPendingSocialMediaData();
-        
+
         if (!data || data.length === 0) {
             console.log('没有可发布的数据');
             return;
@@ -100,21 +114,21 @@ async function main() {
         const item = data[dataIndex];
         console.log(`开始批量发布: ${item.title}`);
         console.log(`目标平台: ${platforms.join(', ')}`);
-        
+
         const results = await publishToAllPlatforms(item, platforms);
-        
+
         // 统计结果
         const successCount = results.filter(r => r.success).length;
         const totalCount = results.length;
-        
+
         console.log(`\n发布完成: ${successCount}/${totalCount} 个平台成功`);
-        
+
         // 显示详细结果
         results.forEach(result => {
             const icon = result.success ? '✅' : '❌';
             console.log(`${icon} ${result.platform}: ${result.message}`);
         });
-        
+
     } catch (error) {
         console.error('批量发布失败:', error.message);
         process.exit(1);
@@ -122,8 +136,12 @@ async function main() {
 }
 
 // 如果直接运行此脚本
-if (import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/'))) {
+if (
+    import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/'))) {
     main();
 }
 
-export { publishToAllPlatforms, publishToPlatform };
+export {
+    publishToAllPlatforms,
+    publishToPlatform
+};

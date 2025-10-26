@@ -7,7 +7,9 @@
  * @Description: 查询所有待发布社交媒体的二维产品图数据
  */
 
+// 禁用 TLS 验证以支持自签名证书
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+console.warn('⚠️  TLS 证书验证已禁用');
 
 import axios from 'axios';
 
@@ -41,17 +43,17 @@ async function queryPendingSocialMediaData() {
         const response = await axiosNoTimeout.post(`${baseUrl}/api/product-image-2d/find-pending-social-media`, {
             limit: 1000
         });
-        
+
         const result = response.data.data;
-        
+
         if (result.data && result.data.length > 0) {
             const universalData = convertToUniversalStructure(result.data);
-            
+
             console.log(JSON.stringify({
                 total: result.total,
                 data: universalData
             }, null, 2));
-            
+
             return universalData;
         } else {
             console.log(JSON.stringify({
@@ -60,7 +62,7 @@ async function queryPendingSocialMediaData() {
             }, null, 2));
             return [];
         }
-        
+
     } catch (error) {
         console.error('查询失败:', error.message);
         throw error;
@@ -80,7 +82,8 @@ async function main() {
 }
 
 // 如果直接运行此脚本
-if (import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/'))) {
+if (
+    import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/'))) {
     main();
 }
 

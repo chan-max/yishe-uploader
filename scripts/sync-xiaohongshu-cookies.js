@@ -5,10 +5,22 @@
  * 将txt文件中的认证数据同步到浏览器
  */
 
-import { getOrCreateBrowser } from '../src/services/BrowserService.js';
-import { xiaohongshuAuth } from '../src/utils/xiaohongshuAuth.js';
-import { authDataParser } from '../src/utils/authDataParser.js';
-import { logger } from '../src/utils/logger.js';
+// 禁用 TLS 验证以支持自签名证书
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+console.warn('⚠️  TLS 证书验证已禁用');
+
+import {
+    getOrCreateBrowser
+} from '../src/services/BrowserService.js';
+import {
+    xiaohongshuAuth
+} from '../src/utils/xiaohongshuAuth.js';
+import {
+    authDataParser
+} from '../src/utils/authDataParser.js';
+import {
+    logger
+} from '../src/utils/logger.js';
 import chalk from 'chalk';
 
 /**
@@ -41,7 +53,7 @@ async function syncXiaohongshuCookies() {
         // 应用认证
         console.log(chalk.blue('🔐 应用小红书认证...'));
         const authSuccess = await xiaohongshuAuth.applyAuth(page);
-        
+
         if (!authSuccess) {
             console.log(chalk.red('❌ 认证应用失败'));
             return false;
@@ -69,15 +81,15 @@ async function syncXiaohongshuCookies() {
 
         // 检查Cookie
         const cookies = await page.cookies();
-        const xiaohongshuCookies = cookies.filter(cookie => 
+        const xiaohongshuCookies = cookies.filter(cookie =>
             cookie.domain.includes('xiaohongshu.com')
         );
 
         console.log(chalk.blue(`🍪 小红书Cookie数量: ${xiaohongshuCookies.length}`));
-        
+
         if (xiaohongshuCookies.length > 0) {
             console.log(chalk.green('✅ Cookie同步成功'));
-            
+
             // 显示关键Cookie
             const importantCookies = [
                 'access-token-creator.xiaohongshu.com',
@@ -106,7 +118,7 @@ async function syncXiaohongshuCookies() {
                 waitUntil: 'networkidle2',
                 timeout: 10000
             });
-            
+
             if (response && response.status() === 200) {
                 console.log(chalk.green('✅ API请求成功 (200)'));
             } else if (response && response.status() === 401) {
@@ -141,7 +153,7 @@ async function syncXiaohongshuCookies() {
 async function main() {
     try {
         const success = await syncXiaohongshuCookies();
-        
+
         if (success) {
             console.log(chalk.green('\n🎯 同步成功！现在可以运行发布脚本了'));
             console.log(chalk.blue('💡 运行命令:'));
@@ -150,7 +162,7 @@ async function main() {
             console.log(chalk.red('\n❌ 同步失败，请检查认证数据'));
             process.exit(1);
         }
-        
+
     } catch (error) {
         console.error(chalk.red('❌ 执行过程出错:'), error.message);
         process.exit(1);
@@ -158,8 +170,11 @@ async function main() {
 }
 
 // 如果直接运行此脚本
-if (import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/'))) {
+if (
+    import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/'))) {
     main();
 }
 
-export { syncXiaohongshuCookies };
+export {
+    syncXiaohongshuCookies
+};

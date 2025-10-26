@@ -5,9 +5,19 @@
  * 基于用户提供的成功请求信息
  */
 
-import { getOrCreateBrowser } from '../src/services/BrowserService.js';
-import { setupAntiDetection } from '../src/services/BrowserService.js';
-import { logger } from '../src/utils/logger.js';
+// 禁用 TLS 验证以支持自签名证书
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+console.warn('⚠️  TLS 证书验证已禁用');
+
+import {
+    getOrCreateBrowser
+} from '../src/services/BrowserService.js';
+import {
+    setupAntiDetection
+} from '../src/services/BrowserService.js';
+import {
+    logger
+} from '../src/utils/logger.js';
 import chalk from 'chalk';
 
 /**
@@ -24,8 +34,7 @@ async function useRealAuth() {
         await setupAntiDetection(page);
 
         // 设置真实的Cookie
-        const realCookies = [
-            {
+        const realCookies = [{
                 name: 'abRequestId',
                 value: '35328789-b536-51f7-952d-7867750a6dd4',
                 domain: '.xiaohongshu.com',
@@ -184,13 +193,13 @@ async function useRealAuth() {
 
         // 设置请求拦截器，添加真实的请求头
         await page.setRequestInterception(true);
-        
+
         page.on('request', (request) => {
             const url = request.url();
-            
+
             if (url.includes('xiaohongshu.com') && url.includes('/web_api/')) {
                 console.log(chalk.blue(`📡 拦截API请求: ${url}`));
-                
+
                 // 使用真实的请求头
                 const headers = {
                     ...request.headers(),
@@ -214,8 +223,10 @@ async function useRealAuth() {
                     'X-T': '1761379614411',
                     'X-Xray-Traceid': 'cd0d33ff447fc06c4d361da526e2594e'
                 };
-                
-                request.continue({ headers });
+
+                request.continue({
+                    headers
+                });
             } else {
                 request.continue();
             }
@@ -227,7 +238,7 @@ async function useRealAuth() {
             if (url.includes('xiaohongshu.com') && url.includes('/web_api/')) {
                 console.log(chalk.blue(`📡 API响应: ${url}`));
                 console.log(chalk.blue(`   状态: ${response.status()}`));
-                
+
                 if (response.status() === 200) {
                     console.log(chalk.green('✅ API请求成功！'));
                     try {
@@ -261,9 +272,9 @@ async function useRealAuth() {
                 waitUntil: 'networkidle2',
                 timeout: 10000
             });
-            
+
             console.log(chalk.blue(`📡 最终响应状态: ${response.status()}`));
-            
+
         } catch (error) {
             console.log(chalk.red(`❌ API请求出错: ${error.message}`));
         }
@@ -294,8 +305,11 @@ async function main() {
 }
 
 // 如果直接运行此脚本
-if (import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/'))) {
+if (
+    import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/'))) {
     main();
 }
 
-export { useRealAuth };
+export {
+    useRealAuth
+};

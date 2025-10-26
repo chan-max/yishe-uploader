@@ -13,6 +13,10 @@
  * 用法：npm run publish:file -- --file ./examples/publish-template.js [--test]
  */
 
+// 禁用 TLS 验证以支持自签名证书
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+console.warn('⚠️  TLS 证书验证已禁用');
+
 import {
     PublishService
 } from '../src/services/PublishService.js';

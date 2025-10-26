@@ -5,6 +5,10 @@
  * 用法：npm run browser:status 或 node scripts/browser-status.js [--close]
  */
 
+// 禁用 TLS 验证以支持自签名证书
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+console.warn('⚠️  TLS 证书验证已禁用');
+
 import {
     BrowserService
 } from '../src/services/BrowserService.js';
@@ -36,7 +40,7 @@ async function main() {
             }
         }
     } catch (err) {
-        console.error(chalk.red('操作失败:'), err?.message || err);
+        console.error(chalk.red('操作失败:'), err ? .message || err);
         process.exitCode = 1;
     }
 }

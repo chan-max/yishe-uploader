@@ -7,17 +7,31 @@
  * @Description: Web 服务器 - 提供 Web 界面来操作各种脚本功能
  */
 
+// 禁用 TLS 验证以支持自签名证书
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+console.warn('⚠️  TLS 证书验证已禁用');
+
 import express from 'express';
 import cors from 'cors';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
-import { exec } from 'child_process';
-import { promisify } from 'util';
+import {
+    fileURLToPath
+} from 'url';
+import {
+    dirname,
+    join
+} from 'path';
+import {
+    exec
+} from 'child_process';
+import {
+    promisify
+} from 'util';
 import open from 'open';
 import chalk from 'chalk';
 
 const execAsync = promisify(exec);
-const __filename = fileURLToPath(import.meta.url);
+const __filename = fileURLToPath(
+    import.meta.url);
 const __dirname = dirname(__filename);
 
 const app = express();
@@ -33,12 +47,15 @@ async function executeScript(scriptPath, args = []) {
     try {
         const command = `node ${scriptPath} ${args.join(' ')}`;
         console.log(chalk.blue(`执行命令: ${command}`));
-        
-        const { stdout, stderr } = await execAsync(command, {
+
+        const {
+            stdout,
+            stderr
+        } = await execAsync(command, {
             cwd: join(__dirname, '..'),
             timeout: 300000 // 5分钟超时
         });
-        
+
         return {
             success: true,
             stdout: stdout.trim(),
@@ -77,22 +94,24 @@ app.post('/api/check-login', async (req, res) => {
 // 查询单个产品
 app.post('/api/query-product', async (req, res) => {
     try {
-        const { env = 'prod', productId, productCode } = req.body;
-        
+        const {
+            env = 'prod', productId, productCode
+        } = req.body;
+
         if (!productId && !productCode) {
             return res.status(400).json({
                 success: false,
                 error: '请提供产品ID或产品代码'
             });
         }
-        
+
         const args = [env];
         if (productId) {
             args.push(productId);
         } else {
             args.push('', productCode);
         }
-        
+
         const result = await executeScript('scripts/query-single-product.js', args);
         res.json({
             success: result.success,
@@ -110,15 +129,17 @@ app.post('/api/query-product', async (req, res) => {
 // 发布单个产品
 app.post('/api/publish-product', async (req, res) => {
     try {
-        const { env = 'prod', productId, productCode, platforms = 'xiaohongshu,weibo,douyin,kuaishou' } = req.body;
-        
+        const {
+            env = 'prod', productId, productCode, platforms = 'xiaohongshu,weibo,douyin,kuaishou'
+        } = req.body;
+
         if (!productId && !productCode) {
             return res.status(400).json({
                 success: false,
                 error: '请提供产品ID或产品代码'
             });
         }
-        
+
         const args = [env];
         if (productId) {
             args.push(productId);
@@ -126,7 +147,7 @@ app.post('/api/publish-product', async (req, res) => {
             args.push('', productCode);
         }
         args.push(platforms);
-        
+
         const result = await executeScript('scripts/publish-single-product.js', args);
         res.json({
             success: result.success,
@@ -144,22 +165,25 @@ app.post('/api/publish-product', async (req, res) => {
 // 单平台发布
 app.post('/api/publish-platform', async (req, res) => {
     try {
-        const { platform, env = 'prod' } = req.body;
-        
+        const {
+            platform,
+            env = 'prod'
+        } = req.body;
+
         if (!platform) {
             return res.status(400).json({
                 success: false,
                 error: '请指定发布平台'
             });
         }
-        
+
         const scriptMap = {
             weibo: 'scripts/publish-weibo.js',
             douyin: 'scripts/publish-douyin.js',
             xiaohongshu: 'scripts/publish-xiaohongshu.js',
             kuaishou: 'scripts/publish-kuaishou.js'
         };
-        
+
         const scriptPath = scriptMap[platform];
         if (!scriptPath) {
             return res.status(400).json({
@@ -167,7 +191,7 @@ app.post('/api/publish-platform', async (req, res) => {
                 error: '不支持的平台'
             });
         }
-        
+
         const result = await executeScript(scriptPath, [env]);
         res.json({
             success: result.success,
@@ -185,8 +209,10 @@ app.post('/api/publish-platform', async (req, res) => {
 // 批量发布所有平台
 app.post('/api/publish-all', async (req, res) => {
     try {
-        const { env = 'prod', dataIndex = '0', platforms = 'xiaohongshu,weibo,douyin,kuaishou' } = req.body;
-        
+        const {
+            env = 'prod', dataIndex = '0', platforms = 'xiaohongshu,weibo,douyin,kuaishou'
+        } = req.body;
+
         const result = await executeScript('scripts/publish-all-platforms.js', [env, dataIndex, platforms]);
         res.json({
             success: result.success,
@@ -204,10 +230,12 @@ app.post('/api/publish-all', async (req, res) => {
 // 浏览器管理
 app.post('/api/browser', async (req, res) => {
     try {
-        const { action } = req.body;
-        
+        const {
+            action
+        } = req.body;
+
         let scriptPath, args = [];
-        
+
         switch (action) {
             case 'start':
                 scriptPath = 'scripts/start-browser.js';
@@ -229,7 +257,7 @@ app.post('/api/browser', async (req, res) => {
                     error: '不支持的操作'
                 });
         }
-        
+
         const result = await executeScript(scriptPath, args);
         res.json({
             success: result.success,
@@ -293,7 +321,7 @@ app.listen(PORT, () => {
     console.log(chalk.cyan(`   - 小红书认证同步`));
     console.log(chalk.cyan(`   - 从文件发布`));
     console.log('');
-    
+
     // 自动打开浏览器
     setTimeout(async () => {
         try {

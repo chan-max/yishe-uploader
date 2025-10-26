@@ -7,8 +7,16 @@
  * @Description: 快手平台发布脚本 - 兼容通用数据结构
  */
 
-import { PublishService } from '../src/services/PublishService.js';
-import { queryPendingSocialMediaData } from './query-pending-social-media.js';
+// 禁用 TLS 验证以支持自签名证书
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+console.warn('⚠️  TLS 证书验证已禁用');
+
+import {
+    PublishService
+} from '../src/services/PublishService.js';
+import {
+    queryPendingSocialMediaData
+} from './query-pending-social-media.js';
 
 // 解析命令行参数
 const env = process.argv[2] === 'dev' ? 'dev' : 'prod';
@@ -57,7 +65,7 @@ async function main() {
     try {
         // 获取待发布数据
         const data = await queryPendingSocialMediaData();
-        
+
         if (!data || data.length === 0) {
             console.log('没有可发布的数据');
             return;
@@ -71,11 +79,11 @@ async function main() {
 
         const item = data[dataIndex];
         console.log(`发布快手: ${item.title}`);
-        
+
         const result = await publishKuaishouItem(item);
         const icon = result.success ? '✅' : '❌';
         console.log(`${icon} 快手发布结果: ${result.message}`);
-        
+
     } catch (error) {
         console.error('快手发布失败:', error.message);
         process.exit(1);
@@ -83,8 +91,11 @@ async function main() {
 }
 
 // 如果直接运行此脚本
-if (import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/'))) {
+if (
+    import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/'))) {
     main();
 }
 
-export { publishKuaishouItem };
+export {
+    publishKuaishouItem
+};
