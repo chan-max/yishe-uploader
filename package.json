@@ -5,6 +5,7 @@
     "main": "src/index.js",
     "type": "module",
     "scripts": {
+        "start": "node scripts/web-server.js",
         "check-login": "node scripts/check-login.js",
         "publish:single": "node scripts/publish-single-product.js",
         "query:single": "node scripts/query-single-product.js",

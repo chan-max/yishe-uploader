@@ -1,154 +1,109 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Yishe Uploader</title>
+    <title>YiShe Uploader 控制台</title>
     <link rel="stylesheet" href="style.css">
+    <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
 </head>
-
 <body>
-    <div class="container">
-        <header class="header">
-            <h1>Yishe Uploader</h1>
-            <p>多媒体发布控制台</p>
-        </header>
-
-        <div class="main-content">
-            <!-- 登录状态检查 -->
-            <section class="card">
-                <h2>登录状态</h2>
-                <div class="button-group">
-                    <button id="check-login" class="btn">检查登录</button>
-                    <button id="sync-xiaohongshu" class="btn">同步小红书</button>
-                </div>
-                <div id="login-status" class="result-box"></div>
-            </section>
-
-            <!-- 产品查询 -->
-            <section class="card">
-                <h2>产品查询</h2>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">
-                    <div class="form-group">
-                        <label for="query-env">环境</label>
-                        <select id="query-env" class="form-control">
-                            <option value="prod">生产</option>
-                            <option value="dev">开发</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label for="product-id">产品ID</label>
-                        <input type="text" id="product-id" class="form-control" placeholder="产品ID">
-                    </div>
-                </div>
-                <div class="form-group">
-                    <label for="product-code">产品代码</label>
-                    <input type="text" id="product-code" class="form-control" placeholder="产品代码">
-                </div>
-                <button id="query-product" class="btn">查询产品</button>
-                <div id="query-result" class="result-box"></div>
-            </section>
-
-            <!-- 单产品发布 -->
-            <section class="card">
-                <h2>单产品发布</h2>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">
-                    <div class="form-group">
-                        <label for="publish-env">环境</label>
-                        <select id="publish-env" class="form-control">
-                            <option value="prod">生产</option>
-                            <option value="dev">开发</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label for="publish-product-id">产品ID</label>
-                        <input type="text" id="publish-product-id" class="form-control" placeholder="产品ID">
-                    </div>
-                </div>
-                <div class="form-group">
-                    <label for="publish-product-code">产品代码</label>
-                    <input type="text" id="publish-product-code" class="form-control" placeholder="产品代码">
-                </div>
-                <div class="form-group">
-                    <label for="publish-platforms">发布平台</label>
-                    <input type="text" id="publish-platforms" class="form-control" placeholder="xiaohongshu,weibo,douyin,kuaishou" value="xiaohongshu,weibo,douyin,kuaishou">
-                </div>
-                <button id="publish-product" class="btn">发布产品</button>
-                <div id="publish-result" class="result-box"></div>
-            </section>
-
-            <!-- 单平台发布 -->
-            <section class="card">
-                <h2>单平台发布</h2>
-                <div class="form-group">
-                    <label for="platform-env">环境</label>
-                    <select id="platform-env" class="form-control">
-                        <option value="prod">生产</option>
-                        <option value="dev">开发</option>
+    <div id="app" class="app-root">
+        <aside class="sidebar">
+            <div class="brand">YiShe Uploader</div>
+            <nav class="menu">
+                <button :class="['menu-item', currentView==='dashboard' && 'active']" @click="currentView='dashboard'">仪表盘</button>
+                <button :class="['menu-item', currentView==='pending' && 'active']" @click="currentView='pending'">待发布商品</button>
+                <button :class="['menu-item', currentView==='login' && 'active']" @click="currentView='login'">平台登录状态</button>
+            </nav>
+            <div class="sidebar-footer">
+                <label class="env">
+                    环境
+                    <select v-model="env">
+                        <option value="prod">生产环境</option>
+                        <option value="dev">开发环境</option>
                     </select>
+                </label>
+            </div>
+        </aside>
+        <main class="main">
+            <header class="topbar">
+                <div class="title">
+                    <h1 v-if="currentView==='dashboard'">仪表盘</h1>
+                    <h1 v-else-if="currentView==='pending'">待发布商品</h1>
+                    <h1 v-else>平台登录状态</h1>
+                    <p>{{ subtitle }}</p>
                 </div>
-                <div class="platform-buttons">
-                    <button class="btn" data-platform="xiaohongshu">小红书</button>
-                    <button class="btn" data-platform="weibo">微博</button>
-                    <button class="btn" data-platform="douyin">抖音</button>
-                    <button class="btn" data-platform="kuaishou">快手</button>
+                <div class="actions">
+                    <button v-if="currentView==='pending'" class="btn" @click="refreshPending">刷新列表</button>
+                    <button v-if="currentView==='login'" class="btn" @click="checkLogin(true)">检查登录状态</button>
                 </div>
-                <div id="platform-result" class="result-box"></div>
-            </section>
+            </header>
 
-            <!-- 批量发布 -->
-            <section class="card">
-                <h2>批量发布</h2>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">
-                    <div class="form-group">
-                        <label for="batch-env">环境</label>
-                        <select id="batch-env" class="form-control">
-                            <option value="prod">生产</option>
-                            <option value="dev">开发</option>
-                        </select>
+            <section class="content">
+                <div v-if="status.message" :class="['status-panel', status.type]">{{ status.message }}</div>
+
+                <template v-if="currentView==='dashboard'">
+                    <div class="cards">
+                        <div class="card">
+                            <div class="card-title">待发布数量</div>
+                            <div class="card-value">{{ pendingCountDisplay }}</div>
+                            <div class="card-desc">来自 {{ env==='prod' ? '生产' : '开发' }} 环境</div>
+                        </div>
+                        <div class="card">
+                            <div class="card-title">已登录平台</div>
+                            <div class="card-value">{{ loggedInPlatforms }}</div>
+                            <div class="card-desc">点击左侧查看详情</div>
+                        </div>
                     </div>
-                    <div class="form-group">
-                        <label for="data-index">数据索引</label>
-                        <input type="number" id="data-index" class="form-control" value="0" min="0">
+                </template>
+
+                <template v-else-if="currentView==='pending'">
+                    <div class="table">
+                        <div class="thead">
+                            <div class="tr">
+                                <div class="th th-id">ID</div>
+                                <div class="th th-name">名称</div>
+                                <div class="th th-imgs">图片</div>
+                                <div class="th th-desc">描述</div>
+                                <div class="th th-keywords">关键字</div>
+                                <div class="th th-status">状态</div>
+                                <div class="th th-actions">操作</div>
+                            </div>
+                        </div>
+                        <div class="tbody">
+                            <div v-for="item in pendingList" :key="item.id" class="tr">
+                                <div class="td td-id">{{ item.id }}</div>
+                                <div class="td td-name" :title="item.name">{{ item.name || '未命名商品' }}</div>
+                                <div class="td td-images">
+                                    <template v-if="item.images && item.images.length">
+                                        <img v-for="(img,idx) in item.images.slice(0,3)" :key="idx" :src="img" :alt="item.name || '商品图片'" loading="lazy" />
+                                        <span v-if="item.images.length>3" class="more">+{{ item.images.length - 3 }}</span>
+                                    </template>
+                                    <template v-else>—</template>
+                                </div>
+                                <div class="td td-desc">{{ item.description || '—' }}</div>
+                                <div class="td td-keywords">{{ item.keywords || '—' }}</div>
+                                <div class="td td-status">{{ item.publishStatus || '-' }}</div>
+                                <div class="td td-actions">
+                                    <button class="publish-btn" @click="publishSingle(item.id, $event)">发布</button>
+                                </div>
+                            </div>
+                        </div>
                     </div>
-                </div>
-                <div class="form-group">
-                    <label for="batch-platforms">发布平台</label>
-                    <input type="text" id="batch-platforms" class="form-control" placeholder="xiaohongshu,weibo,douyin,kuaishou" value="xiaohongshu,weibo,douyin,kuaishou">
-                </div>
-                <button id="publish-all" class="btn">批量发布</button>
-                <div id="batch-result" class="result-box"></div>
-            </section>
+                </template>
 
-            <!-- 浏览器管理 -->
-            <section class="card">
-                <h2>浏览器管理</h2>
-                <div class="button-group">
-                    <button id="browser-start" class="btn">启动</button>
-                    <button id="browser-start-keep" class="btn">启动(保持)</button>
-                    <button id="browser-status" class="btn">状态</button>
-                    <button id="browser-close" class="btn">关闭</button>
-                </div>
-                <div id="browser-result" class="result-box"></div>
+                <template v-else>
+                    <div class="login-status">
+                        <span v-for="(info, platform) in loginStatus" :key="platform" :class="['login-badge', info.isLoggedIn ? 'ok' : (info.status==='error' ? 'warn' : 'err')]">
+                            {{ platform }}：{{ info.isLoggedIn ? '已登录' : (info.status==='error' ? '异常' : '未登录') }}
+                        </span>
+                    </div>
+                </template>
             </section>
-
-            <!-- 其他功能 -->
-            <section class="card">
-                <h2>其他功能</h2>
-                <div class="button-group">
-                    <button id="publish-from-file" class="btn">从文件发布</button>
-                </div>
-                <div id="other-result" class="result-box"></div>
-            </section>
-        </div>
-
-        <footer class="footer">
-            <p>© 2025 Yishe Uploader - 多媒体自动发布脚本</p>
-        </footer>
+        </main>
     </div>
 
     <script src="script.js"></script>
 </body>
-
 </html>
