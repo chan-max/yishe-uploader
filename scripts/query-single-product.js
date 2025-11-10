@@ -37,21 +37,13 @@ const axiosNoTimeout = createAxiosInstance({
  * 转换为自媒体平台通用结构
  */
 function convertToUniversalStructure(originalData) {
-    // 提取图片列表
-    const images = [];
-    for (let i = 1; i <= 10; i++) {
-        const imageUrl = originalData[`image${i}`];
-        if (imageUrl && imageUrl.trim()) {
-            images.push(imageUrl);
-        }
-    }
-
+    const images = Array.isArray(originalData.images) ? originalData.images : [];
     return {
         id: originalData.id,
         title: originalData.name,
         content: originalData.description || '',
         tags: originalData.keywords ? originalData.keywords.split(',').map(tag => tag.trim()) : [],
-        images: images
+        images
     };
 }
 
@@ -82,10 +74,12 @@ async function testNetworkConnection() {
 }
 async function queryProductById(productId) {
     try {
-        const response = await axiosNoTimeout.get(`${baseUrl}/api/product-image-2d/${productId}`);
+        const response = await axiosNoTimeout.get(`${baseUrl}/api/product/${productId}?includeRelations=false`);
 
-        if (response.data.status && response.data.data) {
-            const universalData = convertToUniversalStructure(response.data.data);
+        const payload = response.data.data || response.data;
+
+        if (payload && payload.id) {
+            const universalData = convertToUniversalStructure(payload);
 
             console.log(JSON.stringify({
                 success: true,
@@ -112,12 +106,22 @@ async function queryProductById(productId) {
  */
 async function queryProductByCode(productCode) {
     try {
-        const response = await axiosNoTimeout.post(`${baseUrl}/api/product-image-2d/find-by-code`, {
-            code: productCode
+        // 通过分页接口按 code 精确匹配或模糊搜索
+        const response = await axiosNoTimeout.post(`${baseUrl}/api/product/page`, {
+            search: productCode,
+            includeRelations: false,
+            page: 1,
+            pageSize: 5
         });
 
-        if (response.data.status && response.data.data) {
-            const universalData = convertToUniversalStructure(response.data.data);
+        const list = (response.data && response.data.data && response.data.data.list)
+            ? response.data.data.list
+            : (response.data.list || []);
+
+        const matched = list.find(item => item.code === productCode) || list[0];
+
+        if (matched) {
+            const universalData = convertToUniversalStructure(matched);
 
             console.log(JSON.stringify({
                 success: true,

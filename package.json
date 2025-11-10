@@ -5,27 +5,10 @@
     "main": "src/index.js",
     "type": "module",
     "scripts": {
-        "start": "node src/index.js",
-        "dev": "node src/index.js",
-        "test": "node test/index.js",
         "check-login": "node scripts/check-login.js",
-        "publish:file": "node scripts/publish-from-file.js",
-        "publish:weibo": "node scripts/publish-weibo.js",
-        "publish:douyin": "node scripts/publish-douyin.js",
-        "publish:xiaohongshu": "node scripts/publish-xiaohongshu.js",
-        "publish:kuaishou": "node scripts/publish-kuaishou.js",
-        "publish:all": "node scripts/publish-all-platforms.js",
         "publish:single": "node scripts/publish-single-product.js",
         "query:single": "node scripts/query-single-product.js",
-        "browser:start": "node scripts/start-browser.js",
-        "browser:start:keep": "node scripts/start-browser.js --keep-open",
-        "browser:status": "node scripts/browser-status.js",
-        "browser:close": "node scripts/browser-status.js --close",
-        "test:real-auth": "node scripts/use-real-auth.js",
-        "sync:xiaohongshu": "node scripts/sync-xiaohongshu-cookies.js",
-        "web": "node scripts/web-server.js",
-        "lint": "eslint src --ext .js",
-        "format": "prettier --write src/**/*.js"
+        "browser:start": "node scripts/start-browser.js"
     },
     "keywords": [
         "social-media",
@@ -48,16 +31,9 @@
         "chalk": "^5.3.0",
         "ora": "^8.0.1",
         "inquirer": "^9.2.15",
-        "fs-extra": "^11.2.0",
-        "node-fetch": "^3.3.2",
-        "express": "^4.18.2",
-        "cors": "^2.8.5",
-        "open": "^10.0.2"
+        "fs-extra": "^11.2.0"
     },
-    "devDependencies": {
-        "eslint": "^9.24.0",
-        "prettier": "^3.5.3"
-    },
+    "devDependencies": {},
     "engines": {
         "node": ">=18.0.0"
     }

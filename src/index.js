@@ -42,10 +42,10 @@ const baseUrl = env === 'dev' ? 'http://localhost:1520' : 'https://1s.design:152
 
 // 数据源配置
 const DATA_SOURCES = {
-    PRODUCT_IMAGE_2D: {
-        name: '二维产品图',
-        endpoint: '/api/product-image-2d/find-pending-social-media',
-        description: '从二维产品图数据中获取待发布内容'
+    PRODUCT: {
+        name: '商品',
+        endpoint: '/api/product/page',
+        description: '从商品数据中获取待发布内容（按发布状态筛选）'
     },
     CUSTOM_MODEL: {
         name: '自定义模型',
@@ -88,7 +88,7 @@ async function selectDataSource() {
         name: 'dataSource',
         message: '请选择数据源:',
         choices: choices,
-        default: 'PRODUCT_IMAGE_2D'
+        default: 'PRODUCT'
     }]);
 
     return answers.dataSource;
@@ -127,19 +127,29 @@ async function testNetworkConnection() {
         throw error;
     }
 }
-async function getPendingData(dataSource = 'PRODUCT_IMAGE_2D') {
+async function getPendingData(dataSource = 'PRODUCT') {
     try {
         const sourceConfig = DATA_SOURCES[dataSource];
         logger.info(`正在从 ${sourceConfig.name} 获取待发布数据...`);
 
-        const response = await axiosNoTimeout.post(`${baseUrl}${sourceConfig.endpoint}`, {
-            limit: 1000
-        });
+        let list = [];
+        if (dataSource === 'PRODUCT') {
+            const response = await axiosNoTimeout.post(`${baseUrl}${sourceConfig.endpoint}`, {
+                publishStatus: 'pending_social_media',
+                includeRelations: false,
+                page: 1,
+                pageSize: 1000
+            });
+            const res = response.data;
+            list = (res.data && res.data.list) ? res.data.list : (res.list || []);
+        } else {
+            const response = await axiosNoTimeout.post(`${baseUrl}${sourceConfig.endpoint}`, { limit: 1000 });
+            const result = response.data.data;
+            list = (result && result.data) ? result.data : [];
+        }
 
-        const result = response.data.data;
-
-        if (result.data && result.data.length > 0) {
-            const universalData = convertToUniversalStructure(result.data);
+        if (list && list.length > 0) {
+            const universalData = convertToUniversalStructure(list);
             logger.info(`成功获取 ${universalData.length} 条待发布数据 (来源: ${sourceConfig.name})`);
             return universalData;
         } else {
@@ -365,15 +375,14 @@ program
     .command('start')
     .description('启动自动发布流程 - 获取服务器数据并发布到各平台')
     .option('--env <env>', '环境选择 (dev|prod)', 'dev')
-    .option('--source <source>', '数据源选择 (product-image-2d|custom-model)', '')
+    .option('--source <source>', '数据源选择 (product|custom-model)', '')
     .action(async (options) => {
         // 转换数据源参数
         let dataSource = '';
         if (options.source) {
             switch (options.source.toLowerCase()) {
-                case 'product-image-2d':
                 case 'product':
-                    dataSource = 'PRODUCT_IMAGE_2D';
+                    dataSource = 'PRODUCT';
                     break;
                 case 'custom-model':
                 case 'custom':
@@ -551,7 +560,7 @@ program
 program
     .command('query')
     .description('查询指定数据源的待发布数据')
-    .option('--source <source>', '数据源选择 (product-image-2d|custom-model)', '')
+    .option('--source <source>', '数据源选择 (product|custom-model)', '')
     .option('--env <env>', '环境选择 (dev|prod)', 'dev')
     .action(async (options) => {
         const spinner = ora('正在查询数据...').start();
@@ -561,9 +570,8 @@ program
             let dataSource = '';
             if (options.source) {
                 switch (options.source.toLowerCase()) {
-                    case 'product-image-2d':
                     case 'product':
-                        dataSource = 'PRODUCT_IMAGE_2D';
+                        dataSource = 'PRODUCT';
                         break;
                     case 'custom-model':
                     case 'custom':

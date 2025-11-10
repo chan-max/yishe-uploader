@@ -15,21 +15,12 @@ import {
     queryProductById,
     queryProductByCode
 } from './query-single-product.js';
-import {
-    publishWeiboItem
-} from './publish-weibo.js';
-import {
-    publishXiaohongshuItem
-} from './publish-xiaohongshu.js';
-import {
-    publishDouyinItem
-} from './publish-douyin.js';
-import {
-    publishKuaishouItem
-} from './publish-kuaishou.js';
+import { PublishService } from '../src/services/PublishService.js';
+import axios from 'axios';
 
 // 解析命令行参数
 const env = process.argv[2] === 'dev' ? 'dev' : 'prod';
+const baseUrl = env === 'dev' ? 'http://localhost:1520' : 'https://1s.design:1520';
 
 // 智能解析参数：支持两种格式
 // 格式1: node script.js prod <productId> [productCode] [platforms]
@@ -37,39 +28,23 @@ const env = process.argv[2] === 'dev' ? 'dev' : 'prod';
 let productId = process.argv[3];
 let productCode = process.argv[4];
 let platforms = process.argv[5] ? process.argv[5].split(',') : ['xiaohongshu', 'weibo', 'douyin', 'kuaishou']; // 默认所有平台
-
-// 如果 productId 看起来像产品代码（不以数字开头），可能是混淆了参数
-if (productId && !/^\d+$/.test(productId) && !productCode) {
-    // 将 productId 作为 productCode 处理
-    productCode = productId;
-    productId = '';
-}
+// 取消自动参数交换：如果需要按 code 查询，请传 "" 占位并把代码放到第4个参数
 
 /**
  * 发布到指定平台
  */
 async function publishToPlatform(platform, item) {
-    const platformFunctions = {
-        weibo: publishWeiboItem,
-        xiaohongshu: publishXiaohongshuItem,
-        douyin: publishDouyinItem,
-        kuaishou: publishKuaishouItem
-    };
-
-    const publishFunction = platformFunctions[platform];
-    if (!publishFunction) {
-        return {
-            success: false,
-            message: `不支持的平台: ${platform}`,
-            platform,
-            itemId: item.id
-        };
-    }
-
     try {
-        const result = await publishFunction(item);
+        const result = await PublishService.publishSingle({
+            platform,
+            title: item.title,
+            content: item.content,
+            images: item.images,
+            tags: item.tags || []
+        });
         return {
-            ...result,
+            success: result.success,
+            message: result.message,
             platform
         };
     } catch (error) {
@@ -107,6 +82,21 @@ async function publishSingleProductToPlatforms(item, targetPlatforms) {
     }
 
     return results;
+}
+
+async function updateProductStatus(productId, status) {
+    if (!productId) return;
+    try {
+        await axios.post(`${baseUrl}/api/product/update`, {
+            id: productId,
+            publishStatus: status
+        }, {
+            timeout: 15000
+        });
+        console.log(`✅ 已更新商品发布状态为: ${status}`);
+    } catch (e) {
+        console.warn(`⚠️ 更新商品发布状态失败: ${e.message}`);
+    }
 }
 
 /**
@@ -161,8 +151,13 @@ async function main() {
 
         // 如果有失败的平台，退出码为1
         if (successCount < totalCount) {
+            // 部分成功，仍标记为已发布到社交媒体
+            await updateProductStatus(item.id, 'published_social_media');
             process.exit(1);
         }
+
+        // 全部成功，标记为已发布到社交媒体（如需改为 archived，可调整此处）
+        await updateProductStatus(item.id, 'published_social_media');
 
     } catch (error) {
         console.error('单条发布失败:', error.message);

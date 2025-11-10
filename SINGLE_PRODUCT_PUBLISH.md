@@ -38,10 +38,10 @@
 
 ## 新增后端API接口
 
-### 1. 根据产品代码查询接口
-- **路径**: `POST /api/product-image-2d/find-by-code`
-- **参数**: `{ "code": "产品代码" }`
-- **返回**: 产品详细信息
+### 1. 根据产品代码查询接口（通过分页检索）
+- **路径**: `POST /api/product/page`
+- **参数**: `{ "search": "产品代码", "includeRelations": false, "page": 1, "pageSize": 5 }`
+- **返回**: `data.list` 中匹配的商品（脚本会优先匹配 `code===产品代码`）
 
 ## 使用方法
 
