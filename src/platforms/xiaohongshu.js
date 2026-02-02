@@ -366,7 +366,8 @@ class XiaohongshuPublisher {
 
             // 上传文件
             logger.info(`开始上传文件: ${tempPath}`);
-            await fileInput.uploadFile(tempPath);
+            // Playwright: setInputFiles 替代 Puppeteer 的 uploadFile
+            await fileInput.setInputFiles(tempPath);
             logger.info(`文件已选择，等待上传...`);
 
             // 等待图片上传完成

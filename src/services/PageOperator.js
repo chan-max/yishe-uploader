@@ -19,11 +19,9 @@ export class PageOperator {
      * 设置反检测脚本
      */
     async setupAntiDetection(page) {
-        // 设置更真实的 user-agent
-        await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-
+        // Playwright: userAgent 需要在 context 创建时设置；这里保持“脚本注入/headers/viewport”能力
         // 注入反检测脚本
-        await page.evaluateOnNewDocument(() => {
+        await page.addInitScript(() => {
             // 更彻底的 webdriver 伪装
             delete navigator.__proto__.webdriver;
 
@@ -101,11 +99,7 @@ export class PageOperator {
         });
 
         // 设置视口大小
-        await page.setViewport({
-            width: 1920,
-            height: 1080,
-            deviceScaleFactor: 1,
-        });
+        await page.setViewportSize({ width: 1920, height: 1080 });
 
         // 设置额外的请求头
         await page.setExtraHTTPHeaders({

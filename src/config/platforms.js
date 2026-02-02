@@ -63,7 +63,8 @@ export const PLATFORM_CONFIGS = {
     xiaohongshu: {
         name: '小红书',
         uploadUrl: 'https://creator.xiaohongshu.com/publish/publish?target=image',
-        waitUntil: 'networkidle2',
+        // Playwright: 使用 networkidle（Puppeteer 的 networkidle2 在 Playwright 中不存在）
+        waitUntil: 'networkidle',
         timeout: 30000,
         antiDetection: true,
         checkLogin: true,

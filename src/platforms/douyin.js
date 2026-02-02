@@ -171,7 +171,8 @@ class DouyinPublisher {
             throw new Error('未找到文件选择器');
         }
 
-        await fileInput.uploadFile(tempPath);
+        // Playwright: setInputFiles 替代 Puppeteer 的 uploadFile
+        await fileInput.setInputFiles(tempPath);
         logger.info(`已上传图片 ${imageIndex + 1}`);
 
         // 等待图片上传完成

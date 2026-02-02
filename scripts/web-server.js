@@ -4,12 +4,14 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { URL } from 'url';
 import { spawn } from 'child_process';
-import axios from 'axios';
-import { PublishService } from '../src/services/PublishService.js';
+import http from 'http';
 import { BrowserService } from '../src/services/BrowserService.js';
 
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-console.warn('⚠️  TLS 证书验证已禁用');
+// 如需访问自签名 HTTPS 可开启；浏览器连接管理本身不依赖它
+if (process.env.DISABLE_TLS_VERIFY === 'true') {
+    process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+    console.warn('⚠️  TLS 证书验证已禁用');
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -53,144 +55,101 @@ function serveStatic(res, filePath, contentType = 'text/plain; charset=utf-8') {
     });
 }
 
-async function fetchPendingFromServer(baseUrl, status) {
-    const body = {
-        publishStatus: status,
-        includeRelations: false,
-        page: 1,
-        pageSize: 1000
-    };
-    console.log('[pending] requesting %s status=%s body=%o', baseUrl, status, body);
-    const response = await axios.post(`${baseUrl}/api/product/page`, body, { timeout: 30000 });
-    return response.data || {};
-}
-
-async function handleGetPending(req, res, query) {
-    const env = query.env === 'dev' ? 'dev' : 'prod';
-    const baseUrl = env === 'dev' ? 'http://localhost:1520' : 'https://1s.design:1520';
-    const statusCandidates = ['pending_social_media', 'pendingSocialMedia', 'pending'];
-
+async function handleBrowserStatus(req, res) {
     try {
-        let resBody = null;
-        let selectedStatus = null;
-
-        for (const candidate of statusCandidates) {
-            try {
-                const data = await fetchPendingFromServer(baseUrl, candidate);
-                console.log(data)
-                const list = extractList(data);
-                console.log('[pending] status %s -> %d items', candidate, list.length);
-                if (list.length > 0 || candidate === statusCandidates[statusCandidates.length - 1]) {
-                    resBody = data;
-                    selectedStatus = candidate;
-                    break;
-                }
-            } catch (err) {
-                console.error('[pending] status %s request failed: %s', candidate, err?.message || err);
-                if (candidate === statusCandidates[statusCandidates.length - 1]) {
-                    throw err;
-                }
-            }
-        }
-
-        const list = extractList(resBody);
-        console.log('[pending] final status=%s, count=%d', selectedStatus, list.length);
-
-        if (!res.writableEnded) {
-            sendJSON(res, 200, {
-                success: true,
-                data: list.map(item => ({
-                    id: item.id,
-                    name: item.name,
-                    description: item.description || '',
-                    images: Array.isArray(item.images) ? item.images : [],
-                    keywords: item.keywords || '',
-                    publishStatus: item.publishStatus
-                })),
-                rawCount: list.length,
-                statusTried: selectedStatus
-            });
-        }
-    } catch (error) {
-        console.error('[pending] request failed:', error?.message || error);
-        if (!res.writableEnded) {
-            sendJSON(res, 500, {
-                success: false,
-                message: error.message || '获取待发布数据失败'
-            });
-        }
+        const status = await BrowserService.getStatus();
+        sendJSON(res, 200, { success: true, data: status });
+    } catch (e) {
+        sendJSON(res, 500, { success: false, message: e?.message || '获取浏览器状态失败' });
     }
 }
 
-function extractList(resBody) {
-    if (!resBody) return [];
-    return Array.isArray(resBody?.data?.list)
-        ? resBody.data.list
-        : Array.isArray(resBody?.data?.data?.list)
-            ? resBody.data.data.list
-            : Array.isArray(resBody?.list)
-                ? resBody.list
-                : Array.isArray(resBody?.data)
-                    ? resBody.data
-                    : [];
-}
-
-function runPublishCommand({ env, productId, productCode }) {
-    return new Promise((resolve) => {
-        const args = [path.join(__dirname, 'publish-single-product.js'), env || 'prod'];
-        if (productId) {
-            args.push(productId);
-        } else {
-            args.push('');
-        }
-        if (productCode) {
-            args.push(productCode);
-        }
-
-        const child = spawn('node', args, { cwd: ROOT_DIR, shell: false });
-
-        let stdout = '';
-        let stderr = '';
-
-        child.stdout.on('data', chunk => { stdout += chunk.toString(); });
-        child.stderr.on('data', chunk => { stderr += chunk.toString(); });
-
-        child.on('error', error => {
-            resolve({ success: false, message: error.message, stdout, stderr });
-        });
-
-        child.on('close', code => {
-            resolve({
-                success: code === 0,
-                code,
-                stdout,
-                stderr
-            });
-        });
-    });
-}
-
-async function handlePublish(req, res) {
+async function handleBrowserConnect(req, res) {
     try {
         const body = await readRequestBody(req);
-        const { env = 'prod', productId = '', productCode = '' } = JSON.parse(body || '{}');
+        const {
+            mode,
+            chromeUserDataDir,
+            chromeProfileDir,
+            chromeExecutablePath,
+            cdpEndpoint
+        } = JSON.parse(body || '{}');
 
-        if (!productId && !productCode) {
-            sendJSON(res, 400, { success: false, message: '缺少 productId 或 productCode' });
-            return;
-        }
-
-        const result = await runPublishCommand({ env, productId, productCode });
-
-        const message = result.success ? '发布流程已完成' : '发布流程失败';
-        sendJSON(res, 200, {
-            success: result.success,
-            message,
-            stdout: result.stdout,
-            stderr: result.stderr
+        // 触发连接/启动（BrowserService 内部会复用已有实例）
+        await BrowserService.getOrCreateBrowser({
+            mode,
+            chromeUserDataDir,
+            chromeProfileDir,
+            chromeExecutablePath,
+            cdpEndpoint
         });
-    } catch (error) {
-        sendJSON(res, 500, { success: false, message: error.message || '发布失败' });
+
+        const status = await BrowserService.getStatus();
+        sendJSON(res, 200, { success: true, data: status });
+    } catch (e) {
+        sendJSON(res, 500, { success: false, message: e?.message || '连接浏览器失败' });
+    }
+}
+
+async function handleBrowserClose(req, res) {
+    try {
+        await BrowserService.close();
+        const status = await BrowserService.getStatus();
+        sendJSON(res, 200, { success: true, data: status });
+    } catch (e) {
+        sendJSON(res, 500, { success: false, message: e?.message || '关闭浏览器失败' });
+    }
+}
+
+/**
+ * 检测指定端口是否有 Chrome 远程调试服务在监听
+ * 请求 http://127.0.0.1:port/json/version，Chrome 开启调试时会返回版本信息
+ */
+async function handleBrowserCheckPort(req, res) {
+    try {
+        const body = await readRequestBody(req);
+        const { port = 9222 } = JSON.parse(body || '{}');
+        const url = `http://127.0.0.1:${port}/json/version`;
+        const result = await new Promise((resolve) => {
+            const req = http.get(url, { timeout: 3000 }, (resp) => {
+                let data = '';
+                resp.on('data', chunk => { data += chunk; });
+                resp.on('end', () => {
+                    try {
+                        const json = JSON.parse(data);
+                        resolve({
+                            ok: true,
+                            port,
+                            browser: json.Browser || json.browser,
+                            'Protocol-Version': json['Protocol-Version'],
+                            'User-Agent': json['User-Agent']
+                        });
+                    } catch {
+                        resolve({ ok: true, port, raw: data?.slice(0, 200) });
+                    }
+                });
+            });
+            req.on('error', (e) => resolve({ ok: false, port, error: e.message }));
+            req.on('timeout', () => { req.destroy(); resolve({ ok: false, port, error: '连接超时' }); });
+        });
+        sendJSON(res, 200, { success: true, data: result });
+    } catch (e) {
+        sendJSON(res, 500, { success: false, message: e?.message || '检测端口失败' });
+    }
+}
+
+/**
+ * 启动带远程调试端口的 Chrome（使用默认 profile，含你的登录态）
+ * 流程：先完全关闭 Chrome → 点此接口 → Chrome 以调试模式启动 → 再用 CDP 连接
+ */
+async function handleBrowserLaunchWithDebug(req, res) {
+    try {
+        const body = await readRequestBody(req);
+        const { port = 9222, userDataDir } = JSON.parse(body || '{}');
+        const result = BrowserService.launchWithDebugPort({ port, userDataDir });
+        sendJSON(res, 200, { success: true, data: result });
+    } catch (e) {
+        sendJSON(res, 500, { success: false, message: e?.message || '启动浏览器失败' });
     }
 }
 
@@ -230,23 +189,24 @@ const server = createServer(async (req, res) => {
         const pathname = parsedUrl.pathname;
 
         if (pathname.startsWith('/api/')) {
-            if (req.method === 'POST' && pathname === '/api/check-login') {
-                try {
-                    const body = await readRequestBody(req);
-                    const { force = false } = JSON.parse(body || '{}');
-                    const loginStatus = await PublishService.checkSocialMediaLoginStatus(force);
-                    sendJSON(res, 200, { success: true, data: loginStatus });
-                } catch (e) {
-                    sendJSON(res, 500, { success: false, message: e?.message || '检查登录状态失败' });
-                }
+            if (req.method === 'GET' && pathname === '/api/browser/status') {
+                await handleBrowserStatus(req, res);
                 return;
             }
-            if (req.method === 'GET' && pathname === '/api/pending') {
-                await handleGetPending(req, res, Object.fromEntries(parsedUrl.searchParams.entries()));
+            if (req.method === 'POST' && pathname === '/api/browser/connect') {
+                await handleBrowserConnect(req, res);
                 return;
             }
-            if (req.method === 'POST' && pathname === '/api/publish') {
-                await handlePublish(req, res);
+            if (req.method === 'POST' && pathname === '/api/browser/close') {
+                await handleBrowserClose(req, res);
+                return;
+            }
+            if (req.method === 'POST' && pathname === '/api/browser/launch-with-debug') {
+                await handleBrowserLaunchWithDebug(req, res);
+                return;
+            }
+            if (req.method === 'POST' && pathname === '/api/browser/check-port') {
+                await handleBrowserCheckPort(req, res);
                 return;
             }
 

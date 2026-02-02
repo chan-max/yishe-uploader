@@ -1,30 +1,38 @@
-const { createApp, reactive, computed } = Vue;
+const { createApp, reactive, computed, ref, nextTick } = Vue;
 
 const API_BASE = '';
-const BACKEND_BASE = {
-    dev: 'http://localhost:1520',
-    prod: 'https://1s.design:1520'
-};
 
 createApp({
     setup() {
+        const browserConnecting = ref(false);
+        const portChecking = ref(false);
+        const defaultUserDataDir = (() => {
+            // Windows: 给一个“可直接用”的默认目录，避免默认 Profile 导致端口起不来
+            const isWin = navigator.userAgent?.toLowerCase?.().includes('windows');
+            return isWin ? 'C:\\temp\\yishe-uploader-cdp-1s' : '/tmp/yishe-uploader-cdp-1s';
+        })();
         const state = reactive({
-            env: 'prod',
-            currentView: 'pending', // 'dashboard' | 'pending' | 'login'
             status: { message: '', type: 'info' },
-            pendingList: [],
-            loginStatus: {},
+            browserStatus: null,
+            browserConfig: {
+                cdpUserDataDir: defaultUserDataDir,
+                cdpPort: 9222
+            }
         });
 
-        const subtitle = computed(() => state.currentView === 'pending'
-            ? '查看待发布的商品并快速触发单条发布脚本'
-            : state.currentView === 'login' ? '查看并检查各平台登录状态' : '概览');
+        function getCdpPort() {
+            const p = parseInt(state.browserConfig.cdpPort, 10);
+            return (p > 0 && p < 65536) ? p : 9222;
+        }
 
-        const pendingCountDisplay = computed(() => state.pendingList.length || '-');
-        const loggedInPlatforms = computed(() => {
-            const entries = Object.values(state.loginStatus);
-            if (!entries.length) return '-';
-            return entries.filter(x => x && x.isLoggedIn).length;
+        const lastActivityText = computed(() => {
+            const ts = state.browserStatus?.lastActivity;
+            if (!ts) return '-';
+            try {
+                return new Date(ts).toLocaleString();
+            } catch {
+                return String(ts);
+            }
         });
 
         function setStatus(message, type = 'info') {
@@ -32,109 +40,132 @@ createApp({
             state.status.type = type;
         }
 
-        function mapItem(raw) {
-            return {
-                id: raw.id,
-                name: raw.name,
-                description: raw.description || '',
-                images: Array.isArray(raw.images) ? raw.images : [],
-                keywords: raw.keywords || '',
-                publishStatus: raw.publishStatus
-            };
-        }
-
-        async function refreshPending() {
-            setStatus('正在获取待发布商品...', 'info');
-            state.pendingList = [];
+        async function refreshBrowserStatus() {
             try {
-                const backendBase = BACKEND_BASE[state.env] || BACKEND_BASE.prod;
-                const res = await fetch(`${backendBase}/api/product/page`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        publishStatus: 'pending_social_media',
-                        includeRelations: false,
-                        page: 1,
-                        pageSize: 1000
-                    })
-                });
-                if (!res.ok) throw new Error(`服务器返回 ${res.status}`);
+                const res = await fetch(`${API_BASE}/api/browser/status`);
                 const data = await res.json();
-                const list = Array.isArray(data?.data?.list)
-                    ? data.data.list
-                    : Array.isArray(data?.list)
-                        ? data.list
-                        : Array.isArray(data?.data)
-                            ? data.data
-                            : [];
-                state.pendingList = list.map(mapItem);
-                setStatus(`共获取到 ${state.pendingList.length} 条商品`, 'success');
+                if (!data.success) throw new Error(data.message || '获取状态失败');
+                state.browserStatus = data.data;
             } catch (e) {
-                console.error('[pending] error', e);
-                setStatus(e.message || '获取数据失败', 'error');
+                // 不打断 UI，仅提示
+                console.error('[browser-status] error', e);
+                setStatus(e.message || '获取浏览器状态失败', 'error');
             }
         }
 
-        async function publishSingle(productId, evt) {
-            const btn = evt?.target;
-            if (btn) {
-                btn.disabled = true;
-                btn.textContent = '发布中...';
+        async function launchAndConnect() {
+            if (window.location.protocol === 'file:') {
+                setStatus('请先通过 http://localhost:7010 打开此页面（运行 npm start）', 'error');
+                return;
             }
+            browserConnecting.value = true;
+            setStatus('正在启动 Chrome（带调试端口）...', 'info');
+            await nextTick();
             try {
-                const res = await fetch(`${API_BASE}/api/publish`, {
+                const port = getCdpPort();
+                const userDataDir = (state.browserConfig.cdpUserDataDir || '').trim();
+                const launchRes = await fetch(`${API_BASE}/api/browser/launch-with-debug`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ env: state.env, productId })
+                    body: JSON.stringify({ port, userDataDir })
                 });
-                const result = await res.json();
-                if (!result.success) throw new Error(result.message || '发布失败');
-                if (btn) {
-                    btn.textContent = '发布成功';
-                    btn.classList.add('success');
-                }
-                setStatus(`商品 ${productId} 发布完成`, 'success');
+                const launchData = await launchRes.json();
+                if (!launchData.success) throw new Error(launchData.message || '启动失败');
+                setStatus('Chrome 已启动，等待 8 秒后连接（若失败会自动重试）...', 'info');
+                await new Promise(r => setTimeout(r, 8000));
+                const controller = new AbortController();
+                const timer = setTimeout(() => controller.abort(), 30000);
+                const connectRes = await fetch(`${API_BASE}/api/browser/connect`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ mode: 'cdp', cdpEndpoint: `http://127.0.0.1:${port}` }),
+                    signal: controller.signal
+                });
+                clearTimeout(timer);
+                const connectData = await connectRes.json();
+                if (!connectData.success) throw new Error(connectData.message || '连接失败');
+                state.browserStatus = connectData.data;
+                setStatus('浏览器已连接', 'success');
             } catch (e) {
-                console.error('[publish] error', e);
-                if (btn) {
-                    btn.disabled = false;
-                    btn.textContent = '发布';
-                }
-                setStatus(e.message || '发布失败', 'error');
+                console.error('[launch-and-connect] error', e);
+                const msg = e?.name === 'AbortError' ? '连接超时' : (e.message || '启动并连接失败');
+                setStatus(msg, 'error');
+            } finally {
+                browserConnecting.value = false;
             }
         }
 
-        async function checkLogin(force = false) {
-            setStatus('正在检查平台登录状态...', 'info');
-            state.loginStatus = {};
+        async function checkPort() {
+            if (window.location.protocol === 'file:') {
+                setStatus('请先通过 http://localhost:7010 打开此页面', 'error');
+                return;
+            }
+            portChecking.value = true;
+            setStatus('正在检测端口...', 'info');
             try {
-                const res = await fetch(`${API_BASE}/api/check-login`, {
+                const port = getCdpPort();
+                const res = await fetch(`${API_BASE}/api/browser/check-port`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ force })
+                    body: JSON.stringify({ port })
                 });
                 const data = await res.json();
-                if (!data.success) throw new Error(data.message || '检查失败');
-                state.loginStatus = data.data || {};
-                setStatus('登录状态检查完成', 'success');
+                if (!data.success) throw new Error(data.message || '检测失败');
+                const d = data.data;
+                if (d.ok) {
+                    setStatus(`端口 ${d.port} 已开放，Chrome 调试服务正常。${d.browser ? ' 版本: ' + d.browser : ''}`, 'success');
+                } else {
+                    setStatus(`端口 ${d.port} 未开放：${d.error || '无响应'}。可尝试：先点「连接」启动 Chrome；或改端口 9223/9224；或确认 user-data-dir 有写权限。`, 'error');
+                }
             } catch (e) {
-                console.error('[login] error', e);
-                setStatus(e.message || '检查登录状态失败', 'error');
+                console.error('[check-port] error', e);
+                setStatus(e.message || '检测端口失败', 'error');
+            } finally {
+                portChecking.value = false;
+            }
+        }
+
+        async function closeBrowser() {
+            browserConnecting.value = true;
+            setStatus('正在断开浏览器...', 'info');
+            try {
+                const res = await fetch(`${API_BASE}/api/browser/close`, { method: 'POST' });
+                const data = await res.json();
+                if (!data.success) throw new Error(data.message || '断开失败');
+                state.browserStatus = data.data;
+                setStatus('浏览器已断开', 'success');
+            } catch (e) {
+                console.error('[browser-close] error', e);
+                setStatus(e.message || '断开浏览器失败', 'error');
+            } finally {
+                browserConnecting.value = false;
             }
         }
 
         // initial
-        refreshPending();
+        if (window.location.protocol === 'file:') {
+            setStatus('请通过 http://localhost:7010 打开此页面（先运行 npm start）', 'error');
+        } else {
+            refreshBrowserStatus();
+        }
+
+        // 轮询刷新连接状态（仅当非 file 协议时）
+        setInterval(() => {
+            if (window.location.protocol !== 'file:') {
+                refreshBrowserStatus();
+            }
+        }, 2000);
 
         return {
+            browserConnecting,
+            portChecking,
             ...Vue.toRefs(state),
-            subtitle,
-            pendingCountDisplay,
-            loggedInPlatforms,
+            lastActivityText,
             setStatus,
-            refreshPending,
-            publishSingle,
-            checkLogin
+            refreshBrowserStatus,
+            checkPort,
+            launchAndConnect,
+            closeBrowser
         };
     }
 }).mount('#app');

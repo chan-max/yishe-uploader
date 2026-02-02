@@ -3,104 +3,67 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>YiShe Uploader 控制台</title>
+    <title>YiShe Browser Connector</title>
     <link rel="stylesheet" href="style.css">
     <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
 </head>
 <body>
-    <div id="app" class="app-root">
-        <aside class="sidebar">
-            <div class="brand">YiShe Uploader</div>
-            <nav class="menu">
-                <button :class="['menu-item', currentView==='dashboard' && 'active']" @click="currentView='dashboard'">仪表盘</button>
-                <button :class="['menu-item', currentView==='pending' && 'active']" @click="currentView='pending'">待发布商品</button>
-                <button :class="['menu-item', currentView==='login' && 'active']" @click="currentView='login'">平台登录状态</button>
-            </nav>
-            <div class="sidebar-footer">
-                <label class="env">
-                    环境
-                    <select v-model="env">
-                        <option value="prod">生产环境</option>
-                        <option value="dev">开发环境</option>
-                    </select>
-                </label>
+    <div id="app" class="page">
+        <header class="header">
+            <div class="header-title">
+                <div class="h1">Browser Connector</div>
+                <div class="sub">仅负责：连接/启动浏览器、断开、状态显示</div>
             </div>
-        </aside>
-        <main class="main">
-            <header class="topbar">
-                <div class="title">
-                    <h1 v-if="currentView==='dashboard'">仪表盘</h1>
-                    <h1 v-else-if="currentView==='pending'">待发布商品</h1>
-                    <h1 v-else>平台登录状态</h1>
-                    <p>{{ subtitle }}</p>
-                </div>
-                <div class="actions">
-                    <button v-if="currentView==='pending'" class="btn" @click="refreshPending">刷新列表</button>
-                    <button v-if="currentView==='login'" class="btn" @click="checkLogin(true)">检查登录状态</button>
-                </div>
-            </header>
+            <div class="header-actions">
+                <button class="btn primary" @click="launchAndConnect" :disabled="browserConnecting">
+                    {{ browserConnecting ? '连接中...' : '连接（启动并连接）' }}
+                </button>
+                <button class="btn" @click="refreshBrowserStatus" :disabled="browserConnecting">刷新状态</button>
+                <button class="btn" @click="checkPort" :disabled="portChecking">检测端口</button>
+                <button class="btn danger" @click="closeBrowser" :disabled="browserConnecting">断开</button>
+            </div>
+        </header>
 
-            <section class="content">
-                <div v-if="status.message" :class="['status-panel', status.type]">{{ status.message }}</div>
+        <main class="container">
+            <div v-if="status.message" :class="['status-panel', status.type]">{{ status.message }}</div>
 
-                <template v-if="currentView==='dashboard'">
-                    <div class="cards">
-                        <div class="card">
-                            <div class="card-title">待发布数量</div>
-                            <div class="card-value">{{ pendingCountDisplay }}</div>
-                            <div class="card-desc">来自 {{ env==='prod' ? '生产' : '开发' }} 环境</div>
-                        </div>
-                        <div class="card">
-                            <div class="card-title">已登录平台</div>
-                            <div class="card-value">{{ loggedInPlatforms }}</div>
-                            <div class="card-desc">点击左侧查看详情</div>
-                        </div>
-                    </div>
-                </template>
-
-                <template v-else-if="currentView==='pending'">
-                    <div class="table">
-                        <div class="thead">
-                            <div class="tr">
-                                <div class="th th-id">ID</div>
-                                <div class="th th-name">名称</div>
-                                <div class="th th-imgs">图片</div>
-                                <div class="th th-desc">描述</div>
-                                <div class="th th-keywords">关键字</div>
-                                <div class="th th-status">状态</div>
-                                <div class="th th-actions">操作</div>
-                            </div>
-                        </div>
-                        <div class="tbody">
-                            <div v-for="item in pendingList" :key="item.id" class="tr">
-                                <div class="td td-id">{{ item.id }}</div>
-                                <div class="td td-name" :title="item.name">{{ item.name || '未命名商品' }}</div>
-                                <div class="td td-images">
-                                    <template v-if="item.images && item.images.length">
-                                        <img v-for="(img,idx) in item.images.slice(0,3)" :key="idx" :src="img" :alt="item.name || '商品图片'" loading="lazy" />
-                                        <span v-if="item.images.length>3" class="more">+{{ item.images.length - 3 }}</span>
-                                    </template>
-                                    <template v-else>—</template>
-                                </div>
-                                <div class="td td-desc">{{ item.description || '—' }}</div>
-                                <div class="td td-keywords">{{ item.keywords || '—' }}</div>
-                                <div class="td td-status">{{ item.publishStatus || '-' }}</div>
-                                <div class="td td-actions">
-                                    <button class="publish-btn" @click="publishSingle(item.id, $event)">发布</button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </template>
-
-                <template v-else>
-                    <div class="login-status">
-                        <span v-for="(info, platform) in loginStatus" :key="platform" :class="['login-badge', info.isLoggedIn ? 'ok' : (info.status==='error' ? 'warn' : 'err')]">
-                            {{ platform }}：{{ info.isLoggedIn ? '已登录' : (info.status==='error' ? '异常' : '未登录') }}
+            <div class="browser-panel">
+                <div class="browser-card">
+                    <div class="browser-card-title">连接状态</div>
+                    <div class="browser-status-row">
+                        <span :class="['dot', browserStatus?.hasInstance ? 'ok' : 'err']"></span>
+                        <span class="browser-status-text">
+                            {{ browserStatus?.hasInstance ? '已连接' : '未连接' }}
                         </span>
                     </div>
-                </template>
-            </section>
+                    <div class="browser-meta">
+                        <div><span class="k">页面数量</span><span class="v">{{ browserStatus?.pageCount ?? '-' }}</span></div>
+                        <div><span class="k">最后活动</span><span class="v">{{ lastActivityText }}</span></div>
+                    <div><span class="k">模式</span><span class="v">{{ browserStatus?.connection?.mode ?? '-' }}</span></div>
+                    <div><span class="k">Profile</span><span class="v">{{ browserStatus?.connection?.profileDir ?? '-' }}</span></div>
+                    <div><span class="k">UserData</span><span class="v" style="word-break:break-all">{{ browserStatus?.connection?.userDataDir ?? '-' }}</span></div>
+                    </div>
+                </div>
+
+                <div class="browser-card">
+                    <div class="browser-card-title">连接参数</div>
+                    <div class="form">
+                        <label class="field">
+                            <div class="label">CDP User Data Dir（默认值一般可直接用）</div>
+                            <input v-model="browserConfig.cdpUserDataDir" placeholder="例如：C:\temp\yishe-uploader-cdp" />
+                            <span class="inline-hint">用于稳定开启 9222（独立浏览器配置目录）。首次需要在该目录的 Chrome 里登录一次。</span>
+                        </label>
+                        <label class="field">
+                            <div class="label">CDP 端口（9222 被占用可改为 9223、9224）</div>
+                            <input v-model.number="browserConfig.cdpPort" type="number" placeholder="9222" style="width:120px" />
+                            <span class="inline-hint">→ http://127.0.0.1:{{ browserConfig.cdpPort || 9222 }}</span>
+                        </label>
+                    </div>
+                    <div class="hint">
+                        <strong>重要：</strong>为保证 9222 稳定可用，本工具默认使用独立的 <code>--user-data-dir</code> 启动 Chrome。首次使用需要在新打开的 Chrome 里登录一次（之后会一直复用该目录的登录态）。用 Edge 打开此页面即可。
+                    </div>
+                </div>
+            </div>
         </main>
     </div>
 

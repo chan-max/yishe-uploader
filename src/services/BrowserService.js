@@ -1,28 +1,40 @@
 /**
- * 浏览器服务 - 管理 Puppeteer 浏览器实例
+ * 浏览器服务 - 管理 Playwright 浏览器实例
+ *
+ * 目标：复用你电脑“本地浏览器”的登录态（cookie/session）
+ *
+ * 支持两种模式（通过环境变量选择）：
+ * - BROWSER_MODE=persistent (默认): launchPersistentContext 使用 Chrome User Data（需要关闭正在运行的 Chrome，否则 profile 会被占用）
+ * - BROWSER_MODE=cdp: connectOverCDP 连接已开启远程调试端口的 Chrome（需你用 --remote-debugging-port 启动）
  */
 
-import puppeteer from 'puppeteer-extra';
-import StealthPlugin from 'puppeteer-extra-plugin-stealth';
+import { chromium } from 'playwright';
+import { spawn } from 'child_process';
 import {
     join as pathJoin
 } from 'path';
 import {
     existsSync,
+    rmSync,
     mkdirSync,
-    rmSync
+    readFileSync
 } from 'fs';
 import {
     logger
 } from '../utils/logger.js';
+import os from 'os';
 
-// 使用 stealth 插件
-puppeteer.use(StealthPlugin());
-
-// 全局浏览器实例
-let browserInstance = null;
-// 当前用户数据目录
-let currentUserDataDir = null;
+// 全局：Playwright Browser / BrowserContext
+let browserInstance = null;    // playwright Browser（cdp模式使用）
+let contextInstance = null;    // playwright BrowserContext（persistent/cdp 都会有）
+let currentUserDataDir = null; // 当前 user data dir（persistent）
+let currentProfileDir = null;
+let currentExecutablePath = null;
+let currentMode = null;
+let currentBrowserName = null;
+let currentCdpEndpoint = null;
+let connectPromise = null;
+let lastConnectError = null;
 // 浏览器状态管理
 let browserStatus = {
     isInitialized: false,
@@ -31,16 +43,134 @@ let browserStatus = {
     pageCount: 0
 };
 
+function existsAny(paths = []) {
+    for (const p of paths) {
+        try {
+            if (p && existsSync(p)) return p;
+        } catch {
+            // ignore
+        }
+    }
+    return null;
+}
+
+function getDefaultExecutablePath() {
+    if (process.platform === 'win32') {
+        const pf = process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)';
+        const pf64 = process.env.ProgramFiles || 'C:\\Program Files';
+        return existsAny([
+            pathJoin(pf64, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+            pathJoin(pf, 'Google', 'Chrome', 'Application', 'chrome.exe')
+        ]) || pathJoin(pf64, 'Google', 'Chrome', 'Application', 'chrome.exe');
+    }
+    if (process.platform === 'darwin') {
+        return '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+    }
+    return '/usr/bin/google-chrome';
+}
+
+function getDefaultUserDataDir() {
+    if (process.platform === 'win32') {
+        const localAppData = process.env.LOCALAPPDATA || pathJoin(os.homedir(), 'AppData', 'Local');
+        return pathJoin(localAppData, 'Google', 'Chrome', 'User Data');
+    }
+    if (process.platform === 'darwin') {
+        return pathJoin(os.homedir(), 'Library', 'Application Support', 'Google', 'Chrome');
+    }
+    return pathJoin(os.homedir(), '.config', 'google-chrome');
+}
+
+function getBrowserMode() {
+    return (process.env.BROWSER_MODE || 'persistent').toLowerCase();
+}
+
+function buildPersistentLaunchOptions({ profileDir, executablePath }) {
+    const args = [
+        '--start-maximized',
+        '--no-first-run',
+        '--no-default-browser-check',
+        ...(profileDir ? [`--profile-directory=${profileDir}`] : [])
+    ];
+    return {
+        headless: false,
+        executablePath: executablePath,
+        args,
+        viewport: null,
+        ignoreHTTPSErrors: true
+    };
+}
+
+function withTimeout(promise, ms, label) {
+    let t;
+    const timeout = new Promise((_, reject) => {
+        t = setTimeout(() => reject(new Error(`${label} timeout after ${ms}ms`)), ms);
+    });
+    return Promise.race([promise.finally(() => clearTimeout(t)), timeout]);
+}
+
+function tryListProfiles(userDataDir) {
+    // 读取 Chrome/Edge 的 "Local State" 来列出 profile 目录（可用于 UI 下拉选择）
+    try {
+        const localStatePath = pathJoin(userDataDir, 'Local State');
+        if (!existsSync(localStatePath)) return [];
+        const raw = readFileSync(localStatePath, 'utf-8');
+        const json = JSON.parse(raw);
+        const infoCache = json?.profile?.info_cache || {};
+        return Object.entries(infoCache).map(([dir, info]) => ({
+            dir,
+            name: info?.name || dir,
+            isDefault: dir === 'Default'
+        }));
+    } catch {
+        return [];
+    }
+}
+
+/**
+ * 启动带远程调试端口的 Chrome（仅 --remote-debugging-port，使用默认 profile = 你的登录态）
+ * 使用前请先完全关闭 Chrome，否则会提示 profile 被占用。
+ */
+export function launchWithDebugPort({ port = 9222 }) {
+    const exe = getDefaultExecutablePath();
+    if (!exe || !existsSync(exe)) {
+        throw new Error(`未找到 Chrome 可执行文件: ${exe}，请确认已安装 Google Chrome`);
+    }
+    const userDataDir =
+        (typeof arguments[0] === 'object' && arguments[0] && arguments[0].userDataDir)
+            ? String(arguments[0].userDataDir).trim()
+            : '';
+
+    const args = [
+        '--remote-debugging-address=127.0.0.1',
+        `--remote-debugging-port=${port}`,
+        ...(userDataDir ? [`--user-data-dir=${userDataDir}`] : [])
+    ];
+
+    if (userDataDir) {
+        try {
+            mkdirSync(userDataDir, { recursive: true });
+        } catch (e) {
+            throw new Error(`无法创建/访问 user-data-dir: ${userDataDir}，请确认路径可写。原错误: ${e.message}`);
+        }
+    }
+
+    const child = spawn(exe, args, { stdio: 'ignore', detached: true });
+    child.unref();
+    const pid = child.pid;
+    logger.info(`已启动 Chrome pid=${pid} port=${port}，使用默认 profile`);
+    return { port, browserName: 'chrome', pid };
+}
+
 /**
  * 检查浏览器是否可用
  */
 export async function isBrowserAvailable() {
-    if (!browserInstance) {
+    if (!contextInstance && !browserInstance) {
         return false;
     }
 
     try {
-        const pages = await browserInstance.pages();
+        const pages = contextInstance ? contextInstance.pages() : await browserInstance.pages();
         browserStatus.isConnected = true;
         browserStatus.pageCount = pages.length;
         browserStatus.lastActivity = Date.now();
@@ -59,21 +189,29 @@ export async function isBrowserAvailable() {
 export async function detectExistingBrowser() {
     try {
         // 尝试连接到现有的浏览器实例
-        if (browserInstance && await isBrowserAvailable()) {
+        if ((contextInstance || browserInstance) && await isBrowserAvailable()) {
             logger.info('检测到现有浏览器实例，页面数量:', browserStatus.pageCount);
-            return browserInstance;
+            return {
+                newPage: async () => {
+                    if (!contextInstance) {
+                        // 兜底：cdp模式 browser 可能存在多个 context
+                        contextInstance = browserInstance.contexts()[0] || await browserInstance.newContext();
+                    }
+                    return await contextInstance.newPage();
+                }
+            };
         }
 
         // 如果浏览器实例存在但不可用，清理它
-        if (browserInstance) {
+        if (browserInstance || contextInstance) {
             logger.info('现有浏览器实例不可用，将重新创建');
             browserInstance = null;
+            contextInstance = null;
             browserStatus.isInitialized = false;
             browserStatus.isConnected = false;
         }
 
-        // 不再尝试连接到 localhost:9222
-        logger.debug('每次都创建新的浏览器实例');
+        logger.debug('未发现可复用实例，将创建新的 Playwright 实例');
         return null;
 
     } catch (error) {
@@ -85,7 +223,20 @@ export async function detectExistingBrowser() {
 /**
  * 获取或创建浏览器实例
  */
-export async function getOrCreateBrowser() {
+export async function getOrCreateBrowser(options = {}) {
+    // 并发保护：多次点击只跑一次连接
+    if (connectPromise) {
+        await connectPromise;
+        return {
+            newPage: async () => {
+                if (!contextInstance) {
+                    contextInstance = browserInstance?.contexts?.()[0] || await browserInstance?.newContext?.();
+                }
+                return await contextInstance.newPage();
+            }
+        };
+    }
+
     // 首先尝试检测现有浏览器
     const existingBrowser = await detectExistingBrowser();
     if (existingBrowser) {
@@ -96,164 +247,99 @@ export async function getOrCreateBrowser() {
     logger.info('启动新的浏览器实例...');
 
     try {
-        // 使用固定的用户数据目录，保存登录信息
-        const baseUserDataDir = process.platform === 'win32' ?
-            'C:\\temp\\puppeteer-user-data' :
-            '/tmp/puppeteer-user-data';
+        const mode = (options.mode || getBrowserMode()).toLowerCase();
+        currentMode = mode;
+        currentBrowserName = 'chrome';
+        lastConnectError = null;
 
-        // 先尝试启动固定目录，如果失败则使用临时目录
-        let userDataDir = baseUserDataDir;
-        let browserLaunched = false;
+        connectPromise = (async () => {
+            if (mode === 'cdp') {
+                const endpoint = options.cdpEndpoint || process.env.CDP_ENDPOINT || 'http://127.0.0.1:9222';
+                currentCdpEndpoint = endpoint;
+                logger.info('使用 CDP 模式连接浏览器:', endpoint);
+                // Chrome 启动后端口可能需几秒才就绪，重试连接
+                const maxRetries = 10;
+                const retryDelayMs = 2000;
+                let lastErr;
+                for (let i = 0; i < maxRetries; i++) {
+                    try {
+                        browserInstance = await withTimeout(chromium.connectOverCDP(endpoint), 15000, 'connectOverCDP');
+                        break;
+                    } catch (e) {
+                        lastErr = e;
+                        if (i < maxRetries - 1) {
+                            logger.info(`CDP 连接失败，${retryDelayMs / 1000} 秒后重试 (${i + 1}/${maxRetries})...`);
+                            await new Promise(r => setTimeout(r, retryDelayMs));
+                        } else {
+                            throw new Error(
+                                `连接 Chrome 失败 (ECONNREFUSED)。请确保：(1) 点击「启动并连接」前已完全关闭所有 Chrome 进程（含任务管理器、系统托盘）；` +
+                                `(2) 若 Chrome 已打开，请先关闭再重新点击。原错误: ${e.message}`
+                            );
+                        }
+                    }
+                }
+                contextInstance = browserInstance.contexts()[0] || await browserInstance.newContext();
 
-        // 第一次尝试：使用固定目录
-        try {
-            logger.info('尝试使用固定用户数据目录:', baseUserDataDir);
-            currentUserDataDir = userDataDir;
+                browserStatus.isInitialized = true;
+                browserStatus.isConnected = true;
+                browserStatus.lastActivity = Date.now();
+                browserStatus.pageCount = contextInstance.pages().length;
 
-            browserInstance = await puppeteer.launch({
-                headless: false, // 设置为false以显示浏览器窗口
-                defaultViewport: null, // 使用默认视口大小
-                userDataDir: userDataDir, // 保存用户数据，包括登录信息
-                args: [
-                    '--start-maximized',
-                    '--no-sandbox',
-                    '--disable-setuid-sandbox',
-                    '--disable-dev-shm-usage',
-                    '--disable-blink-features=AutomationControlled', // 隐藏自动化标识
-                    '--disable-web-security',
-                    '--disable-features=VizDisplayCompositor',
-                    '--disable-extensions-except',
-                    '--disable-plugins-discovery',
-                    '--disable-default-apps',
-                    '--no-first-run',
-                    '--no-default-browser-check',
-                    '--disable-background-timer-throttling',
-                    '--disable-backgrounding-occluded-windows',
-                    '--disable-renderer-backgrounding',
-                    '--disable-features=TranslateUI',
-                    '--disable-ipc-flooding-protection',
-                    '--disable-hang-monitor',
-                    '--disable-prompt-on-repost',
-                    '--disable-domain-reliability',
-                    '--disable-component-extensions-with-background-pages',
-                    '--disable-background-networking',
-                    '--disable-sync',
-                    '--metrics-recording-only',
-                    '--no-report-upload',
-                    '--disable-infobars', // 禁用信息栏
-                    '--disable-breakpad', // 禁用崩溃报告
-                    '--noerrdialogs', // 不显示错误对话框
-                    '--disable-gpu-sandbox', // 禁用GPU沙箱
-                    '--disable-software-rasterizer', // 禁用软件光栅化
-                    '--disable-profile-resetter' // 禁用配置文件重置
-                ]
-            });
+                currentUserDataDir = null;
+                currentProfileDir = null;
+                currentExecutablePath = null;
 
-            // 更新浏览器状态
+                return;
+            }
+
+            // persistent：复用系统 Chrome 的 user data（包含 cookie/session）
+            const chromeUserDataDir = options.chromeUserDataDir || process.env.CHROME_USER_DATA_DIR || getDefaultUserDataDir();
+            const profileDir = options.chromeProfileDir || process.env.CHROME_PROFILE_DIR || 'Default';
+            const executablePath = options.chromeExecutablePath || process.env.CHROME_EXECUTABLE_PATH || getDefaultExecutablePath();
+
+            currentUserDataDir = chromeUserDataDir;
+            currentProfileDir = profileDir;
+            currentExecutablePath = executablePath;
+            currentCdpEndpoint = null;
+
+            logger.info('使用 persistent 模式启动 (复用本机 Chrome profile)');
+            logger.info('user data dir:', chromeUserDataDir);
+            logger.info('profile dir:', profileDir);
+            logger.info('executable:', executablePath);
+
+            try {
+                contextInstance = await withTimeout(
+                    chromium.launchPersistentContext(
+                        chromeUserDataDir,
+                        buildPersistentLaunchOptions({ profileDir, executablePath })
+                    ),
+                    60000,
+                    'launchPersistentContext'
+                );
+            } catch (e) {
+                // 常见：浏览器正在运行导致 profile 被占用
+                throw new Error(
+                    `启动 Chrome 失败（常见原因：Chrome 正在运行占用 profile，或 profileDir 选错）。` +
+                    `请先完全关闭 Chrome（含后台进程），并确认 profileDir（Default/Profile 1...）。原错误: ${e.message}`
+                );
+            }
+
             browserStatus.isInitialized = true;
             browserStatus.isConnected = true;
             browserStatus.lastActivity = Date.now();
-            browserStatus.pageCount = 0;
+            browserStatus.pageCount = contextInstance.pages().length;
+        })();
 
-            logger.info('新浏览器实例启动成功，用户数据目录:', userDataDir);
-            logger.info('浏览器状态已更新:', browserStatus);
-            browserLaunched = true;
-
-        } catch (firstError) {
-            // 如果固定目录被占用，先尝试清理锁文件，然后重试
-            logger.warn('固定目录被占用，尝试清理锁文件后重试:', firstError.message);
-
-            // macOS/Linux 上可能需要清理多个锁文件
-            const lockFiles = process.platform === 'win32' ? [`${baseUserDataDir}\\SingletonLock`] : [
-                `${baseUserDataDir}/SingletonLock`,
-                `${baseUserDataDir}/SingletonCookie`,
-                `${baseUserDataDir}/SingletonSocket`
-            ];
-
-            let hasLockFiles = false;
-            for (const lockFile of lockFiles) {
-                if (existsSync(lockFile)) {
-                    hasLockFiles = true;
-                    try {
-                        rmSync(lockFile, {
-                            force: true
-                        });
-                        logger.info(`已删除锁文件: ${lockFile}`);
-                    } catch (err) {
-                        logger.warn(`删除锁文件失败: ${lockFile}`, err.message);
-                    }
-                }
-            }
-
-            if (hasLockFiles) {
-                logger.info('所有锁文件已清理，重试启动固定目录...');
-
-                try {
-                    // 等待一小段时间让浏览器进程完全关闭
-                    await new Promise(resolve => setTimeout(resolve, 1000));
-
-                    // 再次尝试启动固定目录
-                    browserInstance = await puppeteer.launch({
-                        headless: false,
-                        defaultViewport: null,
-                        userDataDir: baseUserDataDir,
-                        args: [
-                            '--start-maximized',
-                            '--no-sandbox',
-                            '--disable-setuid-sandbox',
-                            '--disable-dev-shm-usage',
-                            '--disable-blink-features=AutomationControlled',
-                            '--disable-web-security',
-                            '--disable-features=VizDisplayCompositor',
-                            '--disable-extensions-except',
-                            '--disable-plugins-discovery',
-                            '--disable-default-apps',
-                            '--no-first-run',
-                            '--no-default-browser-check',
-                            '--disable-background-timer-throttling',
-                            '--disable-backgrounding-occluded-windows',
-                            '--disable-renderer-backgrounding',
-                            '--disable-features=TranslateUI',
-                            '--disable-ipc-flooding-protection',
-                            '--disable-hang-monitor',
-                            '--disable-prompt-on-repost',
-                            '--disable-domain-reliability',
-                            '--disable-component-extensions-with-background-pages',
-                            '--disable-background-networking',
-                            '--disable-sync',
-                            '--metrics-recording-only',
-                            '--no-report-upload',
-                            '--disable-infobars',
-                            '--disable-breakpad',
-                            '--noerrdialogs',
-                            '--disable-gpu-sandbox',
-                            '--disable-software-rasterizer',
-                            '--disable-profile-resetter'
-                        ]
-                    });
-
-                    browserStatus.isInitialized = true;
-                    browserStatus.isConnected = true;
-                    browserStatus.lastActivity = Date.now();
-                    browserStatus.pageCount = 0;
-
-                    logger.info('重试成功，使用固定目录:', baseUserDataDir);
-                    browserLaunched = true;
-                } catch (retryError) {
-                    logger.error('重试失败，浏览器可能仍在运行:', retryError.message);
-                    logger.info('请手动关闭现有浏览器后重试');
-                    throw new Error(`固定目录被占用，请先关闭现有浏览器: ${retryError.message}`);
-                }
-            } else {
-                // 锁文件不存在，但启动失败，抛出原错误
-                logger.error('锁文件不存在但启动失败:', firstError.message);
-                throw firstError;
-            }
+        try {
+            await connectPromise;
+        } catch (e) {
+            lastConnectError = e?.message || String(e);
+            throw e;
+        } finally {
+            connectPromise = null;
         }
 
-        if (browserLaunched) {
-            return browserInstance;
-        }
+        return { newPage: async () => await contextInstance.newPage() };
 
     } catch (error) {
         logger.error('浏览器启动失败:', error);
@@ -262,266 +348,23 @@ export async function getOrCreateBrowser() {
 }
 
 /**
- * 为页面添加反检测脚本
- */
-export async function setupAntiDetection(page) {
-    // 设置更真实的 user-agent
-    await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-
-    // 注入反检测脚本
-    await page.evaluateOnNewDocument(() => {
-        // 更彻底的 webdriver 伪装
-        // 方法1: 删除原型链上的 webdriver 属性
-        delete navigator.__proto__.webdriver;
-
-        // 方法2: 使用 Object.defineProperty 重新定义
-        Object.defineProperty(navigator, 'webdriver', {
-            get: () => false,
-            configurable: true,
-            enumerable: false
-        });
-
-        // 方法3: 确保在 navigator 对象上也不存在
-        if ('webdriver' in navigator) {
-            delete navigator.webdriver;
-        }
-
-        // 方法4: 使用 Proxy 来拦截所有访问
-        const originalNavigator = navigator;
-        const navigatorProxy = new Proxy(originalNavigator, {
-            get: function(target, prop) {
-                if (prop === 'webdriver') {
-                    return false;
-                }
-                return target[prop];
-            },
-            has: function(target, prop) {
-                if (prop === 'webdriver') {
-                    return false;
-                }
-                return prop in target;
-            }
-        });
-
-        // 尝试替换全局 navigator
-        try {
-            Object.defineProperty(window, 'navigator', {
-                value: navigatorProxy,
-                writable: false,
-                configurable: false
-            });
-        } catch (e) {
-            // 如果无法替换，至少确保 webdriver 返回 false
-            console.log('无法替换全局 navigator，使用备用方案');
-        }
-
-        // 伪装插件
-        Object.defineProperty(navigator, 'plugins', {
-            get: () => [1, 2, 3, 4, 5],
-        });
-
-        // 伪装语言
-        Object.defineProperty(navigator, 'languages', {
-            get: () => ['zh-CN', 'zh', 'en'],
-        });
-
-        // 伪装平台
-        Object.defineProperty(navigator, 'platform', {
-            get: () => 'MacIntel',
-        });
-
-        // 伪装硬件并发数
-        Object.defineProperty(navigator, 'hardwareConcurrency', {
-            get: () => 8,
-        });
-
-        // 伪装设备内存
-        Object.defineProperty(navigator, 'deviceMemory', {
-            get: () => 8,
-        });
-
-        // 伪装连接
-        Object.defineProperty(navigator, 'connection', {
-            get: () => ({
-                effectiveType: '4g',
-                rtt: 50,
-                downlink: 10,
-                saveData: false,
-            }),
-        });
-
-        // 伪装 Chrome 运行时
-        window.chrome = {
-            runtime: {},
-        };
-
-        // 伪装 WebGL
-        const getParameter = WebGLRenderingContext.prototype.getParameter;
-        WebGLRenderingContext.prototype.getParameter = function(parameter) {
-            if (parameter === 37445) {
-                return 'Intel Inc.';
-            }
-            if (parameter === 37446) {
-                return 'Intel(R) Iris(TM) Graphics 6100';
-            }
-            return getParameter.call(this, parameter);
-        };
-
-        // 伪装 Canvas
-        const originalGetContext = HTMLCanvasElement.prototype.getContext;
-        HTMLCanvasElement.prototype.getContext = function(type, ...args) {
-            const context = originalGetContext.call(this, type, ...args);
-            if (type === '2d') {
-                const originalFillText = context.fillText;
-                context.fillText = function(...args) {
-                    return originalFillText.apply(this, args);
-                };
-            }
-            return context;
-        };
-
-        // 伪装 AudioContext
-        const originalAudioContext = window.AudioContext || window.webkitAudioContext;
-        if (originalAudioContext) {
-            window.AudioContext = originalAudioContext;
-            window.webkitAudioContext = originalAudioContext;
-        }
-
-        // 伪装 MediaDevices
-        if (navigator.mediaDevices) {
-            const originalGetUserMedia = navigator.mediaDevices.getUserMedia;
-            navigator.mediaDevices.getUserMedia = function(constraints) {
-                return Promise.reject(new Error('Not allowed'));
-            };
-        }
-
-        // 伪装 Battery API
-        if ('getBattery' in navigator) {
-            navigator.getBattery = () => Promise.resolve({
-                charging: true,
-                chargingTime: Infinity,
-                dischargingTime: Infinity,
-                level: 1,
-            });
-        }
-
-        // 伪装 Notification
-        if ('Notification' in window) {
-            Object.defineProperty(Notification, 'permission', {
-                get: () => 'granted',
-            });
-        }
-
-        // 伪装 ServiceWorker
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register = () => Promise.resolve({
-                scope: '',
-                updateViaCache: 'all',
-                scriptURL: '',
-                state: 'activated',
-                unregister: () => Promise.resolve(true),
-                update: () => Promise.resolve(),
-            });
-        }
-
-        // 伪装 WebDriver
-        Object.defineProperty(navigator, 'webdriver', {
-            get: () => false,
-        });
-
-
-        // 伪装 Automation
-        Object.defineProperty(window, 'navigator', {
-            writable: true,
-            value: {
-                ...navigator,
-                webdriver: false,
-            },
-        });
-
-        // 伪装 Chrome 对象
-        window.chrome = {
-            app: {
-                isInstalled: false,
-                InstallState: {
-                    DISABLED: 'disabled',
-                    INSTALLED: 'installed',
-                    NOT_INSTALLED: 'not_installed',
-                },
-                RunningState: {
-                    CANNOT_RUN: 'cannot_run',
-                    READY_TO_RUN: 'ready_to_run',
-                    RUNNING: 'running',
-                },
-            },
-            runtime: {
-                OnInstalledReason: {
-                    CHROME_UPDATE: 'chrome_update',
-                    INSTALL: 'install',
-                    SHARED_MODULE_UPDATE: 'shared_module_update',
-                    UPDATE: 'update',
-                },
-                OnRestartRequiredReason: {
-                    APP_UPDATE: 'app_update',
-                    OS_UPDATE: 'os_update',
-                    PERIODIC: 'periodic',
-                },
-                PlatformArch: {
-                    ARM: 'arm',
-                    ARM64: 'arm64',
-                    MIPS: 'mips',
-                    MIPS64: 'mips64',
-                    X86_32: 'x86-32',
-                    X86_64: 'x86-64',
-                },
-                PlatformNaclArch: {
-                    ARM: 'arm',
-                    MIPS: 'mips',
-                    MIPS64: 'mips64',
-                    X86_32: 'x86-32',
-                    X86_64: 'x86-64',
-                },
-                PlatformOs: {
-                    ANDROID: 'android',
-                    CROS: 'cros',
-                    LINUX: 'linux',
-                    MAC: 'mac',
-                    OPENBSD: 'openbsd',
-                    WIN: 'win',
-                },
-                RequestUpdateCheckStatus: {
-                    NO_UPDATE: 'no_update',
-                    THROTTLED: 'throttled',
-                    UPDATE_AVAILABLE: 'update_available',
-                },
-            },
-        };
-    });
-
-    // 设置视口大小
-    await page.setViewport({
-        width: 1920,
-        height: 1080,
-        deviceScaleFactor: 1,
-    });
-
-    // 设置额外的请求头
-    await page.setExtraHTTPHeaders({
-        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
-        'Cache-Control': 'no-cache',
-        'Pragma': 'no-cache',
-    });
-}
-
-/**
  * 获取浏览器状态信息
  */
 export function getBrowserStatus() {
     return {
         ...browserStatus,
-        hasInstance: !!browserInstance,
+        hasInstance: !!browserInstance || !!contextInstance,
+        connecting: !!connectPromise,
+        lastError: lastConnectError,
+        connection: {
+            mode: currentMode,
+            browserName: currentBrowserName,
+            executablePath: currentExecutablePath,
+            userDataDir: currentUserDataDir,
+            profileDir: currentProfileDir,
+            cdpEndpoint: currentCdpEndpoint,
+            detectedProfiles: currentUserDataDir ? tryListProfiles(currentUserDataDir) : []
+        },
         timestamp: new Date().toISOString()
     };
 }
@@ -531,12 +374,11 @@ export function getBrowserStatus() {
  */
 export function updateBrowserActivity() {
     browserStatus.lastActivity = Date.now();
-    if (browserInstance) {
-        browserInstance.pages().then(pages => {
-            browserStatus.pageCount = pages.length;
-        }).catch(() => {
-            browserStatus.pageCount = 0;
-        });
+    try {
+        const pages = contextInstance ? contextInstance.pages() : (browserInstance ? browserInstance.pages() : []);
+        browserStatus.pageCount = pages.length;
+    } catch {
+        browserStatus.pageCount = 0;
     }
 }
 
@@ -553,41 +395,31 @@ export function keepBrowserOpen() {
  */
 export async function closeBrowser() {
     try {
+        if (contextInstance) {
+            try {
+                await contextInstance.close();
+                logger.info('BrowserContext 已关闭');
+            } catch (e) {
+                logger.warn('关闭 BrowserContext 失败:', e.message);
+            } finally {
+                contextInstance = null;
+            }
+        }
         if (browserInstance) {
             try {
                 await browserInstance.close();
-                logger.info('浏览器实例已关闭');
-            } catch (error) {
-                logger.error('关闭浏览器实例时出错:', error);
+                logger.info('Browser 已关闭');
+            } catch (e) {
+                logger.warn('关闭 Browser 失败:', e.message);
             } finally {
                 browserInstance = null;
-                browserStatus.isInitialized = false;
-                browserStatus.isConnected = false;
-                browserStatus.pageCount = 0;
-
-                // 只清理临时用户数据目录（包含进程ID和时间戳的目录）
-                // 保留固定的用户数据目录以保存登录信息
-                if (currentUserDataDir && existsSync(currentUserDataDir)) {
-                    // 检查是否为临时目录（包含时间戳格式）
-                    const isTemporaryDir = /puppeteer-user-data-\d+-\d+/.test(currentUserDataDir);
-
-                    if (isTemporaryDir) {
-                        try {
-                            rmSync(currentUserDataDir, {
-                                recursive: true,
-                                force: true
-                            });
-                            logger.info('临时用户数据目录已清理:', currentUserDataDir);
-                        } catch (error) {
-                            logger.warn('清理临时用户数据目录失败:', error.message);
-                        }
-                    } else {
-                        logger.info('保留用户数据目录以保存登录信息:', currentUserDataDir);
-                    }
-                }
-                currentUserDataDir = null;
             }
         }
+
+        browserStatus.isInitialized = false;
+        browserStatus.isConnected = false;
+        browserStatus.pageCount = 0;
+        currentUserDataDir = null;
     } catch (error) {
         logger.error('清理浏览器资源时出错:', error);
     }
@@ -601,10 +433,12 @@ export async function clearUserData() {
         // 先关闭浏览器
         await closeBrowser();
 
-        // 使用当前保存的用户数据目录
-        const userDataDir = currentUserDataDir || (process.platform === 'win32' ?
-            'C:\\temp\\puppeteer-user-data' :
-            '/tmp/puppeteer-user-data');
+        // ⚠️ 保护：避免误删你真实 Chrome 的 user data。
+        // 如确需清理，请通过环境变量明确指定目录。
+        const userDataDir = process.env.CLEAR_USER_DATA_DIR;
+        if (!userDataDir) {
+            throw new Error('为避免误删本机 Chrome 数据，请通过环境变量 CLEAR_USER_DATA_DIR 指定要清除的目录');
+        }
 
         // 删除用户数据目录
         if (existsSync(userDataDir)) {
@@ -638,12 +472,8 @@ export async function cleanup() {
 
 // 导出默认的浏览器服务类
 export class BrowserService {
-    static async getOrCreateBrowser() {
-        return getOrCreateBrowser();
-    }
-
-    static async setupAntiDetection(page) {
-        return setupAntiDetection(page);
+    static async getOrCreateBrowser(options = {}) {
+        return getOrCreateBrowser(options);
     }
 
     static async close() {
@@ -668,6 +498,10 @@ export class BrowserService {
 
     static async detectExistingBrowser() {
         return detectExistingBrowser();
+    }
+
+    static launchWithDebugPort(options = {}) {
+        return launchWithDebugPort(options);
     }
 
     static updateActivity() {

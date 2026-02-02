@@ -180,11 +180,11 @@ class KuaishouPublisher {
 
         logger.info('开始上传图片...');
         const [fileChooser] = await Promise.all([
-            page.waitForFileChooser(),
+            page.waitForEvent('filechooser'),
             uploadButton.click()
         ]);
 
-        await fileChooser.accept(tempPaths);
+        await fileChooser.setFiles(tempPaths);
         logger.info('已上传所有图片:', tempPaths);
 
         // 等待图片上传完成
