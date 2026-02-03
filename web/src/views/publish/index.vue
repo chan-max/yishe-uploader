@@ -1,73 +1,105 @@
 <template>
   <div class="publish-page">
-    <div v-if="status.message" :class="['msg', 'msg--' + status.type]">{{ status.message }}</div>
-    <div class="card">
-      <div class="card__title">发布内容</div>
-      <div class="card__content">
-        <div class="form-fields">
-          <div class="field">
-            <label>发布平台</label>
-            <div class="platform-chips">
-              <label v-for="p in platformList" :key="p.id" class="chip" :class="{ 'chip--active': form.platforms.includes(p.id) }">
-                <input v-model="form.platforms" type="checkbox" :value="p.id" class="chip-input" />
-                <span class="chip-label">{{ p.icon }} {{ p.name }}</span>
-              </label>
+    <div class="publish-layout">
+      <!-- 左侧：发布表单 -->
+      <div class="publish-left">
+        <div v-if="status.message" :class="['ui', 'message', statusMsgClass]">{{ status.message }}</div>
+
+        <div class="ui segment">
+          <h3 class="ui dividing header">发布内容</h3>
+          <div class="ui small form">
+            <div class="field">
+              <label>发布平台</label>
+              <div class="platform-chips">
+                <div v-for="p in platformList" :key="p.id" class="ui checkbox">
+                  <input v-model="form.platforms" type="checkbox" :value="p.id" :id="'platform-' + p.id" />
+                  <label :for="'platform-' + p.id">{{ p.icon }} {{ p.name }}</label>
+                </div>
+              </div>
+              <small style="color: #999;">可多选，单平台或多平台均使用同一发布接口</small>
             </div>
-            <small>请先连接浏览器并在各平台登录后再发布</small>
-          </div>
-          <div class="field">
-            <label>视频文件</label>
-            <div class="upload-zone" @click="triggerFileInput" @dragover.prevent="dragOver = true" @dragleave="dragOver = false" @drop.prevent="onDrop">
-              <input ref="fileInputRef" type="file" accept="video/*" class="upload-input" @change="onFileSelect" />
-              <span v-if="!form.filePath" class="upload-placeholder">{{ dragOver ? '松开上传' : '点击或拖拽视频到此处' }}</span>
-              <span v-else class="upload-filename">{{ uploadedFilename }}</span>
+
+            <div class="field">
+              <label>视频文件</label>
+              <div class="upload-zone" @click="triggerFileInput" @dragover.prevent="dragOver = true" @dragleave="dragOver = false" @drop.prevent="onDrop">
+                <input ref="fileInputRef" type="file" accept="video/*" class="upload-input" @change="onFileSelect" />
+                <span v-if="!form.filePath" class="upload-placeholder">{{ dragOver ? '松开上传' : '点击或拖拽视频到此处' }}</span>
+                <span v-else class="upload-filename"><i class="file video icon"></i> {{ uploadedFilename }}</span>
+              </div>
+              <small style="color: #999;">支持 MP4、MOV 等，最大 4GB。需先上传获得 filePath 再发布。</small>
             </div>
-            <small>支持 MP4、MOV 等，最大 4GB。上传后由服务端保存到临时目录供发布使用。</small>
-          </div>
-          <div class="field">
-            <label>标题</label>
-            <input v-model="form.title" type="text" class="input" placeholder="作品标题（如抖音限 30 字）" maxlength="100" />
-          </div>
-          <div class="field">
-            <label>话题标签</label>
-            <input v-model="tagsInput" type="text" class="input" placeholder="多个标签用空格或逗号分隔，如：美食 探店" />
-            <small>发布时会自动加上 # 前缀</small>
-          </div>
-          <div class="field">
-            <label>定时发布</label>
-            <div class="row">
-              <label class="checkbox-wrap"><input v-model="form.scheduled" type="checkbox" /><span>启用定时</span></label>
-              <input v-if="form.scheduled" v-model="form.scheduleTime" type="datetime-local" class="input input--datetime" />
+
+            <div class="field">
+              <label>标题</label>
+              <input v-model="form.title" type="text" placeholder="作品标题（如抖音限 30 字）" maxlength="100" />
+            </div>
+
+            <div class="field">
+              <label>话题标签</label>
+              <input v-model="tagsInput" type="text" placeholder="多个标签用空格或逗号分隔，如：美食 探店" />
+              <small style="color: #999;">发布时会自动加上 # 前缀</small>
+            </div>
+
+            <div class="field">
+              <label>定时发布</label>
+              <div class="inline fields">
+                <div class="field">
+                  <div class="ui checkbox">
+                    <input v-model="form.scheduled" type="checkbox" id="scheduled" />
+                    <label for="scheduled">启用定时</label>
+                  </div>
+                </div>
+                <div v-if="form.scheduled" class="field">
+                  <input v-model="form.scheduleTime" type="datetime-local" style="max-width: 16rem;" />
+                </div>
+              </div>
+            </div>
+
+            <div v-if="form.platforms.includes('douyin')" class="field">
+              <label>抖音设置</label>
+              <div class="two fields">
+                <div class="field">
+                  <input v-model="form.platformSettings.douyin.productLink" type="text" placeholder="商品链接（选填）" />
+                </div>
+                <div class="field">
+                  <input v-model="form.platformSettings.douyin.productTitle" type="text" placeholder="商品短标题（选填）" />
+                </div>
+              </div>
             </div>
           </div>
-          <div v-if="form.platforms.includes('douyin')" class="field platform-extra">
-            <label>抖音设置</label>
-            <div class="sub-fields">
-              <input v-model="form.platformSettings.douyin.productLink" type="text" class="input" placeholder="商品链接（选填）" />
-              <input v-model="form.platformSettings.douyin.productTitle" type="text" class="input" placeholder="商品短标题（选填）" />
-            </div>
+
+          <div class="ui small buttons" style="margin-top: 1rem;">
+            <button type="button" class="ui primary button" :class="{ loading: publishing }" :disabled="publishing || !canPublish" @click="handlePublish">
+              发布
+            </button>
+            <button type="button" class="ui button" :class="{ loading: loginLoading }" :disabled="loginLoading" @click="refreshLoginStatus">
+              刷新登录状态
+            </button>
           </div>
         </div>
       </div>
-    </div>
-    <div class="publish-actions">
-      <button type="button" class="btn btn--primary" :disabled="publishing || !canPublish" @click="handlePublish">
-        <span v-if="publishing" class="btn__loading">发布中...</span>
-        <span v-else>发布</span>
-      </button>
-      <button type="button" class="btn btn--secondary" :disabled="loginLoading" @click="refreshLoginStatus">
-        {{ loginLoading ? '检测中...' : '刷新登录状态' }}
-      </button>
-    </div>
-    <div v-if="Object.keys(loginStatus).length" class="card login-status-card">
-      <div class="card__title">各平台登录状态</div>
-      <div class="card__content">
-        <div class="status-grid">
-          <div v-for="(info, platformId) in loginStatus" :key="platformId" class="status-item">
-            <span class="status-dot" :class="info.isLoggedIn ? 'status-dot--ok' : 'status-dot--err'" />
-            <span class="status-name">{{ platformName(platformId) }}</span>
-            <span class="status-msg">{{ info.message || (info.isLoggedIn ? '已登录' : '未登录') }}</span>
+
+      <!-- 右侧：登录状态 + 接口说明（自适应宽度铺满，超出可滚动） -->
+      <div class="publish-right">
+        <div v-if="Object.keys(loginStatus).length" class="ui segment">
+          <h3 class="ui dividing header">登录状态</h3>
+          <div class="ui relaxed divided list">
+            <div v-for="(info, platformId) in loginStatus" :key="platformId" class="item">
+              <span class="status-indicator">
+                <span class="status-dot" :class="{ ok: info.isLoggedIn, fail: !info.isLoggedIn }"></span>
+                <span class="status-name">{{ platformName(platformId) }}</span>
+              </span>
+              <span class="status-msg">{{ info.message || (info.isLoggedIn ? '已登录' : '未登录') }}</span>
+            </div>
           </div>
+        </div>
+
+        <div class="ui segment api-doc-card">
+          <h3 class="ui dividing header">接口说明</h3>
+          <p class="api-doc-desc">对外统一使用 <strong>POST /api/publish</strong>：单平台传 <code>platform</code>，多平台传 <code>platforms</code>，参数一致。</p>
+          <router-link to="/api-doc" class="ui small primary button fluid">
+            <i class="book icon"></i> 查看 API 文档
+          </router-link>
         </div>
       </div>
     </div>
@@ -103,6 +135,12 @@ const tagsInput = ref('')
 
 const uploadedFilename = computed(() => (form.filePath ? form.filePath.split(/[/\\]/).pop() || '已选择' : ''))
 const canPublish = computed(() => form.platforms.length > 0 && form.filePath && form.title.trim().length > 0)
+
+const statusMsgClass = computed(() => {
+  if (status.type === 'success') return 'success'
+  if (status.type === 'error') return 'error'
+  return 'info'
+})
 
 function platformName(id) { return platformList.find(p => p.id === id)?.name || id }
 function setStatus(message, type = 'info') { status.message = message; status.type = type }
@@ -169,7 +207,7 @@ async function handlePublish() {
       scheduleTime: form.scheduled && form.scheduleTime ? new Date(form.scheduleTime).toISOString() : undefined,
       platformSettings: { douyin: form.platformSettings.douyin, xiaohongshu: form.platformSettings.xiaohongshu }
     }
-    const res = await fetch(`${API_BASE}/api/publish/batch`, {
+    const res = await fetch(`${API_BASE}/api/publish`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
@@ -199,38 +237,58 @@ onMounted(() => { fetchPlatforms(); refreshLoginStatus() })
 
 <style lang="scss" scoped>
 .publish-page {
-  .msg { padding: 0.75rem 1rem; border-radius: 4px; margin-bottom: 1rem; font-size: 0.875rem; border: 1px solid; }
-  .msg--success { background: #ecfdf5; border-color: #a7f3d0; color: #065f46; }
-  .msg--error { background: #fef2f2; border-color: #fecaca; color: #991b1b; }
-  .msg--info { background: #f0f9ff; border-color: #bae6fd; color: #0c4a6e; }
-  .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 4px; margin-bottom: 1rem; overflow: hidden; }
-  .card__title { padding: 0.75rem 1rem; font-weight: 600; font-size: 0.875rem; border-bottom: 1px solid #e5e7eb; color: #374151; }
-  .card__content { padding: 1rem; }
-  .form-fields { display: flex; flex-direction: column; gap: 1rem; }
-  .field { display: flex; flex-direction: column; gap: 0.25rem; label { font-weight: 500; font-size: 0.875rem; color: #374151; } small { color: #9ca3af; font-size: 0.75rem; } }
-  .platform-chips { display: flex; flex-wrap: wrap; gap: 0.5rem; }
-  .chip { display: inline-flex; align-items: center; padding: 0.375rem 0.75rem; border: 1px solid #d1d5db; border-radius: 4px; cursor: pointer; font-size: 0.875rem; background: #fff; transition: background 0.12s, border-color 0.12s; .chip-input { position: absolute; opacity: 0; width: 0; height: 0; } &.chip--active { background: #eff6ff; border-color: #3b82f6; color: #1d4ed8; } }
-  .chip-label { user-select: none; }
-  .upload-zone { position: relative; border: 1px dashed #d1d5db; border-radius: 4px; padding: 1.25rem; text-align: center; cursor: pointer; background: #fafafa; transition: background 0.12s, border-color 0.12s; &:hover { background: #f3f4f6; border-color: #9ca3af; } }
+  .publish-layout {
+    display: flex;
+    gap: 1rem;
+    align-items: stretch;
+    min-height: calc(100vh - 160px);
+  }
+  .publish-left {
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 640px;
+  }
+  .publish-right {
+    flex: 1 1 0;
+    min-width: 280px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+  .platform-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    .ui.checkbox { margin: 0; }
+  }
+  .upload-zone {
+    position: relative;
+    border: 1px dashed rgba(34, 36, 38, 0.15);
+    border-radius: 4px;
+    padding: 1.25rem;
+    text-align: center;
+    cursor: pointer;
+    background: #fafafa;
+    transition: background 0.2s, border-color 0.2s;
+    &:hover {
+      background: #f0f0f0;
+      border-color: rgba(34, 36, 38, 0.25);
+    }
+  }
   .upload-input { position: absolute; width: 0; height: 0; opacity: 0; }
-  .upload-placeholder, .upload-filename { font-size: 0.875rem; color: #6b7280; }
-  .upload-filename { color: #059669; }
-  .input { width: 100%; padding: 0.5rem 0.75rem; font-size: 0.875rem; border: 1px solid #d1d5db; border-radius: 4px; font-family: inherit; &:focus { outline: none; border-color: #3b82f6; } }
-  .input--datetime { max-width: 16rem; margin-top: 0.5rem; }
-  .row { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
-  .checkbox-wrap { display: inline-flex; align-items: center; gap: 0.5rem; font-size: 0.875rem; cursor: pointer; input { width: 1rem; height: 1rem; } }
-  .platform-extra .sub-fields { display: flex; flex-direction: column; gap: 0.5rem; }
-  .publish-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 1rem; }
-  .btn { padding: 0.5rem 1rem; font-size: 0.875rem; font-weight: 500; border-radius: 4px; border: 1px solid; cursor: pointer; font-family: inherit; transition: background 0.12s, border-color 0.12s; &:disabled { opacity: 0.5; cursor: not-allowed; } }
-  .btn--primary { background: #22c55e; border-color: #22c55e; color: #fff; &:hover:not(:disabled) { background: #16a34a; border-color: #16a34a; } }
-  .btn--secondary { background: #fff; border-color: #d1d5db; color: #374151; &:hover:not(:disabled) { background: #f3f4f6; border-color: #9ca3af; } }
-  .btn__loading { opacity: 0.9; }
-  .login-status-card .status-grid { display: flex; flex-direction: column; gap: 0.5rem; }
-  .status-item { display: flex; align-items: center; gap: 0.5rem; font-size: 0.875rem; }
-  .status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-  .status-dot--ok { background: #22c55e; }
-  .status-dot--err { background: #ef4444; }
+  .upload-placeholder { font-size: 0.9em; color: #999; }
+  .upload-filename { font-size: 0.9em; color: #21ba45; }
+  .status-indicator { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.9em; }
+  .status-dot {
+    width: 8px; height: 8px; border-radius: 50%; background: #999;
+    &.ok { background: #21ba45; }
+    &.fail { background: #db2828; }
+  }
   .status-name { font-weight: 500; min-width: 4rem; }
-  .status-msg { color: #6b7280; }
+  .status-msg { color: #666; margin-left: 0.5rem; }
+  .ui.list .item { display: flex; align-items: center; justify-content: space-between; }
+  .api-doc-card .api-doc-desc { font-size: 0.85em; color: #555; margin-bottom: 0.75rem; line-height: 1.5; }
+  .api-doc-card code { background: #f5f5f5; padding: 2px 6px; border-radius: 3px; font-size: 0.9em; }
 }
 </style>

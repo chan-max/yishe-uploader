@@ -1,7 +1,7 @@
 @echo off
 chcp 65001 >nul
 echo ==================================
-echo 易社媒体发布系统 - 启动脚本
+echo Yishe Uploader - 启动脚本
 echo ==================================
 echo.
 

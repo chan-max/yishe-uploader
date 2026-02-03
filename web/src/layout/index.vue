@@ -1,27 +1,35 @@
 <template>
-  <div class="layout">
-    <aside class="layout-sidebar">
+  <div class="app-layout">
+    <aside class="sidebar">
       <div class="sidebar-header">
-        <span class="sidebar-title">易社发布</span>
+        <h2>
+          <i class="cloud upload icon"></i>
+          Yishe Uploader
+        </h2>
+        <div class="sidebar-tagline">多平台发布</div>
       </div>
-      <nav class="sidebar-nav">
+      <div class="sidebar-menu">
         <router-link
           v-for="item in menuItems"
           :key="item.path"
           :to="item.path"
-          class="nav-item"
-          active-class="nav-item--active"
+          class="menu-item"
+          active-class="active"
         >
-          <span class="nav-icon">{{ item.icon }}</span>
-          <span class="nav-label">{{ item.title }}</span>
+          <i :class="item.icon + ' icon'"></i>
+          <span>{{ item.title }}</span>
         </router-link>
-      </nav>
+      </div>
     </aside>
-    <main class="layout-main">
-      <header class="main-header">
-        <h1 class="main-title">{{ currentTitle }}</h1>
-      </header>
-      <div class="main-content">
+    <main class="main-content">
+      <div class="main-content-inner" :class="{ 'publish-full-width': isPublishPage }">
+        <h1 class="ui header page-header">
+          <i :class="headerIcon + ' icon'"></i>
+          <div class="content">
+            {{ currentTitle }}
+            <div class="sub header">{{ currentSubtitle }}</div>
+          </div>
+        </h1>
         <router-view />
       </div>
     </main>
@@ -34,35 +42,112 @@ import { useRoute } from 'vue-router'
 
 const route = useRoute()
 const menuItems = [
-  { path: '/browser', title: '浏览器连接', icon: '🔗' },
-  { path: '/publish', title: '平台发布', icon: '📤' }
+  { path: '/browser', title: '浏览器连接', icon: 'linkify' },
+  { path: '/publish', title: '平台发布', icon: 'upload' },
+  { path: '/api-doc', title: 'API 文档', icon: 'book' }
 ]
 const currentTitle = computed(() => {
   const r = route.matched.find(m => m.meta?.title)
-  return r?.meta?.title || '易社发布'
+  return r?.meta?.title || 'Yishe Uploader'
 })
+const currentSubtitle = computed(() => {
+  const r = route.matched.find(m => m.meta?.subtitle)
+  return r?.meta?.subtitle || '多平台内容发布控制台'
+})
+const headerIcon = computed(() => {
+  const item = menuItems.find(m => route.path.startsWith(m.path))
+  return item?.icon || 'home'
+})
+const isPublishPage = computed(() => route.path.startsWith('/publish'))
 </script>
 
 <style lang="scss" scoped>
-.layout { display: flex; width: 100%; height: 100vh; overflow: hidden; }
-.layout-sidebar {
-  width: 200px; min-width: 200px; background: #f9fafb; color: #374151;
-  display: flex; flex-direction: column; border-right: 1px solid #e5e7eb;
+.app-layout {
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
 }
-.sidebar-header { padding: 1rem; border-bottom: 1px solid #e5e7eb; }
-.sidebar-title { font-size: 1rem; font-weight: 600; color: #111827; }
-.sidebar-nav { flex: 1; padding: 0.5rem 0; overflow-y: auto; }
-.nav-item {
-  display: flex; align-items: center; gap: 0.5rem; padding: 0.625rem 1rem;
-  color: #6b7280; text-decoration: none; transition: background 0.12s, color 0.12s;
-  margin: 0 0.25rem; border-radius: 4px; font-size: 0.875rem;
-  &:hover { background: #f3f4f6; color: #111827; }
-  &.nav-item--active { background: #eff6ff; color: #2563eb; font-weight: 500; }
+.sidebar {
+  width: 220px;
+  background: #1b1c1d;
+  color: #fff;
+  position: fixed;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  overflow-y: auto;
+  z-index: 1000;
 }
-.nav-icon { font-size: 1rem; opacity: 0.85; }
-.nav-label { font-size: 0.875rem; }
-.layout-main { flex: 1; display: flex; flex-direction: column; min-width: 0; background: #fff; }
-.main-header { padding: 0.875rem 1.25rem; border-bottom: 1px solid #e5e7eb; background: #fff; }
-.main-title { margin: 0; font-size: 1.125rem; font-weight: 600; color: #111827; }
-.main-content { flex: 1; padding: 1.25rem; overflow-y: auto; background: #fafafa; }
+.sidebar-header {
+  padding: 1rem 0.75rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  h2 {
+    color: #fff;
+    margin: 0;
+    font-size: 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+}
+.sidebar-tagline {
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.65);
+  margin-top: 0.25rem;
+}
+.sidebar-menu {
+  padding: 0.5rem 0;
+}
+.menu-item {
+  padding: 0.75rem 1rem;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  color: rgba(255, 255, 255, 0.8);
+  border-left: 3px solid transparent;
+  text-decoration: none;
+  &.active {
+    background-color: rgba(33, 133, 208, 0.2);
+    color: #fff;
+    border-left-color: #2185d0;
+  }
+  &:hover:not(.active) {
+    background-color: rgba(255, 255, 255, 0.1);
+    color: #fff;
+  }
+  .icon {
+    width: 20px;
+    text-align: center;
+  }
+}
+.main-content {
+  flex: 1;
+  min-height: 0;
+  height: 100vh;
+  max-height: 100vh;
+  margin-left: 220px;
+  padding: 1rem 1.5rem;
+  overflow-x: hidden;
+  overflow-y: auto;
+  box-sizing: border-box;
+}
+.main-content-inner {
+  max-width: 960px;
+  width: 100%;
+}
+/* 发布页使用整行宽度，便于右侧栏铺满 */
+.main-content-inner.publish-full-width {
+  max-width: none;
+}
+.page-header {
+  margin-bottom: 1.5rem !important;
+  .ui.header {
+    font-size: 1.15em;
+  }
+  .sub.header {
+    font-size: 0.85em;
+  }
+}
 </style>

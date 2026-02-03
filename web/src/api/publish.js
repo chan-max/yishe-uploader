@@ -1,11 +1,13 @@
 import request from './index'
 
-export function publishContent(data) {
+/** 发布（单平台传 platform，多平台传 platforms，同一接口） */
+export function publish(data) {
   return request({ url: '/publish', method: 'post', data })
 }
 
+/** @deprecated 请使用 publish，传 platforms 即可 */
 export function batchPublish(data) {
-  return request({ url: '/publish/batch', method: 'post', data })
+  return request({ url: '/publish', method: 'post', data })
 }
 
 export function getPublishHistory(params) {

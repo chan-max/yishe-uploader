@@ -1,57 +1,59 @@
 <template>
   <div class="browser-page">
-    <div v-if="status.message" :class="['msg', 'msg--' + status.type]">
+    <div v-if="status.message" :class="['ui', 'message', statusTypeClass]">
       {{ status.message }}
     </div>
-    <div class="browser-cards">
-      <div class="card">
-        <div class="card__title">连接状态</div>
-        <div class="card__content">
-          <div class="status-row">
-            <span class="status-dot" :class="browserStatus?.hasInstance ? 'status-dot--ok' : 'status-dot--err'" />
-            <span class="status-text">{{ browserStatus?.hasInstance ? '已连接' : '未连接' }}</span>
+
+    <div class="ui two column grid">
+      <div class="column">
+        <div class="ui segment">
+          <h3 class="ui dividing header">连接状态</h3>
+          <div class="status-indicator">
+            <span class="status-dot" :class="{ ok: browserStatus?.hasInstance, fail: !browserStatus?.hasInstance }"></span>
+            <span>{{ browserStatus?.hasInstance ? '已连接' : '未连接' }}</span>
           </div>
-          <div class="status-meta">
-            <div class="meta-row"><span class="meta-k">页面数</span><span>{{ browserStatus?.pageCount ?? '-' }}</span></div>
-            <div class="meta-row"><span class="meta-k">最后活动</span><span>{{ lastActivityText }}</span></div>
-            <div class="meta-row"><span class="meta-k">模式</span><span>{{ browserStatus?.connection?.mode ?? '-' }}</span></div>
-            <div class="meta-row"><span class="meta-k">Profile</span><span>{{ browserStatus?.connection?.profileDir ?? '-' }}</span></div>
-            <div class="meta-row"><span class="meta-k">UserData</span><span class="meta-v">{{ browserStatus?.connection?.userDataDir ?? '-' }}</span></div>
+          <div class="ui list" style="margin-top: 1rem;">
+            <div class="item"><strong>页面数</strong><span class="right floated">{{ browserStatus?.pageCount ?? '-' }}</span></div>
+            <div class="item"><strong>最后活动</strong><span class="right floated">{{ lastActivityText }}</span></div>
+            <div class="item"><strong>模式</strong><span class="right floated">{{ browserStatus?.connection?.mode ?? '-' }}</span></div>
+            <div class="item"><strong>Profile</strong><span class="right floated">{{ browserStatus?.connection?.profileDir ?? '-' }}</span></div>
+            <div class="item"><strong>UserData</strong><span class="right floated meta-v">{{ browserStatus?.connection?.userDataDir ?? '-' }}</span></div>
           </div>
         </div>
       </div>
-      <div class="card">
-        <div class="card__title">连接参数</div>
-        <div class="card__content">
-          <div class="form-fields">
+      <div class="column">
+        <div class="ui segment">
+          <h3 class="ui dividing header">连接参数</h3>
+          <div class="ui small form">
             <div class="field">
               <label>CDP User Data Dir</label>
-              <input v-model="browserConfig.cdpUserDataDir" type="text" class="input" placeholder="例如：C:\temp\yishe-uploader-cdp" />
-              <small>独立浏览器配置目录，首次需在该 Chrome 内登录一次</small>
+              <input v-model="browserConfig.cdpUserDataDir" type="text" placeholder="例如：C:\temp\yishe-uploader-cdp" />
+              <small style="color: #999;">独立浏览器配置目录，首次需在该 Chrome 内登录一次</small>
             </div>
             <div class="field">
               <label>CDP 端口</label>
-              <input v-model.number="browserConfig.cdpPort" type="number" class="input port-input" placeholder="9222" />
-              <small>→ http://127.0.0.1:{{ browserConfig.cdpPort || 9222 }}</small>
+              <input v-model.number="browserConfig.cdpPort" type="number" placeholder="9222" style="max-width: 8rem;" />
+              <small style="color: #999;">→ http://127.0.0.1:{{ browserConfig.cdpPort || 9222 }}</small>
             </div>
           </div>
-          <div class="form-hint msg msg--info">
+          <div class="ui small info message" style="margin-top: 0.75rem;">
             为保证 9222 稳定可用，默认使用独立的 <code>--user-data-dir</code> 启动 Chrome。首次使用需在新打开的 Chrome 内登录一次，之后会复用该目录的登录态。
           </div>
         </div>
       </div>
     </div>
-    <div class="browser-actions">
-      <button type="button" class="btn btn--primary" :disabled="browserConnecting" @click="launchAndConnect">
-        <span v-if="browserConnecting" class="btn__loading">连接中...</span>
-        <span v-else>连接</span>
-      </button>
-      <button type="button" class="btn btn--secondary" :disabled="browserConnecting" @click="refreshBrowserStatus">刷新</button>
-      <button type="button" class="btn btn--secondary" :disabled="portChecking" @click="checkPort">
-        <span v-if="portChecking" class="btn__loading">检测中...</span>
-        <span v-else>检测端口</span>
-      </button>
-      <button type="button" class="btn btn--danger" :disabled="browserConnecting" @click="closeBrowser">断开</button>
+
+    <div class="ui segment" style="margin-top: 1rem;">
+      <div class="ui small buttons">
+        <button type="button" class="ui primary button" :class="{ loading: browserConnecting }" :disabled="browserConnecting" @click="launchAndConnect">
+          连接
+        </button>
+        <button type="button" class="ui button" :disabled="browserConnecting" @click="refreshBrowserStatus">刷新</button>
+        <button type="button" class="ui button" :class="{ loading: portChecking }" :disabled="portChecking" @click="checkPort">
+          检测端口
+        </button>
+        <button type="button" class="ui red button" :disabled="browserConnecting" @click="closeBrowser">断开</button>
+      </div>
     </div>
   </div>
 </template>
@@ -74,6 +76,12 @@ const lastActivityText = computed(() => {
   const ts = browserStatus.value?.lastActivity
   if (!ts) return '-'
   try { return new Date(ts).toLocaleString() } catch { return String(ts) }
+})
+
+const statusTypeClass = computed(() => {
+  if (status.type === 'success') return 'success'
+  if (status.type === 'error') return 'error'
+  return 'info'
 })
 
 function setStatus(message, type = 'info') { status.message = message; status.type = type }
@@ -170,33 +178,21 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 
 <style lang="scss" scoped>
 .browser-page {
-  .msg { padding: 0.75rem 1rem; border-radius: 4px; margin-bottom: 1rem; font-size: 0.875rem; border: 1px solid; }
-  .msg--success { background: #ecfdf5; border-color: #a7f3d0; color: #065f46; }
-  .msg--error { background: #fef2f2; border-color: #fecaca; color: #991b1b; }
-  .msg--info { background: #f0f9ff; border-color: #bae6fd; color: #0c4a6e; code { background: #e0f2fe; padding: 2px 6px; border-radius: 2px; font-size: 0.8125rem; } }
-  .browser-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 1rem; }
-  .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 4px; overflow: hidden; }
-  .card__title { padding: 0.75rem 1rem; font-weight: 600; font-size: 0.875rem; border-bottom: 1px solid #e5e7eb; background: #fff; color: #374151; }
-  .card__content { padding: 1rem; }
-  .browser-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 1.25rem; }
-  .btn { padding: 0.5rem 1rem; font-size: 0.875rem; font-weight: 500; border-radius: 4px; border: 1px solid; cursor: pointer; font-family: inherit; transition: background 0.12s, border-color 0.12s; &:disabled { opacity: 0.5; cursor: not-allowed; } }
-  .btn--primary { background: #22c55e; border-color: #22c55e; color: #fff; &:hover:not(:disabled) { background: #16a34a; border-color: #16a34a; } }
-  .btn--secondary { background: #fff; border-color: #d1d5db; color: #374151; &:hover:not(:disabled) { background: #f3f4f6; border-color: #9ca3af; } }
-  .btn--danger { background: #fff; border-color: #f87171; color: #dc2626; &:hover:not(:disabled) { background: #fef2f2; border-color: #ef4444; } }
-  .btn__loading { opacity: 0.9; }
-  .input { width: 100%; padding: 0.5rem 0.75rem; font-size: 0.875rem; border: 1px solid #d1d5db; border-radius: 4px; font-family: inherit; background: #fff; &:focus { outline: none; border-color: #3b82f6; } }
-  .port-input { width: 8rem; }
-  .status-row { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; }
-  .status-text { font-weight: 600; font-size: 1rem; }
-  .status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-  .status-dot--ok { background: #22c55e; }
-  .status-dot--err { background: #ef4444; }
-  .status-meta { margin-top: 0.5rem; }
-  .meta-row { display: flex; justify-content: space-between; padding: 0.375rem 0; border-bottom: 1px solid #f3f4f6; font-size: 0.8125rem; }
-  .meta-k { color: #6b7280; margin-right: 0.5rem; }
-  .meta-v { word-break: break-all; max-width: 200px; text-align: right; color: #374151; }
-  .form-fields { display: flex; flex-direction: column; gap: 0.75rem; }
-  .field { display: flex; flex-direction: column; gap: 0.25rem; label { font-weight: 500; font-size: 0.875rem; color: #374151; } small { color: #9ca3af; font-size: 0.75rem; } }
-  .form-hint { margin-top: 0.75rem; }
+  .status-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.9em;
+  }
+  .status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #999;
+    &.ok { background: #21ba45; }
+    &.fail { background: #db2828; }
+  }
+  .meta-v { word-break: break-all; max-width: 200px; }
+  .ui.list .item { display: flex; justify-content: space-between; align-items: center; }
 }
 </style>

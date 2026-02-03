@@ -78,10 +78,12 @@ class ApiServer {
 
             // API 路由
             if (reqPath.startsWith('/api')) {
-                if (reqPath === '/api/publish' && method === 'POST') {
-                    await this.handlePublish(req, res);
-                } else if (reqPath === '/api/publish/batch' && method === 'POST') {
-                    await this.handleBatchPublish(req, res);
+                if (reqPath === '/api' && method === 'GET') {
+                    await this.handleApiIndex(req, res);
+                } else if (reqPath === '/api/docs' && method === 'GET') {
+                    await this.handleApiDocs(req, res);
+                } else if (reqPath === '/api/publish' && method === 'POST') {
+                    await this.handlePublishUnified(req, res);
                 } else if (reqPath === '/api/schedule' && method === 'POST') {
                     await this.handleCreateSchedule(req, res);
                 } else if (reqPath === '/api/platforms' && method === 'GET') {
@@ -115,35 +117,98 @@ class ApiServer {
     }
 
     /**
-     * 处理发布请求
+     * API 概览（供前端/外部发现）
      */
-    async handlePublish(req, res) {
-        const body = await this.parseBody(req);
-        const { platform, ...publishInfo } = body;
-
-        if (!platform) {
-            this.sendResponse(res, 400, { error: '缺少platform参数' });
-            return;
-        }
-
-        const result = await publishService.publishToPlatform(platform, publishInfo);
-        this.sendResponse(res, 200, result);
+    async handleApiIndex(req, res) {
+        const base = `http://${req.headers.host}`;
+        this.sendResponse(res, 200, {
+            name: 'Yishe Uploader API',
+            version: '2.0',
+            docs: `${base}/api/docs`,
+            endpoints: [
+                { method: 'GET', path: '/api', description: 'API 概览（本接口）' },
+                { method: 'GET', path: '/api/docs', description: 'API 文档（JSON）' },
+                { method: 'POST', path: '/api/publish', description: '发布（单平台传 platform，多平台传 platforms）' },
+                { method: 'POST', path: '/api/schedule', description: '创建定时发布' },
+                { method: 'GET', path: '/api/platforms', description: '支持的平台列表' },
+                { method: 'POST', path: '/api/upload', description: '上传视频/图片文件' },
+                { method: 'GET', path: '/api/login-status', description: '各平台登录状态' },
+                { method: 'GET', path: '/api/browser/status', description: '浏览器连接状态' },
+                { method: 'POST', path: '/api/browser/connect', description: '连接浏览器' },
+                { method: 'POST', path: '/api/browser/close', description: '关闭浏览器' },
+                { method: 'POST', path: '/api/browser/launch-with-debug', description: '启动带调试端口的 Chrome' },
+                { method: 'POST', path: '/api/browser/check-port', description: '检测 CDP 端口' }
+            ]
+        });
     }
 
     /**
-     * 处理批量发布请求
+     * API 文档（机器可读的接口说明）
      */
-    async handleBatchPublish(req, res) {
-        const body = await this.parseBody(req);
-        const { platforms, concurrent = false, ...publishInfo } = body;
+    async handleApiDocs(req, res) {
+        const base = `http://${req.headers.host}`;
+        this.sendResponse(res, 200, {
+            openapi: '3.0.0',
+            info: { title: 'Yishe Uploader API', version: '2.0' },
+            servers: [{ url: base }],
+            paths: {
+                '/api/publish': {
+                    post: {
+                        summary: '发布到平台（单平台或多平台统一接口）',
+                        requestBody: {
+                            required: true,
+                            content: {
+                                'application/json': {
+                                    schema: {
+                                        type: 'object',
+                                        required: ['title', 'filePath'],
+                                        properties: {
+                                            platform: { type: 'string', description: '单平台时使用，如 douyin' },
+                                            platforms: { type: 'array', items: { type: 'string' }, description: '多平台时使用' },
+                                            title: { type: 'string' },
+                                            filePath: { type: 'string', description: '先通过 /api/upload 上传后得到的 path' },
+                                            tags: { type: 'array', items: { type: 'string' } },
+                                            scheduled: { type: 'boolean' },
+                                            scheduleTime: { type: 'string', format: 'date-time' },
+                                            concurrent: { type: 'boolean', description: '多平台时是否并发' },
+                                            platformSettings: { type: 'object' }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        responses: { 200: { description: '发布结果' } }
+                    }
+                }
+            }
+        });
+    }
 
-        if (!platforms || !Array.isArray(platforms) || platforms.length === 0) {
-            this.sendResponse(res, 400, { error: '缺少platforms参数或格式错误' });
+    /**
+     * 统一发布：单平台传 platform，多平台传 platforms，一个接口
+     */
+    async handlePublishUnified(req, res) {
+        const body = await this.parseBody(req);
+        const { platform, platforms, concurrent = false, ...publishInfo } = body;
+
+        const hasSingle = platform != null && typeof platform === 'string';
+        const hasMultiple = platforms != null && Array.isArray(platforms) && platforms.length > 0;
+
+        if (hasSingle && !hasMultiple) {
+            const result = await publishService.publishToPlatform(platform, publishInfo);
+            this.sendResponse(res, 200, result);
             return;
         }
-
-        const result = await publishService.batchPublish(platforms, publishInfo, { concurrent });
-        this.sendResponse(res, 200, result);
+        if (hasMultiple && !hasSingle) {
+            const result = await publishService.batchPublish(platforms, publishInfo, { concurrent });
+            this.sendResponse(res, 200, result);
+            return;
+        }
+        if (hasSingle && hasMultiple) {
+            this.sendResponse(res, 400, { success: false, error: '请只传 platform（单平台）或 platforms（多平台），不要同时传' });
+            return;
+        }
+        this.sendResponse(res, 400, { success: false, error: '请传 platform（字符串，单平台）或 platforms（数组，多平台）' });
     }
 
     /**

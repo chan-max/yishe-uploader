@@ -1,4 +1,4 @@
-# 易社媒体发布系统 (Yishe Uploader)
+# Yishe Uploader
 
 一个功能强大的多平台社交媒体自动发布系统，支持抖音、快手、小红书、微博等多个主流平台。采用 Vue3 + Playwright 技术栈，提供友好的 Web 界面和完善的 API 接口。
 
@@ -73,39 +73,19 @@ npm run web:dev
 
 ### API 调用
 
-#### 发布到单个平台
+发布使用**统一接口**，单平台或多平台均为 `POST /api/publish`，通过参数区分：
+
+- **单平台**：传 `platform`（字符串），如 `"douyin"`
+- **多平台**：传 `platforms`（数组），如 `["douyin", "xiaohongshu"]`
+
+完整参数与示例见 [docs/API.md](docs/API.md)。发现接口：`GET /api` 返回端点列表，`GET /api/docs` 返回 OpenAPI 风格 JSON。
 
 ```javascript
-POST /api/publish
+// 单平台
+POST /api/publish  { "platform": "douyin", "title": "标题", "filePath": "先上传获得" }
 
-{
-  "platform": "douyin",
-  "title": "视频标题",
-  "content": "视频描述",
-  "videoUrl": "/path/to/video.mp4",
-  "tags": ["标签1", "标签2"],
-  "platformSettings": {
-    "douyin": {
-      "productLink": "商品链接",
-      "location": "北京市"
-    }
-  }
-}
-```
-
-#### 批量发布到多个平台
-
-```javascript
-POST /api/publish/batch
-
-{
-  "platforms": ["douyin", "kuaishou", "xiaohongshu"],
-  "title": "视频标题",
-  "content": "视频描述",
-  "videoUrl": "/path/to/video.mp4",
-  "tags": ["标签1", "标签2"],
-  "concurrent": false  // 是否并发发布
-}
+// 多平台
+POST /api/publish  { "platforms": ["douyin", "xiaohongshu"], "title": "标题", "filePath": "...", "concurrent": false }
 ```
 
 #### 创建定时发布任务

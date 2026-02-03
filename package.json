@@ -1,7 +1,7 @@
 {
     "name": "yishe-uploader",
     "version": "2.0.0",
-    "description": "易社媒体发布系统 - 支持抖音、快手、小红书、微博等多平台自动发布",
+    "description": "Yishe Uploader - 多平台自动发布（抖音、快手、小红书、微博等）",
     "main": "src/index.js",
     "type": "module",
     "scripts": {
@@ -41,6 +41,7 @@
     "devDependencies": {
         "@vitejs/plugin-vue": "^5.0.0",
         "sass": "^1.69.5",
+        "semantic-ui-css": "^2.5.0",
         "vite": "^5.0.0"
     },
     "engines": {

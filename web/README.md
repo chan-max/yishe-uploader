@@ -1,4 +1,4 @@
-# 易社发布 - 前端（独立项目）
+# Yishe Uploader - Web 前端
 
 前端代码已移至本仓库外，使用独立的 `package.json`、`node_modules` 和 `vite.config.js`。与后端项目 `yishe-uploader` 配合使用。
 
