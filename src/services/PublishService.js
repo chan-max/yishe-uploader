@@ -3,12 +3,10 @@
  */
 
 import {
-    publishToXiaohongshu,
-    checkXiaohongshuLoginStatus
+    publishToXiaohongshu
 } from '../platforms/xiaohongshu.js';
 import {
-    publishToDouyin,
-    checkDouyinLoginStatus
+    publishToDouyin
 } from '../platforms/douyin.js';
 import {
     publishToKuaishou

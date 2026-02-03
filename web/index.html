@@ -1,72 +1,12 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>YiShe Browser Connector</title>
-    <link rel="stylesheet" href="style.css">
-    <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>易社媒体发布系统</title>
 </head>
 <body>
-    <div id="app" class="page">
-        <header class="header">
-            <div class="header-title">
-                <div class="h1">Browser Connector</div>
-                <div class="sub">仅负责：连接/启动浏览器、断开、状态显示</div>
-            </div>
-            <div class="header-actions">
-                <button class="btn primary" @click="launchAndConnect" :disabled="browserConnecting">
-                    {{ browserConnecting ? '连接中...' : '连接（启动并连接）' }}
-                </button>
-                <button class="btn" @click="refreshBrowserStatus" :disabled="browserConnecting">刷新状态</button>
-                <button class="btn" @click="checkPort" :disabled="portChecking">检测端口</button>
-                <button class="btn danger" @click="closeBrowser" :disabled="browserConnecting">断开</button>
-            </div>
-        </header>
-
-        <main class="container">
-            <div v-if="status.message" :class="['status-panel', status.type]">{{ status.message }}</div>
-
-            <div class="browser-panel">
-                <div class="browser-card">
-                    <div class="browser-card-title">连接状态</div>
-                    <div class="browser-status-row">
-                        <span :class="['dot', browserStatus?.hasInstance ? 'ok' : 'err']"></span>
-                        <span class="browser-status-text">
-                            {{ browserStatus?.hasInstance ? '已连接' : '未连接' }}
-                        </span>
-                    </div>
-                    <div class="browser-meta">
-                        <div><span class="k">页面数量</span><span class="v">{{ browserStatus?.pageCount ?? '-' }}</span></div>
-                        <div><span class="k">最后活动</span><span class="v">{{ lastActivityText }}</span></div>
-                    <div><span class="k">模式</span><span class="v">{{ browserStatus?.connection?.mode ?? '-' }}</span></div>
-                    <div><span class="k">Profile</span><span class="v">{{ browserStatus?.connection?.profileDir ?? '-' }}</span></div>
-                    <div><span class="k">UserData</span><span class="v" style="word-break:break-all">{{ browserStatus?.connection?.userDataDir ?? '-' }}</span></div>
-                    </div>
-                </div>
-
-                <div class="browser-card">
-                    <div class="browser-card-title">连接参数</div>
-                    <div class="form">
-                        <label class="field">
-                            <div class="label">CDP User Data Dir（默认值一般可直接用）</div>
-                            <input v-model="browserConfig.cdpUserDataDir" placeholder="例如：C:\temp\yishe-uploader-cdp" />
-                            <span class="inline-hint">用于稳定开启 9222（独立浏览器配置目录）。首次需要在该目录的 Chrome 里登录一次。</span>
-                        </label>
-                        <label class="field">
-                            <div class="label">CDP 端口（9222 被占用可改为 9223、9224）</div>
-                            <input v-model.number="browserConfig.cdpPort" type="number" placeholder="9222" style="width:120px" />
-                            <span class="inline-hint">→ http://127.0.0.1:{{ browserConfig.cdpPort || 9222 }}</span>
-                        </label>
-                    </div>
-                    <div class="hint">
-                        <strong>重要：</strong>为保证 9222 稳定可用，本工具默认使用独立的 <code>--user-data-dir</code> 启动 Chrome。首次使用需要在新打开的 Chrome 里登录一次（之后会一直复用该目录的登录态）。用 Edge 打开此页面即可。
-                    </div>
-                </div>
-            </div>
-        </main>
-    </div>
-
-    <script src="script.js"></script>
+  <div id="app"></div>
+  <script type="module" src="/src/main.js"></script>
 </body>
 </html>

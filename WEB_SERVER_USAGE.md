@@ -14,13 +14,21 @@ Web 控制台提供了一个简洁的管理系统风格图形界面来操作 yis
 
 ## 启动方式
 
+前后端共用同一 `package.json` 和 `node_modules`，前端代码在 `web/` 目录，构建配置在 `web/vite.config.js`。
+
 ```bash
-npm run web
+# 开发：先启动后端，再启动前端开发服务器
+npm run dev          # 后端 7010
+npm run web:dev      # 前端开发服务器 5173，API 代理到 7010
+
+# 生产：构建前端后启动后端
+npm start            # 会先构建 web 再启动后端
 ```
 
 ## 访问地址
 
-启动后会自动打开浏览器访问：`http://localhost:3000`
+- 开发：`http://localhost:5173`（Vite 开发服务器）
+- 生产：`http://localhost:7010`（后端同端口提供 API + 静态资源）
 
 ## 界面说明
 
@@ -111,8 +119,8 @@ npm run web
 
 ## 技术架构
 
-- **后端**: Express.js + Node.js
-- **前端**: 原生 HTML/CSS/JavaScript
+- **后端**: Node.js HTTP 服务器（`src/api/server.js`）
+- **前端**: Vue3 + Vite，代码在 `web/`，共用根目录 package.json
 - **API**: RESTful API 设计
 - **脚本集成**: 直接调用现有脚本文件
 
@@ -120,9 +128,8 @@ npm run web
 
 如需添加新功能，可以：
 
-1. 在 `scripts/web-server.js` 中添加新的 API 路由
-2. 在 `web/index.html` 中添加对应的界面元素
-3. 在 `web/script.js` 中添加前端交互逻辑
+1. 在后端 `src/api/server.js` 中添加新的 API 路由
+2. 在 `web/` 中修改界面与交互逻辑
 
 ## 安全说明
 

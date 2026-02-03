@@ -44,7 +44,7 @@ createApp({
             try {
                 const res = await fetch(`${API_BASE}/api/browser/status`);
                 const data = await res.json();
-                if (!data.success) throw new Error(data.message || '获取状态失败');
+                if (!res.ok || !data.success) throw new Error(data.message || '获取状态失败');
                 state.browserStatus = data.data;
             } catch (e) {
                 // 不打断 UI，仅提示
@@ -70,7 +70,7 @@ createApp({
                     body: JSON.stringify({ port, userDataDir })
                 });
                 const launchData = await launchRes.json();
-                if (!launchData.success) throw new Error(launchData.message || '启动失败');
+                if (!launchRes.ok || !launchData.success) throw new Error(launchData.message || '启动失败');
                 setStatus('Chrome 已启动，等待 8 秒后连接（若失败会自动重试）...', 'info');
                 await new Promise(r => setTimeout(r, 8000));
                 const controller = new AbortController();
@@ -83,7 +83,7 @@ createApp({
                 });
                 clearTimeout(timer);
                 const connectData = await connectRes.json();
-                if (!connectData.success) throw new Error(connectData.message || '连接失败');
+                if (!connectRes.ok || !connectData.success) throw new Error(connectData.message || '连接失败');
                 state.browserStatus = connectData.data;
                 setStatus('浏览器已连接', 'success');
             } catch (e) {
@@ -110,7 +110,7 @@ createApp({
                     body: JSON.stringify({ port })
                 });
                 const data = await res.json();
-                if (!data.success) throw new Error(data.message || '检测失败');
+                if (!res.ok || !data.success) throw new Error(data.message || '检测失败');
                 const d = data.data;
                 if (d.ok) {
                     setStatus(`端口 ${d.port} 已开放，Chrome 调试服务正常。${d.browser ? ' 版本: ' + d.browser : ''}`, 'success');
@@ -131,7 +131,7 @@ createApp({
             try {
                 const res = await fetch(`${API_BASE}/api/browser/close`, { method: 'POST' });
                 const data = await res.json();
-                if (!data.success) throw new Error(data.message || '断开失败');
+                if (!res.ok || !data.success) throw new Error(data.message || '断开失败');
                 state.browserStatus = data.data;
                 setStatus('浏览器已断开', 'success');
             } catch (e) {

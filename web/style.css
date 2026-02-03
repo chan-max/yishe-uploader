@@ -1,65 +1,302 @@
-/***** Base *****/
+/* GitHub 风格 */
 :root {
-    --accent: #0a84ff; /* macOS blue */
-    --bg: #f5f6f8;
-    --card: #ffffff;
-    --text: #1c1c1e;
-    --text-muted: #6e6e73;
-    --border: #e6e6eb;
-    --border-soft: #eff0f3;
-    --shadow-soft: 0 6px 20px rgba(0,0,0,0.06);
+  --gh-header-bg: #24292f;
+  --gh-header-text: #ffffff;
+  --gh-header-border: #57606a;
+  --gh-bg: #ffffff;
+  --gh-bg-secondary: #f6f8fa;
+  --gh-border: #d0d7de;
+  --gh-border-muted: #d8dee4;
+  --gh-text: #1f2328;
+  --gh-text-muted: #656d76;
+  --gh-accent: #0969da;
+  --gh-accent-hover: #0550ae;
+  --gh-success: #1a7f37;
+  --gh-success-bg: #dafbe1;
+  --gh-danger: #cf222e;
+  --gh-danger-bg: #ffebe9;
+  --gh-warning-bg: #fff8c5;
+  --gh-shadow: 0 1px 3px rgba(31,35,40,0.12);
+  --gh-radius: 6px;
 }
 
-html, body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"; }
+* { box-sizing: border-box; }
 
-/***** Layout *****/
-.page { min-height:100vh; background:var(--bg); color:var(--text); display:flex; flex-direction:column; }
-.header { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:16px 20px; background:rgba(255,255,255,0.72); border-bottom:1px solid var(--border-soft); backdrop-filter: saturate(180%) blur(16px); position:sticky; top:0; z-index:10; }
-.header-title .h1 { font-size:18px; font-weight:800; letter-spacing:-.02em; }
-.header-title .sub { margin-top:4px; font-size:12px; color:var(--text-muted); }
-.header-actions { display:flex; gap:10px; flex-wrap:wrap; }
-.container { padding:20px; max-width: 1100px; margin: 0 auto; width:100%; }
+html, body {
+  margin: 0;
+  padding: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--gh-text);
+  background: var(--gh-bg-secondary);
+}
 
-/***** Buttons *****/
-.btn { padding:8px 12px; border-radius:10px; border:1px solid #d5e6ff; background:var(--accent); color:#fff; cursor:pointer; box-shadow:0 1px 0 rgba(0,0,0,0.03); transition: filter .15s ease, box-shadow .2s ease; }
-.btn:hover { filter: brightness(0.96); }
-.btn:active { filter: brightness(0.92); }
-.btn:disabled { opacity: 0.6; cursor:not-allowed; }
-.btn:focus { outline: none; box-shadow: 0 0 0 3px rgba(10,132,255,0.25); }
-.btn.primary { background:#0a84ff; border-color:#0a5bd8; font-weight:600; }
-.btn.primary:hover { filter: brightness(0.96); }
-.btn.danger { background:#ff3b30; border-color:#ffd1cf; }
-.btn.danger:hover { filter: brightness(0.96); }
+.page {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
 
-/***** Status *****/
-.status-panel { margin-bottom:12px; padding:10px 12px; border-radius:12px; font-size:13px; border:1px solid var(--border); background:#fff; box-shadow:0 1px 0 rgba(0,0,0,0.02); }
-.status-panel.success { border-color:#ccebd6; background:#f4fbf6; color:#0a7a2f; }
-.status-panel.error { border-color:#ffd0d0; background:#fff4f4; color:#b3261e; }
-.status-panel.empty { background:#fafafa; color:#6b7280; }
+/* Header - GitHub 深色顶栏 */
+.header {
+  background: var(--gh-header-bg);
+  color: var(--gh-header-text);
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--gh-header-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+}
 
-/***** Browser panel *****/
-.browser-panel { display:grid; grid-template-columns: 1fr 1fr; gap:16px; }
-.browser-card { background:var(--card); border-radius:14px; padding:16px; box-shadow:var(--shadow-soft); border:1px solid var(--border-soft); }
-.browser-card-title { font-weight:700; font-size:13px; color:#3a3a3c; margin-bottom:12px; }
-.browser-status-row { display:flex; align-items:center; gap:10px; margin-bottom:12px; }
-.dot { width:10px; height:10px; border-radius:999px; display:inline-block; }
-.dot.ok { background:#34c759; box-shadow: 0 0 0 3px rgba(52,199,89,0.15); }
-.dot.err { background:#ff3b30; box-shadow: 0 0 0 3px rgba(255,59,48,0.12); }
-.browser-status-text { font-size:15px; font-weight:700; }
-.browser-meta { display:grid; grid-template-columns: 1fr; gap:8px; margin-bottom:12px; color:var(--text-muted); font-size:12px; }
-.browser-meta .k { display:inline-block; width:72px; color:#6e6e73; }
-.browser-meta .v { color:#1c1c1e; font-weight:600; }
-.browser-actions { display:flex; gap:10px; flex-wrap:wrap; }
+.header-title {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
 
-.form { display:flex; flex-direction:column; gap:10px; }
-.field { display:flex; flex-direction:column; gap:6px; }
-.field .label { font-size:12px; color:var(--text-muted); }
-.field input, .field select { padding:10px 12px; border-radius:10px; border:1px solid var(--border); background:#fff; color:var(--text); }
-.inline-hint { margin-left:8px; font-size:12px; color:var(--text-muted); }
-.hint { margin-top:10px; font-size:12px; color:var(--text-muted); line-height:1.5; }
+.header-title .logo {
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.5px;
+}
 
-/***** Responsive *****/
-@media (max-width: 720px) {
-    .header { flex-direction:column; align-items:flex-start; }
-    .browser-panel { grid-template-columns: 1fr; }
+.header-title .sub {
+  font-size: 13px;
+  color: #8b949e;
+  font-weight: 400;
+}
+
+.header-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Buttons - GitHub 按钮风格 */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 16px;
+  font-size: 14px;
+  font-weight: 500;
+  border-radius: var(--gh-radius);
+  border: 1px solid;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+  font-family: inherit;
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn.primary {
+  background: var(--gh-success);
+  border-color: rgba(31,35,40,0.15);
+  color: #fff;
+}
+
+.btn.primary:hover:not(:disabled) {
+  background: #2da44e;
+}
+
+.btn {
+  background: var(--gh-bg);
+  border-color: var(--gh-border);
+  color: var(--gh-text);
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--gh-bg-secondary);
+  border-color: var(--gh-border-muted);
+}
+
+.btn.danger {
+  background: var(--gh-bg);
+  border-color: var(--gh-danger);
+  color: var(--gh-danger);
+}
+
+.btn.danger:hover:not(:disabled) {
+  background: var(--gh-danger-bg);
+}
+
+/* Container */
+.container {
+  flex: 1;
+  max-width: 1012px;
+  margin: 0 auto;
+  padding: 24px;
+  width: 100%;
+}
+
+/* Status 提示 */
+.status-panel {
+  padding: 12px 16px;
+  border-radius: var(--gh-radius);
+  font-size: 14px;
+  margin-bottom: 16px;
+  border: 1px solid;
+}
+
+.status-panel.success {
+  background: var(--gh-success-bg);
+  border-color: #1a7f37;
+  color: #1a7f37;
+}
+
+.status-panel.error {
+  background: var(--gh-danger-bg);
+  border-color: var(--gh-danger);
+  color: var(--gh-danger);
+}
+
+.status-panel.info {
+  background: var(--gh-bg);
+  border-color: var(--gh-border);
+  color: var(--gh-text);
+}
+
+/* Cards - GitHub 卡片 */
+.browser-panel {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+@media (max-width: 768px) {
+  .browser-panel {
+    grid-template-columns: 1fr;
+  }
+}
+
+.browser-card {
+  background: var(--gh-bg);
+  border: 1px solid var(--gh-border);
+  border-radius: var(--gh-radius);
+  padding: 16px;
+  box-shadow: var(--gh-shadow);
+}
+
+.browser-card-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--gh-border);
+}
+
+/* 连接状态 */
+.browser-status-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.dot.ok {
+  background: var(--gh-success);
+  box-shadow: 0 0 0 2px var(--gh-success-bg);
+}
+
+.dot.err {
+  background: var(--gh-danger);
+  box-shadow: 0 0 0 2px var(--gh-danger-bg);
+}
+
+.browser-status-text {
+  font-weight: 600;
+  font-size: 15px;
+}
+
+/* Meta 信息 */
+.browser-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.browser-meta > div {
+  display: flex;
+  gap: 8px;
+}
+
+.browser-meta .k {
+  color: var(--gh-text-muted);
+  min-width: 80px;
+}
+
+.browser-meta .v {
+  color: var(--gh-text);
+  word-break: break-all;
+}
+
+/* Form */
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field .label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--gh-text);
+}
+
+.field input {
+  padding: 5px 12px;
+  font-size: 14px;
+  border: 1px solid var(--gh-border);
+  border-radius: var(--gh-radius);
+  background: var(--gh-bg);
+  color: var(--gh-text);
+  font-family: inherit;
+}
+
+.field input:focus {
+  outline: none;
+  border-color: var(--gh-accent);
+  box-shadow: 0 0 0 3px rgba(9, 105, 218, 0.15);
+}
+
+.inline-hint {
+  font-size: 12px;
+  color: var(--gh-text-muted);
+  margin-top: 4px;
+}
+
+.hint {
+  margin-top: 12px;
+  padding: 12px;
+  background: var(--gh-bg-secondary);
+  border-radius: var(--gh-radius);
+  font-size: 13px;
+  color: var(--gh-text-muted);
+  line-height: 1.5;
+}
+
+.hint code {
+  background: var(--gh-border);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 12px;
 }
