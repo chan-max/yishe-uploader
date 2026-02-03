@@ -128,7 +128,7 @@ class ApiServer {
             endpoints: [
                 { method: 'GET', path: '/api', description: 'API 概览（本接口）' },
                 { method: 'GET', path: '/api/docs', description: 'API 文档（JSON）' },
-                { method: 'POST', path: '/api/publish', description: '发布（单平台传 platform，多平台传 platforms）' },
+                { method: 'POST', path: '/api/publish', description: '发布（传 platforms 数组，单平台如 ["douyin"]）' },
                 { method: 'POST', path: '/api/schedule', description: '创建定时发布' },
                 { method: 'GET', path: '/api/platforms', description: '支持的平台列表' },
                 { method: 'POST', path: '/api/upload', description: '上传视频/图片文件' },
@@ -161,12 +161,11 @@ class ApiServer {
                                 'application/json': {
                                     schema: {
                                         type: 'object',
-                                        required: ['title', 'filePath'],
+                                        required: ['platforms', 'title', 'filePath'],
                                         properties: {
-                                            platform: { type: 'string', description: '单平台时使用，如 douyin' },
-                                            platforms: { type: 'array', items: { type: 'string' }, description: '多平台时使用' },
+                                            platforms: { type: 'array', items: { type: 'string' }, description: '平台 ID 数组，单平台如 ["douyin"]，多平台如 ["douyin", "xiaohongshu"]' },
                                             title: { type: 'string' },
-                                            filePath: { type: 'string', description: '先通过 /api/upload 上传后得到的 path' },
+                                            filePath: { type: 'string', description: '本机视频/图片绝对路径（服务端可访问），如 C:\\videos\\demo.mp4，无需上传' },
                                             tags: { type: 'array', items: { type: 'string' } },
                                             scheduled: { type: 'boolean' },
                                             scheduleTime: { type: 'string', format: 'date-time' },
@@ -185,30 +184,19 @@ class ApiServer {
     }
 
     /**
-     * 统一发布：单平台传 platform，多平台传 platforms，一个接口
+     * 统一发布：单平台与多平台均传 platforms（数组），如 ["douyin"] 或 ["douyin", "xiaohongshu"]
      */
     async handlePublishUnified(req, res) {
         const body = await this.parseBody(req);
-        const { platform, platforms, concurrent = false, ...publishInfo } = body;
+        const { platforms, concurrent = false, ...publishInfo } = body;
 
-        const hasSingle = platform != null && typeof platform === 'string';
-        const hasMultiple = platforms != null && Array.isArray(platforms) && platforms.length > 0;
+        if (!platforms || !Array.isArray(platforms) || platforms.length === 0) {
+            this.sendResponse(res, 400, { success: false, error: '请传 platforms（数组），单平台如 ["douyin"]，多平台如 ["douyin", "xiaohongshu"]' });
+            return;
+        }
 
-        if (hasSingle && !hasMultiple) {
-            const result = await publishService.publishToPlatform(platform, publishInfo);
-            this.sendResponse(res, 200, result);
-            return;
-        }
-        if (hasMultiple && !hasSingle) {
-            const result = await publishService.batchPublish(platforms, publishInfo, { concurrent });
-            this.sendResponse(res, 200, result);
-            return;
-        }
-        if (hasSingle && hasMultiple) {
-            this.sendResponse(res, 400, { success: false, error: '请只传 platform（单平台）或 platforms（多平台），不要同时传' });
-            return;
-        }
-        this.sendResponse(res, 400, { success: false, error: '请传 platform（字符串，单平台）或 platforms（数组，多平台）' });
+        const result = await publishService.batchPublish(platforms, publishInfo, { concurrent });
+        this.sendResponse(res, 200, result);
     }
 
     /**

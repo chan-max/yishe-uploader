@@ -16,21 +16,16 @@
 
       <div class="ui segment">
         <h3 class="ui dividing header">发布接口 POST /api/publish</h3>
-        <p>单平台或多平台统一使用此接口，通过参数区分：</p>
-        <ul class="ui list">
-          <li><strong>单平台</strong>：传 <code>platform</code>（字符串），如 <code>"douyin"</code></li>
-          <li><strong>多平台</strong>：传 <code>platforms</code>（数组），如 <code>["douyin", "xiaohongshu"]</code></li>
-        </ul>
+        <p>单平台与多平台均传 <code>platforms</code>（数组）：单平台如 <code>["douyin"]</code>，多平台如 <code>["douyin", "xiaohongshu"]</code>。</p>
         <h4 class="ui header">请求体参数</h4>
         <table class="ui celled compact table small">
           <thead>
             <tr><th>参数</th><th>类型</th><th>必填</th><th>说明</th></tr>
           </thead>
           <tbody>
-            <tr><td><code>platform</code></td><td>string</td><td>二选一</td><td>单平台 ID</td></tr>
-            <tr><td><code>platforms</code></td><td>string[]</td><td>二选一</td><td>多平台 ID 数组</td></tr>
+            <tr><td><code>platforms</code></td><td>string[]</td><td>是</td><td>平台 ID 数组，如 ["douyin"] 或 ["douyin", "xiaohongshu"]</td></tr>
             <tr><td><code>title</code></td><td>string</td><td>是</td><td>作品标题</td></tr>
-            <tr><td><code>filePath</code></td><td>string</td><td>是</td><td>先通过 POST /api/upload 上传后得到的 path</td></tr>
+            <tr><td><code>filePath</code></td><td>string</td><td>是</td><td>本机视频/图片绝对路径（如 C:\videos\demo.mp4），无需上传</td></tr>
             <tr><td><code>tags</code></td><td>string[]</td><td>否</td><td>话题标签</td></tr>
             <tr><td><code>concurrent</code></td><td>boolean</td><td>否</td><td>多平台时是否并发，默认 false</td></tr>
             <tr><td><code>platformSettings</code></td><td>object</td><td>否</td><td>如 douyin.productLink、productTitle</td></tr>
@@ -45,8 +40,7 @@
       <div class="ui segment">
         <h3 class="ui dividing header">其他接口</h3>
         <p><strong>GET /api</strong> — 本概览的 JSON；<strong>GET /api/docs</strong> — OpenAPI 3.0 风格文档（机器可读）。</p>
-        <p>上传：<strong>POST /api/upload</strong>，multipart/form-data 字段 <code>file</code>，返回 <code>{ path }</code>。</p>
-        <p>定时发布：<strong>POST /api/schedule</strong>，需 <code>platforms</code>、<code>scheduleTime</code> 及与发布相同的参数。</p>
+        <p>定时发布：<strong>POST /api/schedule</strong>，需 <code>platforms</code>、<code>scheduleTime</code> 及与发布相同的参数（含 <code>filePath</code> 本地路径）。</p>
       </div>
     </div>
   </div>
@@ -66,16 +60,16 @@ const baseUrl = computed(() => {
 })
 
 const singleExample = `{
-  "platform": "douyin",
+  "platforms": ["douyin"],
   "title": "作品标题",
-  "filePath": "/path/after/upload.mp4",
+  "filePath": "C:\\videos\\demo.mp4",
   "tags": ["美食", "探店"]
 }`
 
 const batchExample = `{
   "platforms": ["douyin", "xiaohongshu", "weibo"],
   "title": "作品标题",
-  "filePath": "/path/after/upload.mp4",
+  "filePath": "C:\\videos\\demo.mp4",
   "tags": ["美食"],
   "concurrent": false
 }`

@@ -62,7 +62,7 @@ npm run web:dev
 2. **内容发布**
    - 进入"内容发布"页面
    - 选择要发布的平台
-   - 上传视频或图片
+   - 填写本机视频/图片路径（无需上传）
    - 填写标题、描述和话题标签
    - 点击"立即发布"或设置定时发布
 
@@ -73,19 +73,19 @@ npm run web:dev
 
 ### API 调用
 
-发布使用**统一接口**，单平台或多平台均为 `POST /api/publish`，通过参数区分：
+发布使用**统一接口** `POST /api/publish`，单平台与多平台均传 **`platforms`**（数组）：
 
-- **单平台**：传 `platform`（字符串），如 `"douyin"`
-- **多平台**：传 `platforms`（数组），如 `["douyin", "xiaohongshu"]`
+- **单平台**：`platforms: ["douyin"]`
+- **多平台**：`platforms: ["douyin", "xiaohongshu"]`
 
 完整参数与示例见 [docs/API.md](docs/API.md)。发现接口：`GET /api` 返回端点列表，`GET /api/docs` 返回 OpenAPI 风格 JSON。
 
 ```javascript
 // 单平台
-POST /api/publish  { "platform": "douyin", "title": "标题", "filePath": "先上传获得" }
+POST /api/publish  { "platforms": ["douyin"], "title": "标题", "filePath": "C:\\videos\\demo.mp4" }
 
 // 多平台
-POST /api/publish  { "platforms": ["douyin", "xiaohongshu"], "title": "标题", "filePath": "...", "concurrent": false }
+POST /api/publish  { "platforms": ["douyin", "xiaohongshu"], "title": "标题", "filePath": "C:\\videos\\demo.mp4", "concurrent": false }
 ```
 
 #### 创建定时发布任务

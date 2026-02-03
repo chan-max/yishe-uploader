@@ -20,13 +20,9 @@
             </div>
 
             <div class="field">
-              <label>视频文件</label>
-              <div class="upload-zone" @click="triggerFileInput" @dragover.prevent="dragOver = true" @dragleave="dragOver = false" @drop.prevent="onDrop">
-                <input ref="fileInputRef" type="file" accept="video/*" class="upload-input" @change="onFileSelect" />
-                <span v-if="!form.filePath" class="upload-placeholder">{{ dragOver ? '松开上传' : '点击或拖拽视频到此处' }}</span>
-                <span v-else class="upload-filename"><i class="file video icon"></i> {{ uploadedFilename }}</span>
-              </div>
-              <small style="color: #999;">支持 MP4、MOV 等，最大 4GB。需先上传获得 filePath 再发布。</small>
+              <label>视频/图片本地路径</label>
+              <input v-model="form.filePath" type="text" placeholder="如：C:\videos\demo.mp4 或 /path/to/video.mp4" />
+              <small style="color: #999;">填写本机绝对路径，服务端会直接使用该路径发布（无需上传）。</small>
             </div>
 
             <div class="field">
@@ -96,7 +92,7 @@
 
         <div class="ui segment api-doc-card">
           <h3 class="ui dividing header">接口说明</h3>
-          <p class="api-doc-desc">对外统一使用 <strong>POST /api/publish</strong>：单平台传 <code>platform</code>，多平台传 <code>platforms</code>，参数一致。</p>
+          <p class="api-doc-desc">对外统一使用 <strong>POST /api/publish</strong>，传 <code>platforms</code>（数组）：单平台如 <code>["douyin"]</code>，多平台如 <code>["douyin", "xiaohongshu"]</code>。</p>
           <router-link to="/api-doc" class="ui small primary button fluid">
             <i class="book icon"></i> 查看 API 文档
           </router-link>
@@ -110,7 +106,6 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 
 const API_BASE = ''
-const fileInputRef = ref(null)
 const platformList = [
   { id: 'douyin', name: '抖音', icon: '🎵' },
   { id: 'kuaishou', name: '快手', icon: '⚡' },
@@ -120,7 +115,6 @@ const platformList = [
 const status = reactive({ message: '', type: 'info' })
 const publishing = ref(false)
 const loginLoading = ref(false)
-const dragOver = ref(false)
 const supportedPlatforms = ref([])
 const loginStatus = ref({})
 const form = reactive({
@@ -133,8 +127,7 @@ const form = reactive({
 })
 const tagsInput = ref('')
 
-const uploadedFilename = computed(() => (form.filePath ? form.filePath.split(/[/\\]/).pop() || '已选择' : ''))
-const canPublish = computed(() => form.platforms.length > 0 && form.filePath && form.title.trim().length > 0)
+const canPublish = computed(() => form.platforms.length > 0 && form.filePath.trim() && form.title.trim().length > 0)
 
 const statusMsgClass = computed(() => {
   if (status.type === 'success') return 'success'
@@ -144,27 +137,6 @@ const statusMsgClass = computed(() => {
 
 function platformName(id) { return platformList.find(p => p.id === id)?.name || id }
 function setStatus(message, type = 'info') { status.message = message; status.type = type }
-function triggerFileInput() { fileInputRef.value?.click() }
-function onFileSelect(e) {
-  const file = e.target.files?.[0]
-  if (file) { form.file = file; form.filePath = file.name; form._fileObj = file }
-  e.target.value = ''
-}
-function onDrop(e) {
-  dragOver.value = false
-  const file = e.dataTransfer?.files?.[0]
-  if (file && file.type.startsWith('video/')) { form.file = file; form.filePath = file.name; form._fileObj = file }
-}
-
-async function uploadFile() {
-  if (!form._fileObj) return null
-  const fd = new FormData()
-  fd.append('file', form._fileObj)
-  const res = await fetch(`${API_BASE}/api/upload`, { method: 'POST', body: fd })
-  const data = await res.json()
-  if (!res.ok || !data.success) throw new Error(data.message || '上传失败')
-  return data.path
-}
 
 async function fetchPlatforms() {
   try {
@@ -193,10 +165,9 @@ async function refreshLoginStatus() {
 async function handlePublish() {
   if (!canPublish.value) return
   publishing.value = true
-  setStatus('正在上传视频并发布...', 'info')
+  setStatus('正在发布...', 'info')
   try {
-    const filePath = await uploadFile()
-    if (!filePath) { setStatus('请先选择视频文件', 'error'); publishing.value = false; return }
+    const filePath = form.filePath.trim()
     const tags = tagsInput.value.split(/[\s,，]+/).map(t => t.trim()).filter(Boolean)
     const body = {
       platforms: form.platforms,
@@ -218,8 +189,6 @@ async function handlePublish() {
     const total = data.total ?? 0
     if (successCount > 0) {
       setStatus(`发布完成：成功 ${successCount}/${total} 个平台`, 'success')
-      form.filePath = ''
-      form._fileObj = null
       form.title = ''
       tagsInput.value = ''
     } else {
@@ -232,7 +201,7 @@ async function handlePublish() {
   }
 }
 
-onMounted(() => { fetchPlatforms(); refreshLoginStatus() })
+onMounted(() => { fetchPlatforms() })
 </script>
 
 <style lang="scss" scoped>
@@ -262,23 +231,6 @@ onMounted(() => { fetchPlatforms(); refreshLoginStatus() })
     gap: 1rem;
     .ui.checkbox { margin: 0; }
   }
-  .upload-zone {
-    position: relative;
-    border: 1px dashed rgba(34, 36, 38, 0.15);
-    border-radius: 4px;
-    padding: 1.25rem;
-    text-align: center;
-    cursor: pointer;
-    background: #fafafa;
-    transition: background 0.2s, border-color 0.2s;
-    &:hover {
-      background: #f0f0f0;
-      border-color: rgba(34, 36, 38, 0.25);
-    }
-  }
-  .upload-input { position: absolute; width: 0; height: 0; opacity: 0; }
-  .upload-placeholder { font-size: 0.9em; color: #999; }
-  .upload-filename { font-size: 0.9em; color: #21ba45; }
   .status-indicator { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.9em; }
   .status-dot {
     width: 8px; height: 8px; border-radius: 50%; background: #999;
