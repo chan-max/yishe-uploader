@@ -6,7 +6,7 @@
           <i class="cloud upload icon"></i>
           Yishe Uploader
         </h2>
-        <div class="sidebar-tagline">多平台发布</div>
+        <div class="sidebar-tagline">多平台发布 · v{{ packageJson.version }}</div>
       </div>
       <div class="sidebar-menu">
         <router-link
@@ -39,6 +39,7 @@
 <script setup>
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
+import packageJson from '../../../package.json'
 
 const route = useRoute()
 const menuItems = [
