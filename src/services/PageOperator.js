@@ -3,6 +3,7 @@
  */
 
 import { logger } from '../utils/logger.js';
+import { stealthScript } from '../utils/stealthScript.js';
 
 /**
  * 页面操作器类
@@ -19,95 +20,29 @@ export class PageOperator {
      * 设置反检测脚本
      */
     async setupAntiDetection(page) {
-        // Playwright: userAgent 需要在 context 创建时设置；这里保持“脚本注入/headers/viewport”能力
-        // 注入反检测脚本
-        await page.addInitScript(() => {
-            // 更彻底的 webdriver 伪装
-            delete navigator.__proto__.webdriver;
+        return
+        // 注入增强型隐身脚本
+        await page.addInitScript(stealthScript);
 
-            Object.defineProperty(navigator, 'webdriver', {
-                get: () => false,
-                configurable: true,
-                enumerable: false
-            });
-
-            if ('webdriver' in navigator) {
-                delete navigator.webdriver;
-            }
-
-            // 使用 Proxy 来拦截所有访问
-            const originalNavigator = navigator;
-            const navigatorProxy = new Proxy(originalNavigator, {
-                get: function(target, prop) {
-                    if (prop === 'webdriver') {
-                        return false;
-                    }
-                    return target[prop];
-                },
-                has: function(target, prop) {
-                    if (prop === 'webdriver') {
-                        return false;
-                    }
-                    return prop in target;
-                }
-            });
-
-            try {
-                Object.defineProperty(window, 'navigator', {
-                    value: navigatorProxy,
-                    writable: false,
-                    configurable: false
-                });
-            } catch (e) {
-                console.log('无法替换全局 navigator，使用备用方案');
-            }
-
-            // 伪装其他属性
-            Object.defineProperty(navigator, 'plugins', {
-                get: () => [1, 2, 3, 4, 5],
-            });
-
-            Object.defineProperty(navigator, 'languages', {
-                get: () => ['zh-CN', 'zh', 'en'],
-            });
-
-            Object.defineProperty(navigator, 'platform', {
-                get: () => 'MacIntel',
-            });
-
-            Object.defineProperty(navigator, 'hardwareConcurrency', {
-                get: () => 8,
-            });
-
-            Object.defineProperty(navigator, 'deviceMemory', {
-                get: () => 8,
-            });
-
-            Object.defineProperty(navigator, 'connection', {
-                get: () => ({
-                    effectiveType: '4g',
-                    rtt: 50,
-                    downlink: 10,
-                    saveData: false,
-                }),
-            });
-
-            // 伪装 Chrome 运行时
-            window.chrome = {
-                runtime: {},
-            };
-        });
+        logger.info('已注入增强型反检测脚本');
 
         // 设置视口大小
         await page.setViewportSize({ width: 1920, height: 1080 });
 
         // 设置额外的请求头
         await page.setExtraHTTPHeaders({
-            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+            'Accept-Language': 'zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7',
             'Accept-Encoding': 'gzip, deflate, br',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
-            'Cache-Control': 'no-cache',
-            'Pragma': 'no-cache',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+            'Cache-Control': 'max-age=0',
+            'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+            'Sec-Ch-Ua-Mobile': '?0',
+            'Sec-Ch-Ua-Platform': '"Windows"',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1',
+            'Upgrade-Insecure-Requests': '1'
         });
     }
 
@@ -116,19 +51,19 @@ export class PageOperator {
      */
     async fillInput(page, selector, text, options = {}) {
         await page.waitForSelector(selector, { timeout: 10000 });
-        
+
         const defaultOptions = {
             delay: 100,
             clear: true
         };
-        
+
         const fillOptions = { ...defaultOptions, ...options };
-        
+
         if (fillOptions.clear) {
             await page.click(selector, { clickCount: 3 }); // 全选
             await page.keyboard.press('Backspace'); // 删除
         }
-        
+
         await page.type(selector, text, { delay: fillOptions.delay });
     }
 
@@ -139,14 +74,14 @@ export class PageOperator {
         return await page.evaluate((sel) => {
             const button = document.querySelector(sel);
             if (!button) return false;
-            
+
             const isDisabled = button.disabled;
-            const hasDisabledClass = button.classList.contains('disabled') || 
-                                    button.classList.contains('loading') ||
-                                    button.classList.contains('uploading');
-            const isVisible = window.getComputedStyle(button).display !== 'none' && 
-                             window.getComputedStyle(button).visibility !== 'hidden';
-            
+            const hasDisabledClass = button.classList.contains('disabled') ||
+                button.classList.contains('loading') ||
+                button.classList.contains('uploading');
+            const isVisible = window.getComputedStyle(button).display !== 'none' &&
+                window.getComputedStyle(button).visibility !== 'hidden';
+
             return !isDisabled && !hasDisabledClass && isVisible;
         }, selector);
     }
@@ -158,9 +93,9 @@ export class PageOperator {
         const maxWaitTime = timeout;
         const checkInterval = 1000;
         let elapsedTime = 0;
-        
+
         logger.info('等待按钮变为可用状态...');
-        
+
         while (elapsedTime < maxWaitTime) {
             try {
                 const buttonStatus = await page.evaluate((sel) => {
@@ -168,38 +103,38 @@ export class PageOperator {
                     if (!button) {
                         return { exists: false, enabled: false, reason: '按钮不存在' };
                     }
-                    
+
                     const isDisabled = button.disabled;
-                    const hasDisabledClass = button.classList.contains('disabled') || 
-                                            button.classList.contains('loading') ||
-                                            button.classList.contains('uploading');
-                    const isVisible = window.getComputedStyle(button).display !== 'none' && 
-                                     window.getComputedStyle(button).visibility !== 'hidden';
-                    
+                    const hasDisabledClass = button.classList.contains('disabled') ||
+                        button.classList.contains('loading') ||
+                        button.classList.contains('uploading');
+                    const isVisible = window.getComputedStyle(button).display !== 'none' &&
+                        window.getComputedStyle(button).visibility !== 'hidden';
+
                     return {
                         exists: true,
                         enabled: !isDisabled && !hasDisabledClass && isVisible,
-                        reason: isDisabled ? '按钮被禁用' : 
-                               hasDisabledClass ? '按钮有禁用类' : 
-                               !isVisible ? '按钮不可见' : '按钮可用'
+                        reason: isDisabled ? '按钮被禁用' :
+                            hasDisabledClass ? '按钮有禁用类' :
+                                !isVisible ? '按钮不可见' : '按钮可用'
                     };
                 }, selector);
-                
+
                 if (buttonStatus.exists && buttonStatus.enabled) {
                     logger.info('按钮已可用');
                     return true;
                 } else {
                     logger.info(`按钮状态: ${buttonStatus.reason}`);
                 }
-                
+
             } catch (error) {
                 logger.warn('检查按钮状态时出错:', error);
             }
-            
+
             await this.delay(checkInterval);
             elapsedTime += checkInterval;
         }
-        
+
         logger.warn('等待按钮可用超时');
         return false;
     }
@@ -223,11 +158,11 @@ export class PageOperator {
     async safeClick(page, selector, options = {}) {
         try {
             await page.waitForSelector(selector, { timeout: 10000 });
-            
+
             // 先悬停
             await page.hover(selector);
             await this.delay(500);
-            
+
             // 点击
             await page.click(selector, options);
             return true;
@@ -306,9 +241,9 @@ export class PageOperator {
      */
     async takeScreenshot(page, filename) {
         try {
-            const screenshot = await page.screenshot({ 
+            const screenshot = await page.screenshot({
                 path: filename,
-                fullPage: true 
+                fullPage: true
             });
             logger.info(`截图已保存: ${filename}`);
             return screenshot;

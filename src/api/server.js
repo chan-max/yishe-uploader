@@ -8,7 +8,7 @@ import fs from 'fs';
 import path from 'path';
 import { URL, fileURLToPath } from 'url';
 import publishService from './publishService.js';
-import { getBrowserStatus, getOrCreateBrowser, closeBrowser, launchWithDebugPort } from '../services/BrowserService.js';
+import { getBrowserStatus, getOrCreateBrowser, closeBrowser, launchWithDebugPort, checkAndReconnectBrowser } from '../services/BrowserService.js';
 import { PublishService } from '../services/PublishService.js';
 import { logger } from '../utils/logger.js';
 import { PLATFORM_CONFIGS } from '../config/platforms.js';
@@ -19,13 +19,27 @@ const WEB_DIR = process.env.FRONTEND_DIST
     : path.resolve(__dirname, '../../web/dist');
 const UPLOAD_DIR = path.resolve(__dirname, '../../temp');
 
+/** 与前端一致的默认 CDP 独立配置目录（避免占用系统 Chrome profile） */
+function getDefaultCdpUserDataDir() {
+    return process.platform === 'win32'
+        ? (process.env.UPLOADER_CDP_USER_DATA_DIR || 'C:\\temp\\yishe-uploader-cdp-1s')
+        : (process.env.UPLOADER_CDP_USER_DATA_DIR || '/tmp/yishe-uploader-cdp-1s');
+}
+
+function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /**
  * API服务器类
  */
+const BROWSER_CHECK_INTERVAL_MS = Number(process.env.BROWSER_CHECK_INTERVAL_MS) || 10000;
+
 class ApiServer {
     constructor(port = 7010) {
         this.port = port;
         this.server = null;
+        this.browserCheckTimer = null;
     }
 
     /**
@@ -39,15 +53,41 @@ class ApiServer {
         this.server.listen(this.port, () => {
             logger.info(`服务已启动，端口: ${this.port}`);
             logger.info(`访问地址: http://localhost:${this.port}`);
+            this.startBrowserCheckTimer();
         });
 
         return this.server;
+    }
+
+    /** 定时检测浏览器实例（断开则清除引用，便于下次发布时自动重连） */
+    startBrowserCheckTimer() {
+        if (this.browserCheckTimer) return;
+        this.browserCheckTimer = setInterval(async () => {
+            try {
+                const result = await checkAndReconnectBrowser({ reconnect: false });
+                if (!result.available && result.message && !result.message.includes('无浏览器实例')) {
+                    logger.debug('定时检测: 浏览器已断开，引用已清除');
+                }
+            } catch (e) {
+                logger.debug('定时检测浏览器异常:', e?.message);
+            }
+        }, BROWSER_CHECK_INTERVAL_MS);
+        logger.info(`浏览器实例定时检测已启动，间隔 ${BROWSER_CHECK_INTERVAL_MS / 1000} 秒`);
+    }
+
+    stopBrowserCheckTimer() {
+        if (this.browserCheckTimer) {
+            clearInterval(this.browserCheckTimer);
+            this.browserCheckTimer = null;
+            logger.info('浏览器实例定时检测已停止');
+        }
     }
 
     /**
      * 停止服务器
      */
     stop() {
+        this.stopBrowserCheckTimer();
         if (this.server) {
             this.server.close();
             logger.info('API服务器已停止');
@@ -95,12 +135,14 @@ class ApiServer {
                     await this.handleBrowserConnect(req, res);
                 } else if (reqPath === '/api/browser/close' && method === 'POST') {
                     await this.handleBrowserClose(req, res);
-            } else if (reqPath === '/api/browser/launch-with-debug' && method === 'POST') {
-                await this.handleBrowserLaunchDebug(req, res);
+                } else if (reqPath === '/api/browser/launch-with-debug' && method === 'POST') {
+                    await this.handleBrowserLaunchDebug(req, res);
                 } else if (reqPath === '/api/browser/check-port' && method === 'POST') {
                     await this.handleBrowserCheckPort(req, res);
                 } else if (reqPath === '/api/browser/open-platform' && method === 'POST') {
                     await this.handleBrowserOpenPlatform(req, res);
+                } else if ((reqPath === '/api/browser/check-and-reconnect' || reqPath === '/api/browser/check') && (method === 'POST' || method === 'GET')) {
+                    await this.handleBrowserCheckAndReconnect(req, res);
                 } else if (reqPath === '/api/upload' && method === 'POST') {
                     await this.handleUpload(req, res);
                 } else if (reqPath === '/api/login-status' && method === 'GET') {
@@ -141,7 +183,9 @@ class ApiServer {
                 { method: 'POST', path: '/api/browser/close', description: '关闭浏览器' },
                 { method: 'POST', path: '/api/browser/launch-with-debug', description: '启动带调试端口的 Chrome' },
                 { method: 'POST', path: '/api/browser/check-port', description: '检测 CDP 端口' },
-                { method: 'POST', path: '/api/browser/open-platform', description: '在已连接浏览器中打开指定平台创作页' }
+                { method: 'POST', path: '/api/browser/open-platform', description: '在已连接浏览器中打开指定平台创作页' },
+                { method: 'POST', path: '/api/browser/check-and-reconnect', description: '检测浏览器实例并可选重连（body: { reconnect?: boolean }）' },
+                { method: 'GET', path: '/api/browser/check', description: '仅检测浏览器实例（不重连）' }
             ]
         });
     }
@@ -228,11 +272,12 @@ class ApiServer {
     }
 
     /**
-     * 获取浏览器状态
+     * 获取浏览器状态（返回前先做存活检测，若窗口已关闭则清除引用，保证客户端/网页端看到的是实时状态）
      */
     async handleBrowserStatus(req, res) {
         try {
-            const status = getBrowserStatus();
+            await checkAndReconnectBrowser({ reconnect: false });
+            const status = await getBrowserStatus();
             this.sendResponse(res, 200, { success: true, data: status });
         } catch (error) {
             this.sendResponse(res, 500, { success: false, message: error.message });
@@ -241,12 +286,29 @@ class ApiServer {
 
     /**
      * 连接浏览器
+     * 若未传 mode: 'cdp'，则与前端一致：先 launch-with-debug（独立 user-data-dir）再 CDP 连接，避免占用系统 Chrome profile
      */
     async handleBrowserConnect(req, res) {
         try {
-            const body = await this.parseBody(req);
-            await getOrCreateBrowser(body);
-            const status = getBrowserStatus();
+            const body = await this.parseBody(req).catch(() => ({})) || {};
+            await checkAndReconnectBrowser({ reconnect: false });
+            const statusBefore = await getBrowserStatus();
+            if (statusBefore.hasInstance && statusBefore.isConnected) {
+                this.sendResponse(res, 200, { success: true, data: statusBefore });
+                return;
+            }
+            const explicitCdp = body && body.mode === 'cdp' && body.cdpEndpoint;
+            if (explicitCdp) {
+                await getOrCreateBrowser(body);
+            } else {
+                const port = Number(body.port) || 9222;
+                const userDataDir = (body.cdpUserDataDir || body.userDataDir || getDefaultCdpUserDataDir()).trim();
+                logger.info('API connect 未指定 CDP，先启动带调试端口的 Chrome（独立目录）再连接');
+                launchWithDebugPort({ port, userDataDir });
+                await sleep(3500);
+                await getOrCreateBrowser({ mode: 'cdp', cdpEndpoint: `http://127.0.0.1:${port}` });
+            }
+            const status = await getBrowserStatus();
             this.sendResponse(res, 200, { success: true, data: status });
         } catch (error) {
             this.sendResponse(res, 500, { success: false, message: error.message });
@@ -259,7 +321,7 @@ class ApiServer {
     async handleBrowserClose(req, res) {
         try {
             await closeBrowser();
-            const status = getBrowserStatus();
+            const status = await getBrowserStatus();
             this.sendResponse(res, 200, { success: true, data: status });
         } catch (error) {
             this.sendResponse(res, 500, { success: false, message: error.message });
@@ -332,6 +394,31 @@ class ApiServer {
             this.sendResponse(res, 200, { success: true, data: { platform, name: config.name, url: config.uploadUrl } });
         } catch (error) {
             this.sendResponse(res, 500, { success: false, message: error.message || '打开平台链接失败' });
+        }
+    }
+
+    /**
+     * 检测浏览器实例并可选重连（接口调用）
+     * POST/GET /api/browser/check-and-reconnect 或 GET /api/browser/check
+     * Body (POST): { reconnect?: boolean }，reconnect 为 true 时断开后尝试自动重连
+     */
+    async handleBrowserCheckAndReconnect(req, res) {
+        try {
+            let reconnect = false;
+            if (req.method === 'POST') {
+                const body = await this.parseBody(req).catch(() => ({}));
+                reconnect = !!body.reconnect;
+            }
+            const result = await checkAndReconnectBrowser({ reconnect });
+            this.sendResponse(res, 200, {
+                success: true,
+                available: result.available,
+                reconnected: result.reconnected || false,
+                message: result.message,
+                status: result.status
+            });
+        } catch (error) {
+            this.sendResponse(res, 500, { success: false, message: error.message || '检测失败' });
         }
     }
 

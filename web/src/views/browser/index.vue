@@ -133,18 +133,13 @@ async function launchAndConnect() {
   setStatus('正在启动 Chrome 并连接...', 'info')
   try {
     const port = getCdpPort()
-    const userDataDir = (browserConfig.cdpUserDataDir || '').trim()
-    const launchRes = await fetch(`${API_BASE}/api/browser/launch-with-debug`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ port, userDataDir })
-    })
-    const launchData = await launchRes.json()
-    if (!launchRes.ok || !launchData.success) throw new Error(launchData.message || '启动失败')
+    const cdpUserDataDir = (browserConfig.cdpUserDataDir || '').trim()
     const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), 30000)
+    const timer = setTimeout(() => controller.abort(), 60000)
     const connectRes = await fetch(`${API_BASE}/api/browser/connect`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mode: 'cdp', cdpEndpoint: `http://127.0.0.1:${port}` }),
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ port, cdpUserDataDir: cdpUserDataDir || undefined }),
       signal: controller.signal
     })
     clearTimeout(timer)

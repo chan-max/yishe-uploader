@@ -35,6 +35,7 @@ let currentBrowserName = null;
 let currentCdpEndpoint = null;
 let connectPromise = null;
 let lastConnectError = null;
+let currentBrowserOptions = {};
 // 浏览器状态管理
 let browserStatus = {
     isInitialized: false,
@@ -116,7 +117,7 @@ async function setBrowserWindowMaximized(context) {
     } catch (e) {
         logger.warn('设置窗口最大化失败（可忽略）:', e?.message || e);
     } finally {
-        if (createdPage && page) await page.close().catch(() => {});
+        if (createdPage && page) await page.close().catch(() => { });
     }
 }
 
@@ -126,6 +127,43 @@ function withTimeout(promise, ms, label) {
         t = setTimeout(() => reject(new Error(`${label} timeout after ${ms}ms`)), ms);
     });
     return Promise.race([promise.finally(() => clearTimeout(t)), timeout]);
+}
+
+/** 是否为「浏览器/上下文已关闭」类错误（用户关闭了由本服务启动的窗口后仍用旧引用会报此错） */
+function isBrowserClosedError(err) {
+    const msg = (err && err.message) ? String(err.message) : '';
+    return /Target page, context or browser has been closed/i.test(msg) ||
+        /Browser has been closed/i.test(msg) ||
+        /Context has been closed/i.test(msg);
+}
+
+/**
+ * 包装 newPage：若因浏览器/上下文已关闭而失败，则清除旧引用并重新 getOrCreateBrowser 后重试一次
+ */
+async function newPageWithReconnect(options = {}) {
+    try {
+        if (!contextInstance) {
+            if (browserInstance && typeof browserInstance.contexts === 'function') {
+                const ctxs = browserInstance.contexts();
+                contextInstance = ctxs[0] || await browserInstance.newContext({ devtools: true, headless: false });
+            } else {
+                throw new Error('No browser context available');
+            }
+        }
+        return await contextInstance.newPage();
+    } catch (err) {
+        if (!isBrowserClosedError(err)) throw err;
+        logger.warn('检测到浏览器/上下文已关闭，清除引用并尝试重新连接:', err.message);
+        contextInstance = null;
+        browserInstance = null;
+        connectPromise = null;
+        browserStatus.isInitialized = false;
+        browserStatus.isConnected = false;
+        browserStatus.pageCount = 0;
+        await getOrCreateBrowser(currentBrowserOptions);
+        if (!contextInstance) throw new Error('重新连接后仍无法获取浏览器上下文');
+        return await contextInstance.newPage();
+    }
 }
 
 function tryListProfiles(userDataDir) {
@@ -190,6 +228,9 @@ export async function isBrowserAvailable() {
     }
 
     try {
+        if (browserInstance && !browserInstance.isConnected()) {
+            return false;
+        }
         const pages = contextInstance ? contextInstance.pages() : await browserInstance.pages();
         browserStatus.isConnected = true;
         browserStatus.pageCount = pages.length;
@@ -212,13 +253,7 @@ export async function detectExistingBrowser() {
         if ((contextInstance || browserInstance) && await isBrowserAvailable()) {
             logger.info('检测到现有浏览器实例，页面数量:', browserStatus.pageCount);
             return {
-                newPage: async () => {
-                    if (!contextInstance) {
-                        // 兜底：cdp模式 browser 可能存在多个 context
-                        contextInstance = browserInstance.contexts()[0] || await browserInstance.newContext();
-                    }
-                    return await contextInstance.newPage();
-                }
+                newPage: async () => await newPageWithReconnect(currentBrowserOptions)
             };
         }
 
@@ -244,16 +279,19 @@ export async function detectExistingBrowser() {
  * 获取或创建浏览器实例
  */
 export async function getOrCreateBrowser(options = {}) {
+    // Only update options if provided; otherwise keep using the successful options from before
+    if (options && Object.keys(options).length > 0) {
+        currentBrowserOptions = options;
+    } else if (!currentBrowserOptions || Object.keys(currentBrowserOptions).length === 0) {
+        // Fallback or initialization if absolutely no options exist
+        currentBrowserOptions = options || {};
+    }
+
     // 并发保护：多次点击只跑一次连接
     if (connectPromise) {
         await connectPromise;
         return {
-            newPage: async () => {
-                if (!contextInstance) {
-                    contextInstance = browserInstance?.contexts?.()[0] || await browserInstance?.newContext?.();
-                }
-                return await contextInstance.newPage();
-            }
+            newPage: async () => await newPageWithReconnect(currentBrowserOptions)
         };
     }
 
@@ -298,7 +336,7 @@ export async function getOrCreateBrowser(options = {}) {
                         }
                     }
                 }
-                contextInstance = browserInstance.contexts()[0] || await browserInstance.newContext();
+                contextInstance = browserInstance.contexts()[0] || await browserInstance.newContext({ devtools: true, headless: false });
                 await setBrowserWindowMaximized(contextInstance);
 
                 browserStatus.isInitialized = true;
@@ -362,7 +400,7 @@ export async function getOrCreateBrowser(options = {}) {
             connectPromise = null;
         }
 
-        return { newPage: async () => await contextInstance.newPage() };
+        return { newPage: async () => await newPageWithReconnect(currentBrowserOptions) };
 
     } catch (error) {
         logger.error('浏览器启动失败:', error);
@@ -371,9 +409,69 @@ export async function getOrCreateBrowser(options = {}) {
 }
 
 /**
+ * 定时检测浏览器实例是否存活；若已断开则清除引用，可选自动重连（通过接口调用）
+ * @param { { reconnect?: boolean } } options - reconnect 为 true 时在断开后尝试重新 getOrCreateBrowser（CDP 模式下会重连端口）
+ * @returns { Promise<{ available: boolean, reconnected?: boolean, message?: string, status?: object }> }
+ */
+export async function checkAndReconnectBrowser(options = {}) {
+    const { reconnect = false } = options;
+    if (!contextInstance && !browserInstance) {
+        return { available: false, message: '无浏览器实例' };
+    }
+    const available = await isBrowserAvailable();
+    if (available) {
+        return { available: true, status: await getBrowserStatus() };
+    }
+    logger.info('浏览器实例已断开，清除引用');
+    contextInstance = null;
+    browserInstance = null;
+    connectPromise = null;
+    browserStatus.isInitialized = false;
+    browserStatus.isConnected = false;
+    browserStatus.pageCount = 0;
+
+    if (reconnect) {
+        try {
+            await getOrCreateBrowser(currentBrowserOptions);
+            const ok = await isBrowserAvailable();
+            if (ok) {
+                logger.info('浏览器已重新连接');
+                return { available: true, reconnected: true, status: await getBrowserStatus() };
+            }
+        } catch (e) {
+            logger.warn('自动重连失败:', e?.message || e);
+            return { available: false, reconnected: false, message: e?.message || '重连失败' };
+        }
+    }
+    return { available: false, message: '浏览器已断开，引用已清除。可调用连接接口或带 reconnect: true 的检测接口重连。' };
+}
+
+/**
  * 获取浏览器状态信息
  */
-export function getBrowserStatus() {
+export async function getBrowserStatus() {
+    let pagesInfo = [];
+    try {
+        const pages = contextInstance ? contextInstance.pages() : (browserInstance ? browserInstance.pages() : []);
+        pagesInfo = await Promise.all(pages.map(async (p) => {
+            try {
+                // Use Promise.race with timeout to avoid hanging on destroyed contexts
+                const titlePromise = p.title().catch(() => 'Unknown');
+                const urlPromise = p.url();
+                const [title, url] = await Promise.all([
+                    Promise.race([titlePromise, new Promise(resolve => setTimeout(() => resolve('Loading...'), 1000))]),
+                    Promise.resolve(urlPromise)
+                ]);
+                return { title, url };
+            } catch {
+                return { title: 'Unknown', url: 'Unknown' };
+            }
+        }));
+    } catch (e) {
+        logger.debug('获取页面信息失败（可能正在导航）:', e?.message);
+        pagesInfo = [];
+    }
+
     return {
         ...browserStatus,
         hasInstance: !!browserInstance || !!contextInstance,
@@ -388,6 +486,7 @@ export function getBrowserStatus() {
             cdpEndpoint: currentCdpEndpoint,
             detectedProfiles: currentUserDataDir ? tryListProfiles(currentUserDataDir) : []
         },
+        pages: pagesInfo,
         timestamp: new Date().toISOString()
     };
 }
@@ -507,8 +606,8 @@ export class BrowserService {
         return clearUserData();
     }
 
-    static getStatus() {
-        return getBrowserStatus();
+    static async getStatus() {
+        return await getBrowserStatus();
     }
 
     static async cleanup() {
