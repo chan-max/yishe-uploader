@@ -11,6 +11,7 @@ import publishService from './publishService.js';
 import { getBrowserStatus, getOrCreateBrowser, closeBrowser, launchWithDebugPort } from '../services/BrowserService.js';
 import { PublishService } from '../services/PublishService.js';
 import { logger } from '../utils/logger.js';
+import { PLATFORM_CONFIGS } from '../config/platforms.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WEB_DIR = process.env.FRONTEND_DIST
@@ -98,6 +99,8 @@ class ApiServer {
                 await this.handleBrowserLaunchDebug(req, res);
                 } else if (reqPath === '/api/browser/check-port' && method === 'POST') {
                     await this.handleBrowserCheckPort(req, res);
+                } else if (reqPath === '/api/browser/open-platform' && method === 'POST') {
+                    await this.handleBrowserOpenPlatform(req, res);
                 } else if (reqPath === '/api/upload' && method === 'POST') {
                     await this.handleUpload(req, res);
                 } else if (reqPath === '/api/login-status' && method === 'GET') {
@@ -137,7 +140,8 @@ class ApiServer {
                 { method: 'POST', path: '/api/browser/connect', description: '连接浏览器' },
                 { method: 'POST', path: '/api/browser/close', description: '关闭浏览器' },
                 { method: 'POST', path: '/api/browser/launch-with-debug', description: '启动带调试端口的 Chrome' },
-                { method: 'POST', path: '/api/browser/check-port', description: '检测 CDP 端口' }
+                { method: 'POST', path: '/api/browser/check-port', description: '检测 CDP 端口' },
+                { method: 'POST', path: '/api/browser/open-platform', description: '在已连接浏览器中打开指定平台创作页' }
             ]
         });
     }
@@ -303,6 +307,31 @@ class ApiServer {
             this.sendResponse(res, 200, { success: true, data: result });
         } catch (error) {
             this.sendResponse(res, 500, { success: false, message: error.message });
+        }
+    }
+
+    /**
+     * 在已连接浏览器中打开指定平台创作页
+     */
+    async handleBrowserOpenPlatform(req, res) {
+        try {
+            const body = await this.parseBody(req);
+            const { platform } = body;
+            if (!platform || typeof platform !== 'string') {
+                this.sendResponse(res, 400, { success: false, message: '请传 platform（如 douyin、xiaohongshu、weibo、kuaishou）' });
+                return;
+            }
+            const config = PLATFORM_CONFIGS[platform];
+            if (!config || !config.uploadUrl) {
+                this.sendResponse(res, 400, { success: false, message: `不支持的平台: ${platform}` });
+                return;
+            }
+            const browser = await getOrCreateBrowser();
+            const page = await browser.newPage();
+            await page.goto(config.uploadUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+            this.sendResponse(res, 200, { success: true, data: { platform, name: config.name, url: config.uploadUrl } });
+        } catch (error) {
+            this.sendResponse(res, 500, { success: false, message: error.message || '打开平台链接失败' });
         }
     }
 

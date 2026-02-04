@@ -100,6 +100,26 @@ function buildPersistentLaunchOptions({ profileDir, executablePath }) {
     };
 }
 
+/**
+ * 通过 CDP 将浏览器窗口设为最大化（启动后调用）
+ */
+async function setBrowserWindowMaximized(context) {
+    if (!context) return;
+    let page = context.pages()[0];
+    const createdPage = !page;
+    if (!page) page = await context.newPage();
+    try {
+        const cdp = await context.newCDPSession(page);
+        const { windowId } = await cdp.send('Browser.getWindowForTarget');
+        await cdp.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'maximized' } });
+        logger.info('已通过 CDP 将浏览器窗口设为最大化');
+    } catch (e) {
+        logger.warn('设置窗口最大化失败（可忽略）:', e?.message || e);
+    } finally {
+        if (createdPage && page) await page.close().catch(() => {});
+    }
+}
+
 function withTimeout(promise, ms, label) {
     let t;
     const timeout = new Promise((_, reject) => {
@@ -279,6 +299,7 @@ export async function getOrCreateBrowser(options = {}) {
                     }
                 }
                 contextInstance = browserInstance.contexts()[0] || await browserInstance.newContext();
+                await setBrowserWindowMaximized(contextInstance);
 
                 browserStatus.isInitialized = true;
                 browserStatus.isConnected = true;
@@ -323,6 +344,8 @@ export async function getOrCreateBrowser(options = {}) {
                     `请先完全关闭 Chrome（含后台进程），并确认 profileDir（Default/Profile 1...）。原错误: ${e.message}`
                 );
             }
+
+            await setBrowserWindowMaximized(contextInstance);
 
             browserStatus.isInitialized = true;
             browserStatus.isConnected = true;
