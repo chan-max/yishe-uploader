@@ -1,0 +1,83 @@
+name: Build and Release EXE
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - 'package.json'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Read version
+        id: get_version
+        shell: pwsh
+        run: |
+          $ver = (Get-Content package.json | ConvertFrom-Json).version
+          if ([string]::IsNullOrWhiteSpace($ver)) { throw "Version not found in package.json" }
+          "VERSION=$ver" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "Detected version: $ver"
+
+      - name: Check if tag exists
+        shell: pwsh
+        run: |
+          $tag = "v$env:VERSION"
+          git fetch --tags --force
+          if (git tag -l $tag) {
+            Write-Host "Tag $tag already exists. Skipping build."
+            echo "TAG_EXISTS=true" >> $env:GITHUB_ENV
+          } else {
+            echo "TAG_EXISTS=false" >> $env:GITHUB_ENV
+          }
+
+      - name: Install dependencies
+        if: env.TAG_EXISTS == 'false'
+        run: npm ci
+
+      - name: Build EXE
+        if: env.TAG_EXISTS == 'false'
+        run: npm run build:exe
+
+      - name: Package Release Asset
+        if: env.TAG_EXISTS == 'false'
+        shell: pwsh
+        run: |
+          $zipName = "yishe-uploader-v$env:VERSION-windows-x64.zip"
+          Compress-Archive -Path "yishe-uploader.exe" -DestinationPath $zipName
+          "ASSET_PATH=$zipName" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Create Tag and Push
+        if: env.TAG_EXISTS == 'false'
+        shell: pwsh
+        run: |
+          $tag = "v$env:VERSION"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag $tag
+          git push origin $tag
+
+      - name: Create Release
+        if: env.TAG_EXISTS == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.VERSION }}
+          files: ${{ env.ASSET_PATH }}
+          generate_release_notes: true

@@ -337,7 +337,7 @@ async function mainPublishFlow(options = {}) {
 
         // 4. 显示最终结果
         logger.info('\n🎉 所有数据发布完成！');
-        logger.info(`📈 总体成功率: ${successCount}/${totalCount} (${((successCount/totalCount)*100).toFixed(1)}%)`);
+        logger.info(`📈 总体成功率: ${successCount}/${totalCount} (${((successCount / totalCount) * 100).toFixed(1)}%)`);
 
         // 按平台统计
         const platformStats = {};
@@ -426,7 +426,7 @@ program
                 } = await import('url');
                 const resolved = resolve(process.cwd(), options.file);
                 const mod = await import(pathToFileURL(resolved).href);
-                const data = mod.default ? ? mod.config ? ? mod.publish ? ? mod;
+                const data = mod.default ?? mod.config ?? mod.publish ?? mod;
                 if (Array.isArray(data)) {
                     publishConfigs = data;
                 } else if (data && Array.isArray(data.platforms)) {
@@ -516,7 +516,7 @@ program
 
             const successCount = results.filter(r => r.success).length;
             const totalCount = results.length;
-            console.log(`\n📈 成功率: ${successCount}/${totalCount} (${((successCount/totalCount)*100).toFixed(1)}%)`);
+            console.log(`\n📈 成功率: ${successCount}/${totalCount} (${((successCount / totalCount) * 100).toFixed(1)}%)`);
 
         } catch (error) {
             spinner.fail('发布失败');
