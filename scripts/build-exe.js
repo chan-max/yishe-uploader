@@ -45,7 +45,6 @@ try {
         external: [
             'playwright',
             'playwright-core',
-            // 保留其他可能的原生模块
         ],
         banner: {
             js: `
@@ -76,7 +75,7 @@ if (__nexe_patches.isNexe) {
         define: {
             'import.meta.url': '__import_meta_url',
         },
-        minify: false, // 保持可读性，便于调试
+        minify: false,
     });
 
     console.log('✅ 后端代码打包完成\n');
@@ -88,34 +87,47 @@ if (__nexe_patches.isNexe) {
 // 步骤 3: 使用 nexe 生成 exe
 console.log('📦 步骤 3/3: 使用 nexe 生成 EXE...');
 try {
-    // 使用社区维护的 nexe 预编译版本
-    // 官方 nexe 预编译版本已过时（最新只到 Node.js 14.15.3）
-    // 使用 urbdyn/nexe_builds 提供的更新版本
-    // 参考: https://github.com/urbdyn/nexe_builds
-    const nexeCmd = 'npx -y nexe';
+    // 使用本地安装的 nexe (直接调用 .cmd 文件以兼容 Windows，兼容 CI/CD)
+    const isWin = process.platform === 'win32';
+    const nexeExe = isWin ? 'nexe.cmd' : 'nexe';
+    const nexeCmd = path.join(rootDir, 'node_modules', '.bin', nexeExe);
+
     const remote = 'https://github.com/urbdyn/nexe_builds/releases/download/0.4.0/';
     const target = 'windows-x64-20.18.3';
 
+    // 检查并删除已存在的 EXE，避免 EBUSY 错误
+    if (fs.existsSync(exePath)) {
+        try {
+            fs.unlinkSync(exePath);
+            console.log('✅ 已清理旧的 EXE 文件');
+        } catch (e) {
+            console.error('\n❌ 无法删除旧的 EXE 文件，可能正在运行中。请先关闭 yishe-uploader.exe！');
+            console.error(`错误详情: ${e.message}`);
+            process.exit(1);
+        }
+    }
+
+    // 计算相对路径，避免绝对路径可能导致的问题
+    const relativeBundlePath = path.relative(rootDir, bundlePath);
+
     const nexeArgs = [
-        bundlePath,
-        '--target', target,
+        '-i', `"${relativeBundlePath}"`, // 显式指定输入文件
+        '-t', target,
         '--remote', `"${remote}"`,
-        '--output', exePath,
+        '-o', `"${exePath}"`,
         '--verbose',
-        // 排除源代码目录，避免 nexe 尝试解析原始 ESM 文件
         '--exclude', 'src/**',
         '--exclude', 'web/**',
         '--exclude', 'scripts/**',
         '--exclude', 'docs/**',
-        // 包含 web/dist 目录作为资源
-        '--resource', path.join(rootDir, 'web/dist/**/*'),
+        '--resource', `"${path.join(rootDir, 'web/dist/**/*')}"`,
     ].join(' ');
 
     console.log(`执行命令: ${nexeCmd} ${nexeArgs}\n`);
     console.log(`使用远程源: ${remote}`);
     console.log(`目标版本: ${target}\n`);
 
-    execSync(`${nexeCmd} ${nexeArgs}`, { stdio: 'inherit', cwd: rootDir });
+    execSync(`"${nexeCmd}" ${nexeArgs}`, { stdio: 'inherit', cwd: rootDir });
 
     console.log('\n✅ EXE 构建完成!');
     console.log(`📍 输出路径: ${exePath}`);
@@ -126,9 +138,5 @@ try {
     console.log('\n🎉 构建流程全部完成!');
 } catch (error) {
     console.error('❌ Nexe 打包失败:', error.message);
-    console.error('\n💡 提示:');
-    console.error('   - 如果下载失败，请检查网络连接');
-    console.error('   - 可以尝试使用 --build 标志从源码构建（较慢，需要 Python 和 C++ 编译环境）:');
-    console.error('     npx nexe temp/server-bundle.cjs --target windows-x64-20.18.3 --build --output yishe-uploader.exe');
     process.exit(1);
 }
