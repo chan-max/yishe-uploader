@@ -50,6 +50,16 @@ npm run web:dev
 
 访问 http://localhost:7010 即可使用 Web 界面。
 
+### 构建 EXE 可执行文件
+
+如果需要将项目打包成单一的 Windows EXE 可执行文件：
+
+```bash
+npm run build:exe
+```
+
+详细说明请参考 [构建 EXE 文档](docs/BUILD_EXE.md)。
+
 ## 📖 使用指南
 
 ### Web 界面使用
