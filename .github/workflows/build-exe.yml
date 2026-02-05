@@ -56,12 +56,21 @@ jobs:
         if: env.TAG_EXISTS == 'false'
         run: npm run build:exe
 
+      - name: Rename EXE with Version
+        if: env.TAG_EXISTS == 'false'
+        shell: pwsh
+        run: |
+          $exeName = "yishe-uploader-v$env:VERSION.exe"
+          Rename-Item -Path "yishe-uploader.exe" -NewName $exeName
+          Write-Host "Renamed to $exeName"
+          "EXE_NAME=$exeName" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Package Release Asset
         if: env.TAG_EXISTS == 'false'
         shell: pwsh
         run: |
           $zipName = "yishe-uploader-v$env:VERSION-windows-x64.zip"
-          Compress-Archive -Path "yishe-uploader.exe" -DestinationPath $zipName
+          Compress-Archive -Path $env:EXE_NAME -DestinationPath $zipName
           "ASSET_PATH=$zipName" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Create Tag and Push
