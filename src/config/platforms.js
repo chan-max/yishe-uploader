@@ -175,6 +175,86 @@ export const PLATFORM_CONFIGS = {
         },
         preProcess: null,
         postProcess: null
+    },
+    xianyu: {
+        name: '咸鱼',
+        uploadUrl: 'https://www.xianyu.taobao.com/my-release',
+        waitUntil: 'domcontentloaded',
+        timeout: 30000,
+        antiDetection: false,
+        checkLogin: true,
+        selectors: {
+            titleInput: 'input[placeholder*="商品名称"], input[placeholder*="标题"]',
+            contentInput: 'textarea[placeholder*="商品描述"], textarea[placeholder*="说明"]',
+            fileInput: 'input[type="file"]',
+            submitButton: 'button[type="primary"], button.next-btn-primary, button:has-text("发布")'
+        },
+        loginSelectors: {
+            userElements: ['.user-avatar', '.user-info', '.header-user'],
+            loginElements: ['.login-btn', '.login-button', '.login-entry', '.login-text']
+        },
+        preProcess: null,
+        postProcess: null
+    },
+    shumaiyun: {
+        name: '速卖通',
+        uploadUrl: 'https://gshop.aliexpress.com/p/add',
+        waitUntil: 'domcontentloaded',
+        timeout: 30000,
+        antiDetection: true,
+        checkLogin: true,
+        selectors: {
+            titleInput: 'input[name*="productName"], input[placeholder*="商品标题"]',
+            contentInput: 'textarea[name*="productDescription"], textarea[placeholder*="商品描述"]',
+            fileInput: 'input[type="file"]',
+            submitButton: 'button[type="primary"], button.ant-btn-primary, button:has-text("保存"), button:has-text("发布")'
+        },
+        loginSelectors: {
+            userElements: ['.user-avatar', '.user-info', '.account-info'],
+            loginElements: ['.login-btn', '.login-button', '.auth-btn', '.login-text']
+        },
+        preProcess: null,
+        postProcess: null
+    },
+    amazon: {
+        name: '亚马逊',
+        uploadUrl: 'https://sellercentral.amazon.com/products/create',
+        waitUntil: 'domcontentloaded',
+        timeout: 30000,
+        antiDetection: true,
+        checkLogin: true,
+        selectors: {
+            titleInput: 'input[name*="product-title"], input[aria-label*="title"], input.title-input',
+            contentInput: 'textarea[name*="feature"], textarea[aria-label*="description"]',
+            fileInput: 'input[type="file"]',
+            submitButton: 'button[name*="save"], button[aria-label*="save"], button:has-text("Save"), button:has-text("Publish")'
+        },
+        loginSelectors: {
+            userElements: ['.profile-avatar', '.account-info', '.user-menu'],
+            loginElements: ['.login-btn', '.login-button', '.auth-btn', '.sign-in']
+        },
+        preProcess: null,
+        postProcess: null
+    },
+    shein: {
+        name: '希音',
+        uploadUrl: 'https://seller.shein.com/seller-center/product/products',
+        waitUntil: 'domcontentloaded',
+        timeout: 30000,
+        antiDetection: false,
+        checkLogin: true,
+        selectors: {
+            titleInput: 'input[placeholder*="商品名称"], input[placeholder*="标题"], input.product-title',
+            contentInput: 'textarea[placeholder*="商品描述"], textarea[placeholder*="说明"], textarea.product-desc',
+            fileInput: 'input[type="file"]',
+            submitButton: 'button[type="primary"], button.btn-primary, button:has-text("发布"), button:has-text("保存")'
+        },
+        loginSelectors: {
+            userElements: ['.user-avatar', '.user-info', '.header-user', '.profile-avatar'],
+            loginElements: ['.login-btn', '.login-button', '.login-entry', '.auth-btn']
+        },
+        preProcess: null,
+        postProcess: null
     }
 };
 
