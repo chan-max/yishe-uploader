@@ -275,6 +275,384 @@ export const PLATFORM_CONFIGS = {
         },
         preProcess: null,
         postProcess: null
+    },
+    bilibili: {
+        name: 'B站',
+        uploadUrl: 'https://member.bilibili.com/platform/upload/video/frame',
+        waitUntil: 'domcontentloaded',
+        timeout: 30000,
+        antiDetection: true,
+        checkLogin: true,
+        selectors: {
+            titleInput: 'input[placeholder*="标题"]',
+            contentInput: 'div[placeholder*="简介"]',
+            fileInput: 'input[type="file"]',
+            submitButton: 'div.submit-add'
+        },
+        loginSelectors: {
+            userElements: ['.avatar', '.header-entry-avatar'],
+            loginElements: ['.header-entry-login']
+        }
+    },
+    zhihu: {
+        name: '知乎',
+        uploadUrl: 'https://www.zhihu.com/creator',
+        waitUntil: 'domcontentloaded',
+        timeout: 30000,
+        antiDetection: true,
+        checkLogin: true,
+        selectors: {
+            titleInput: 'textarea[placeholder*="标题"]',
+            contentInput: '.DraftEditor-editorContainer',
+            fileInput: 'input[type="file"]',
+            submitButton: 'button.PublishPanel-triggerButton'
+        },
+        loginSelectors: {
+            userElements: ['.AppHeader-profileAvatar'],
+            loginElements: ['.AppHeader-login']
+        }
+    },
+    tiktok: {
+        name: 'TikTok',
+        uploadUrl: 'https://www.tiktok.com/upload',
+        waitUntil: 'networkidle',
+        timeout: 60000,
+        antiDetection: true,
+        checkLogin: true,
+        selectors: {
+            titleInput: 'div[contenteditable="true"]',
+            contentInput: 'div[contenteditable="true"]',
+            fileInput: 'input[type="file"]',
+            submitButton: 'button[data-e2e="post_video_button"]'
+        },
+        loginSelectors: {
+            userElements: ['.avatar', '[data-e2e="profile-icon"]'],
+            loginElements: ['[data-e2e="top-login-button"]']
+        }
+    },
+    temu: {
+        name: 'Temu',
+        uploadUrl: 'https://kuajing.pinduoduo.com/main/product/list',
+        waitUntil: 'domcontentloaded',
+        timeout: 30000,
+        antiDetection: true,
+        checkLogin: true,
+        selectors: {
+            titleInput: 'input[placeholder*="标题"]',
+            contentInput: 'textarea',
+            fileInput: 'input[type="file"]',
+            submitButton: 'button'
+        },
+        loginSelectors: {
+            userElements: ['.user-avatar'],
+            loginElements: ['.login-btn']
+        }
+    },
+    taobao: {
+        name: '淘宝',
+        uploadUrl: 'https://upload.taobao.com/auction/publish/publish.htm',
+        waitUntil: 'domcontentloaded',
+        timeout: 30000,
+        antiDetection: true,
+        checkLogin: true,
+        selectors: {
+            titleInput: '#title',
+            contentInput: '#description',
+            fileInput: 'input[type="file"]',
+            submitButton: '#J_BtnPublish'
+        },
+        loginSelectors: {
+            userElements: ['.avatar'],
+            loginElements: ['.login']
+        }
+    },
+    wechat_channels: {
+        name: '视频号',
+        uploadUrl: 'https://channels.weixin.qq.com/platform/post/create',
+        waitUntil: 'networkidle',
+        timeout: 45000,
+        antiDetection: true,
+        checkLogin: true,
+        selectors: {
+            titleInput: 'input[placeholder="标题"]',
+            contentInput: 'div[contenteditable]',
+            fileInput: 'input[type="file"]',
+            submitButton: 'button.weui-desktop-btn_primary'
+        },
+        loginSelectors: {
+            userElements: ['.finder-nickname'],
+            loginElements: ['.login-btn']
+        }
+    },
+    baijiahao: {
+        name: '百家号',
+        uploadUrl: 'https://baijiahao.baidu.com/builder/rc/edit/type/video',
+        waitUntil: 'domcontentloaded',
+        timeout: 30000,
+        antiDetection: true,
+        checkLogin: true,
+        selectors: {
+            titleInput: 'input[placeholder*="标题"]',
+            contentInput: 'textarea',
+            fileInput: 'input[type="file"]',
+            submitButton: 'button.btn-publish'
+        },
+        loginSelectors: {
+            userElements: ['.user-name'],
+            loginElements: ['.login-btn']
+        }
+    },
+    jd: {
+        name: '京东',
+        uploadUrl: 'https://shop.jd.com/',
+        waitUntil: 'domcontentloaded',
+        timeout: 30000,
+        antiDetection: true,
+        checkLogin: true,
+        selectors: {
+            titleInput: 'input[name="title"]',
+            contentInput: 'textarea',
+            fileInput: 'input[type="file"]',
+            submitButton: 'button.submit'
+        },
+        loginSelectors: {
+            userElements: ['.user-info'],
+            loginElements: ['.login-btn']
+        }
+    },
+    pinduoduo: {
+        name: '拼多多',
+        uploadUrl: 'https://mms.pinduoduo.com/goods/goods_list',
+        waitUntil: 'domcontentloaded',
+        timeout: 30000,
+        antiDetection: true,
+        checkLogin: true,
+        selectors: {
+            titleInput: 'input.goods-name',
+            contentInput: 'textarea',
+            fileInput: 'input[type="file"]',
+            submitButton: 'button.submit-btn'
+        },
+        loginSelectors: {
+            userElements: ['.avatar'],
+            loginElements: ['.login-btn']
+        }
+    },
+    toutiao: {
+        name: '今日头条',
+        uploadUrl: 'https://mp.toutiao.com/profile_v4/graphic/publish',
+        waitUntil: 'domcontentloaded',
+        timeout: 30000,
+        antiDetection: true,
+        checkLogin: true,
+        selectors: {
+            titleInput: 'input[placeholder*="标题"]',
+            contentInput: 'div.editor',
+            fileInput: 'input[type="file"]',
+            submitButton: 'button.publish-btn'
+        },
+        loginSelectors: {
+            userElements: ['.user-head'],
+            loginElements: ['.login-btn']
+        }
+    },
+    dayu: {
+        name: '大鱼号',
+        uploadUrl: 'https://mp.dayu.com/dashboard/article/write',
+        waitUntil: 'domcontentloaded',
+        timeout: 30000,
+        antiDetection: true,
+        checkLogin: true,
+        selectors: {
+            titleInput: 'input.title',
+            contentInput: 'div.editor',
+            fileInput: 'input[type="file"]',
+            submitButton: 'button.btn-publish'
+        },
+        loginSelectors: {
+            userElements: ['.avatar-img'],
+            loginElements: ['.login-btn']
+        }
+    },
+    penguin: {
+        name: '企鹅号',
+        uploadUrl: 'https://om.qq.com/article/articlePublish',
+        waitUntil: 'domcontentloaded',
+        timeout: 30000,
+        antiDetection: true,
+        checkLogin: true,
+        selectors: {
+            titleInput: 'input#title',
+            contentInput: 'div#content',
+            fileInput: 'input[type="file"]',
+            submitButton: 'button#submit'
+        },
+        loginSelectors: {
+            userElements: ['.user-pic'],
+            loginElements: ['.login-link']
+        }
+    },
+    sohu: {
+        name: '搜狐号',
+        uploadUrl: 'https://mp.sohu.com/mp/index/index.action',
+        waitUntil: 'domcontentloaded',
+        timeout: 30000,
+        antiDetection: true,
+        checkLogin: true,
+        selectors: {
+            titleInput: 'input.title-input',
+            contentInput: 'div.editor-container',
+            fileInput: 'input[type="file"]',
+            submitButton: 'div.publish-btn'
+        },
+        loginSelectors: {
+            userElements: ['.user-avatar'],
+            loginElements: ['.login-btn']
+        }
+    },
+    netease: {
+        name: '网易号',
+        uploadUrl: 'https://mp.163.com/admin/article/publish',
+        waitUntil: 'domcontentloaded',
+        timeout: 30000,
+        antiDetection: true,
+        checkLogin: true,
+        selectors: {
+            titleInput: 'input.title',
+            contentInput: 'div.editor',
+            fileInput: 'input[type="file"]',
+            submitButton: 'div.submit-btn'
+        },
+        loginSelectors: {
+            userElements: ['.avatar'],
+            loginElements: ['.login-btn']
+        }
+    },
+    duxiaoshi: {
+        name: '度小视',
+        uploadUrl: 'https://haokan.baidu.com/author/upload',
+        waitUntil: 'domcontentloaded',
+        timeout: 30000,
+        antiDetection: true,
+        checkLogin: true,
+        selectors: {
+            titleInput: 'input.title',
+            contentInput: 'textarea.desc',
+            fileInput: 'input[type="file"]',
+            submitButton: 'button.submit'
+        },
+        loginSelectors: {
+            userElements: ['.user-icon'],
+            loginElements: ['.login-btn']
+        }
+    },
+    meipai: {
+        name: '美拍',
+        uploadUrl: 'https://www.meipai.com/upload',
+        waitUntil: 'domcontentloaded',
+        timeout: 30000,
+        antiDetection: false,
+        checkLogin: true,
+        selectors: {
+            titleInput: 'textarea.description',
+            contentInput: 'textarea.description',
+            fileInput: 'input[type="file"]',
+            submitButton: 'button.upload-btn'
+        },
+        loginSelectors: {
+            userElements: ['.avatar'],
+            loginElements: ['.login-btn']
+        }
+    },
+    miaopai: {
+        name: '秒拍',
+        uploadUrl: 'https://www.miaopai.com/u/upload',
+        waitUntil: 'domcontentloaded',
+        timeout: 30000,
+        antiDetection: false,
+        checkLogin: true,
+        selectors: {
+            titleInput: 'input.title',
+            contentInput: 'textarea.desc',
+            fileInput: 'input[type="file"]',
+            submitButton: 'button.submit'
+        },
+        loginSelectors: {
+            userElements: ['.header-user'],
+            loginElements: ['.login']
+        }
+    },
+    acfun: {
+        name: 'A站',
+        uploadUrl: 'https://member.acfun.cn/upload-video',
+        waitUntil: 'domcontentloaded',
+        timeout: 30000,
+        antiDetection: true,
+        checkLogin: true,
+        selectors: {
+            titleInput: 'input.title-input',
+            contentInput: 'div.desc-input',
+            fileInput: 'input[type="file"]',
+            submitButton: 'div.btn-submit'
+        },
+        loginSelectors: {
+            userElements: ['.user-avatar'],
+            loginElements: ['.login-btn']
+        }
+    },
+    xigua: {
+        name: '西瓜视频',
+        uploadUrl: 'https://studio.ixigua.com/upload',
+        waitUntil: 'domcontentloaded',
+        timeout: 30000,
+        antiDetection: true,
+        checkLogin: true,
+        selectors: {
+            titleInput: 'div[contenteditable]',
+            contentInput: 'div.description',
+            fileInput: 'input[type="file"]',
+            submitButton: 'button.publish-btn'
+        },
+        loginSelectors: {
+            userElements: ['.avatar'],
+            loginElements: ['.login-btn']
+        }
+    },
+    haokan: {
+        name: '好看视频',
+        uploadUrl: 'https://haokan.baidu.com/author/upload',
+        waitUntil: 'domcontentloaded',
+        timeout: 30000,
+        antiDetection: true,
+        checkLogin: true,
+        selectors: {
+            titleInput: 'input.title',
+            contentInput: 'textarea.desc',
+            fileInput: 'input[type="file"]',
+            submitButton: 'button.submit'
+        },
+        loginSelectors: {
+            userElements: ['.user-icon'],
+            loginElements: ['.login-btn']
+        }
+    },
+    quanmin: {
+        name: '全民小视频',
+        uploadUrl: 'https://quanmin.baidu.com/author/upload',
+        waitUntil: 'domcontentloaded',
+        timeout: 30000,
+        antiDetection: false,
+        checkLogin: true,
+        selectors: {
+            titleInput: 'input.title',
+            contentInput: 'textarea.desc',
+            fileInput: 'input[type="file"]',
+            submitButton: 'button.submit'
+        },
+        loginSelectors: {
+            userElements: ['.user-icon'],
+            loginElements: ['.login-btn']
+        }
     }
 };
 
