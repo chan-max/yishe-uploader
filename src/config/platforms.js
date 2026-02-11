@@ -255,6 +255,26 @@ export const PLATFORM_CONFIGS = {
         },
         preProcess: null,
         postProcess: null
+    },
+    youtube: {
+        name: 'YouTube',
+        uploadUrl: 'https://studio.youtube.com/',
+        waitUntil: 'domcontentloaded',
+        timeout: 60000,
+        antiDetection: true,
+        checkLogin: true,
+        selectors: {
+            titleInput: '#textbox[aria-label="Add a title that describes your video"]',
+            contentInput: '#textbox[aria-label="Tell viewers about your video"]',
+            fileInput: '#content input[type="file"]',
+            submitButton: '#done-button'
+        },
+        loginSelectors: {
+            userElements: ['#avatar-btn', 'button#avatar-btn', 'img#img'],
+            loginElements: ['#text-item-0', 'text="Sign in"', 'a[href*="accounts.google.com"]']
+        },
+        preProcess: null,
+        postProcess: null
     }
 };
 

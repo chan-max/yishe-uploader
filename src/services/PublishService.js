@@ -15,6 +15,9 @@ import {
     publishToWeibo
 } from '../platforms/weibo.js';
 import {
+    publishToYouTube
+} from '../platforms/youtube.js';
+import {
     getOrCreateBrowser,
     isBrowserAvailable,
     updateBrowserActivity
@@ -156,6 +159,9 @@ export class PublishService {
                 case 'weibo':
                     result = await publishToWeibo(publishInfo);
                     break;
+                case 'youtube':
+                    result = await publishToYouTube(publishInfo);
+                    break;
                 default:
                     result = {
                         success: false,
@@ -219,7 +225,11 @@ export class PublishService {
                 {
                     name: 'weibo',
                     checker: new GenericLoginChecker('微博', { selectors: PLATFORM_CONFIGS.weibo.loginSelectors }),
-                    config: PLATFORM_CONFIGS.weibo
+                },
+                {
+                    name: 'youtube',
+                    checker: new GenericLoginChecker('YouTube', { selectors: PLATFORM_CONFIGS.youtube.loginSelectors }),
+                    config: PLATFORM_CONFIGS.youtube
                 }
             ];
 
@@ -329,7 +339,7 @@ export class PublishService {
 
                     // 使用对应的登录检查器
                     const loginResult = await config.checker.checkLoginStatus(page);
-                    
+
                     logger.info(`${config.name} 登录状态检查结果:`, loginResult);
 
                     // 根据检测结果设置详细消息
