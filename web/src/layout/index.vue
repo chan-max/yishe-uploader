@@ -22,7 +22,7 @@
       </div>
     </aside>
     <main class="main-content">
-      <div class="main-content-inner" :class="{ 'publish-full-width': isPublishPage }">
+      <div class="main-content-inner">
         <h1 class="ui header page-header">
           <i :class="headerIcon + ' icon'"></i>
           <div class="content">
@@ -44,7 +44,6 @@ import packageJson from '../../../package.json'
 const route = useRoute()
 const menuItems = [
   { path: '/browser', title: '浏览器连接', icon: 'linkify' },
-  { path: '/publish', title: '平台发布', icon: 'upload' },
   { path: '/api-doc', title: 'API 文档', icon: 'book' }
 ]
 const currentTitle = computed(() => {
@@ -59,7 +58,7 @@ const headerIcon = computed(() => {
   const item = menuItems.find(m => route.path.startsWith(m.path))
   return item?.icon || 'home'
 })
-const isPublishPage = computed(() => route.path.startsWith('/publish'))
+
 </script>
 
 <style lang="scss" scoped>
