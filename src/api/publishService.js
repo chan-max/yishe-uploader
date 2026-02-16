@@ -8,6 +8,7 @@ import { publishToKuaishou } from '../platforms/kuaishou.js';
 import { publishToXiaohongshu } from '../platforms/xiaohongshu.js';
 import { publishToWeibo } from '../platforms/weibo.js';
 import { publishToYouTube } from '../platforms/youtube.js';
+import { publishToXianyu } from '../platforms/xianyu.js';
 import { logger } from '../utils/logger.js';
 
 /**
@@ -19,6 +20,7 @@ const platformPublishers = {
     xiaohongshu: publishToXiaohongshu,
     weibo: publishToWeibo,
     youtube: publishToYouTube,
+    xianyu: publishToXianyu,
     // 其他平台可以继续添加
     // tencent: publishToTencent,
     // bilibili: publishToBilibili,

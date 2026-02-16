@@ -178,19 +178,20 @@ export const PLATFORM_CONFIGS = {
     },
     xianyu: {
         name: '咸鱼',
-        uploadUrl: 'https://www.xianyu.taobao.com/my-release',
+        uploadUrl: 'https://www.goofish.com/publish',
         waitUntil: 'domcontentloaded',
         timeout: 30000,
         antiDetection: false,
         checkLogin: true,
         selectors: {
-            titleInput: 'input[placeholder*="商品名称"], input[placeholder*="标题"]',
-            contentInput: 'textarea[placeholder*="商品描述"], textarea[placeholder*="说明"]',
+            titleInput: '[class^="editor"]', // 咸鱼标题和描述通常在一个编辑器里，或者使用前缀匹配
+            contentInput: '[class^="editor"]',
             fileInput: 'input[type="file"]',
-            submitButton: 'button[type="primary"], button.next-btn-primary, button:has-text("发布")'
+            uploadTrigger: '[class^="upload-item"]',
+            submitButton: 'button[type="primary"], button:has-text("发布")'
         },
         loginSelectors: {
-            userElements: ['.user-avatar', '.user-info', '.header-user'],
+            userElements: ['[class^="user-order-container"] img'],
             loginElements: ['.login-btn', '.login-button', '.login-entry', '.login-text']
         },
         preProcess: null,

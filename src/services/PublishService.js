@@ -18,6 +18,9 @@ import {
     publishToYouTube
 } from '../platforms/youtube.js';
 import {
+    publishToXianyu
+} from '../platforms/xianyu.js';
+import {
     getOrCreateBrowser,
     isBrowserAvailable,
     updateBrowserActivity
@@ -162,6 +165,9 @@ export class PublishService {
                 case 'youtube':
                     result = await publishToYouTube(publishInfo);
                     break;
+                case 'xianyu':
+                    result = await publishToXianyu(publishInfo);
+                    break;
                 default:
                     result = {
                         success: false,
@@ -230,6 +236,11 @@ export class PublishService {
                     name: 'youtube',
                     checker: new GenericLoginChecker('YouTube', { selectors: PLATFORM_CONFIGS.youtube.loginSelectors }),
                     config: PLATFORM_CONFIGS.youtube
+                },
+                {
+                    name: 'xianyu',
+                    checker: new GenericLoginChecker('咸鱼', { selectors: PLATFORM_CONFIGS.xianyu.loginSelectors }),
+                    config: PLATFORM_CONFIGS.xianyu
                 }
             ];
 
