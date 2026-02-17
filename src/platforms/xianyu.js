@@ -14,6 +14,7 @@
 
 import { getOrCreateBrowser } from '../services/BrowserService.js'
 import { PageOperator } from '../services/PageOperator.js'
+import { ImageManager } from '../services/ImageManager.js'
 import { logger } from '../utils/logger.js'
 
 class XianyuPublisher {
@@ -21,6 +22,7 @@ class XianyuPublisher {
     this.platformName = '咸鱼'
     this.uploadUrl = 'https://www.goofish.com/publish'
     this.pageOperator = new PageOperator()
+    this.imageManager = new ImageManager()
 
     // 咸鱼特定的配置
     this.config = {
@@ -88,13 +90,36 @@ class XianyuPublisher {
       await this._fillProductInfo(page, publishInfo)
       logger.info('商品信息填充完成')
 
-      // 6. 上传图片（咸鱼逻辑：使用 filePath）
-      const filePath = publishInfo.filePath || publishInfo.videoUrl
-      if (filePath) {
-        await this._uploadImages(page, filePath)
-        logger.info(`已上传文件`)
+      // 6. 上传图片 (咸鱼主攻图片)
+      let images = publishInfo.images || []
+      const mainFilePath = publishInfo.filePath || publishInfo.videoUrl
+
+      // 检查主文件是否是视频
+      const isMainFileVideo = mainFilePath && /\.(mp4|mov|avi|wmv|flv|mkv)$/i.test(mainFilePath);
+
+      // 如果没有显式图片列表，或者是视频主文件，尝试寻找封面图作为咸鱼的图片
+      if (images.length === 0) {
+        // 查找任何可能的封面/缩略图
+        const cover = publishInfo.platformSettings?.xianyu?.thumbnail ||
+          publishInfo.platformSettings?.douyin?.thumbnail ||
+          publishInfo.cover ||
+          publishInfo.thumbnail;
+
+        if (cover) {
+          logger.info('咸鱼发布检测到主文件为视频或未提供图片列表，自动使用封面图/缩略图作为发布图片');
+          images = [cover];
+        }
+      }
+
+      if (images.length > 0) {
+        await this._uploadImages(page, images.slice(0, this.config.maxImages))
+        logger.info(`已上传 ${Math.min(images.length, this.config.maxImages)} 张图片`)
+      } else if (mainFilePath) {
+        // 如果最终也没有找到图片，但有主文件路径，按原逻辑上传（支持咸鱼视频发布）
+        await this._uploadSingleFilePath(page, mainFilePath)
+        logger.info(`已通过路径上传文件: ${mainFilePath}`)
       } else {
-        logger.warn('未提供文件路径，跳过上传')
+        logger.warn('未提供图片或文件路径，跳过上传')
       }
 
       // 7. 设置商品分类
@@ -200,10 +225,14 @@ class XianyuPublisher {
 
         // 查找已登录标识
         for (const selector of loggedInSelectors) {
-          const count = await page.locator(selector).count()
-          if (count > 0) {
-            logger.info(`发现用户信息标识: ${selector}，判定为已登录`)
-            return true
+          try {
+            const count = await page.locator(selector).count()
+            if (count > 0) {
+              logger.info(`发现用户信息标识: ${selector}，判定为已登录`)
+              return true
+            }
+          } catch (e) {
+            if (this.pageOperator.isFatalError(e)) throw e
           }
         }
 
@@ -267,54 +296,67 @@ class XianyuPublisher {
   }
 
   /**
-   * 上传图片
+   * 上传多张图片
    */
-  async _uploadImages(page, filePath) {
-    try {
-      if (!filePath) {
-        logger.warn('文件路径为空，跳过上传')
-        return
-      }
+  async _uploadImages(page, imageUrls) {
+    logger.info(`开始上传 ${imageUrls.length} 张图片...`)
 
-      logger.info(`准备上传文件: ${filePath}`)
-
-      // 找到触发上传的元素 (用户提供: class="upload-item--VvK_FTdU")
-      const uploadTrigger = '[class^="upload-item"]'
-
-      // 等待上传触发元素出现
+    for (let i = 0; i < imageUrls.length; i++) {
+      const url = imageUrls[i]
+      let tempPath = null
       try {
-        await page.waitForSelector(uploadTrigger, { timeout: 5000 })
-      } catch (e) {
-        logger.warn('未找到上传触发元素 [class^="upload-item"]')
-        return
+        logger.info(`正在处理第 ${i + 1} 张图片: ${url}`)
+        tempPath = await this.imageManager.downloadImage(url, `xianyu_${Date.now()}_${i}`)
+        await this._uploadSingleFilePath(page, tempPath)
+
+        // 咸鱼上传完一张后通常需要一点缓冲
+        await page.waitForTimeout(2000)
+      } catch (error) {
+        if (this.pageOperator.isFatalError(error)) throw error
+        logger.error(`上传第 ${i + 1} 张图片失败:`, error.message)
+      } finally {
+        if (tempPath) {
+          try { this.imageManager.deleteTempFile(tempPath) } catch (e) { }
+        }
       }
+    }
+  }
 
-      const triggerCount = await page.locator(uploadTrigger).count()
-      logger.info(`找到 ${triggerCount} 个上传触发元素`)
+  /**
+   * 上传单个本地文件
+   */
+  async _uploadSingleFilePath(page, filePath) {
+    try {
+      if (!filePath) return
 
-      if (triggerCount === 0) {
-        logger.warn('未找到上传触发元素')
-        return
-      }
+      // 找到触发上传的元素
+      const uploadTrigger = '[class^="upload-item"]'
+      await page.waitForSelector(uploadTrigger, { timeout: 15000 })
 
-      // 监听文件选择器事件
-      logger.info('点击上传触发元素...')
+      // 获取当前已上传图片数量，以便后续比对
+      const initialImageCount = await page.locator('[class^="image-item"]').count()
+
       const fileChooserPromise = page.waitForEvent('filechooser', { timeout: 10000 })
       await page.click(uploadTrigger)
-
-      logger.info('等待文件选择器...')
       const fileChooser = await fileChooserPromise
-
-      logger.info(`设置文件: ${filePath}`)
       await fileChooser.setFiles(filePath)
-      logger.info('文件上传请求已发送')
 
-      // 等待上传完成
-      await page.waitForTimeout(3000)
-      logger.success('文件上传完成')
+      // 等待预览图数量增加，确保上传成功
+      logger.info('等待图片上传处理完成...')
+      try {
+        await page.waitForFunction(
+          (oldCount) => document.querySelectorAll('[class^="image-item"]').length > oldCount,
+          initialImageCount,
+          { timeout: 20000 }
+        )
+        logger.info('图片上传处理成功')
+      } catch (error) {
+        logger.warn('等待图片预览超时，可能上传较慢或选择器变化，继续流程')
+        await page.waitForTimeout(5000)
+      }
     } catch (error) {
-      logger.error('上传文件异常:', error.message)
-      logger.error('错误详情:', error)
+      if (this.pageOperator.isFatalError(error)) throw error
+      throw error
     }
   }
 
@@ -500,12 +542,9 @@ class XianyuPublisher {
       ]
 
       let clicked = false
-
       for (const selector of publishButtonSelectors) {
         try {
           const buttons = await page.$$(selector)
-
-          // 找最后一个按钮（通常是真正的发布按钮）
           if (buttons.length > 0) {
             const lastButton = buttons[buttons.length - 1]
             const text = await lastButton.textContent()
@@ -513,37 +552,52 @@ class XianyuPublisher {
             if (text && (text.includes('发布') || text.includes('确认'))) {
               await lastButton.click()
               clicked = true
-              logger.info('已点击发布按钮')
+              logger.info(`已点击发布按钮: ${text.trim()}`)
               break
             }
           }
-        } catch (e) {
-          // 继续尝试
-        }
+        } catch (e) { }
       }
 
       if (!clicked) {
-        logger.warn('未找到明确的发布按钮')
-        // 尝试通过 Enter 键提交
+        logger.warn('未找到明确的发布按钮，尝试 Enter 键')
         await page.keyboard.press('Enter')
       }
 
-      // 再等待一段时间确保发布完成
-      await page.waitForTimeout(3000)
+      // 等待发布结果 (咸鱼发布成功后通常会跳转或弹出成功框)
+      logger.info('等待发布结果反馈...')
 
-      // 尝试检测成功提示
-      try {
-        const successElements = await page.$$(
-          'text=发布成功, text=成功, .success-message, .success, [class*="success"]'
-        )
-        if (successElements.length > 0) {
-          logger.info('检测到发布成功提示')
+      const successResult = await Promise.race([
+        // 1. URL 改变 (通常跳转到商品详情或管理页)
+        page.waitForURL(url => !url.href.includes('goofish.com/publish'), { timeout: 20000 })
+          .then(() => ({ type: 'navigation', success: true })),
+
+        // 2. 出现成功关键词
+        page.waitForSelector('text=发布成功, text=成功, .success', { timeout: 20000 })
+          .then(() => ({ type: 'selector', success: true })),
+
+        // 3. 超时兜底
+        new Promise(resolve => setTimeout(() => resolve({ type: 'timeout', success: false }), 21000))
+      ])
+
+      if (successResult.success) {
+        logger.info(`检测到发布成功 (${successResult.type})`)
+        await page.waitForTimeout(2000) // 额外留一点点时间
+      } else {
+        // 如果最终没检测到成功，但也没有报错，则抛出一个警告性的错误或者继续
+        // 咸鱼的反爬和页面变化频繁，如果 URL 变了其实就是成功了
+        const currentUrl = page.url()
+        if (!currentUrl.includes('goofish.com/publish')) {
+          logger.info('页面已跳转，判定发布成功')
+        } else {
+          logger.warn('发布后页面未见明显变化，可能发布失败或反馈延迟')
+          throw new Error('发布结果确认超时，请检查咸鱼发布记录')
         }
-      } catch (e) {
-        logger.info('未检测到明确的成功提示，但发布流程已执行')
       }
     } catch (error) {
-      logger.error('提交发布失败:', error)
+      if (this.pageOperator.isFatalError(error)) throw error
+      logger.error('提交发布深度检查失败:', error.message)
+      throw error // 重新抛出，让外层捕获并标记失败
     }
   }
 }

@@ -95,7 +95,7 @@ class KuaishouPublisher {
 
         } catch (error) {
             logger.error(`${this.platformName}发布过程出错:`, error);
-            
+
             // 截图保存错误现场
             if (page) {
                 try {
@@ -127,20 +127,20 @@ class KuaishouPublisher {
      */
     async uploadVideo(page, filePath) {
         logger.info('开始上传视频文件');
-        
+
         // 等待上传按钮出现
         const uploadButton = page.locator("button[class^='_upload-btn']");
         await uploadButton.waitFor({ state: 'visible', timeout: 10000 });
-        
+
         // 使用文件选择器上传
         const [fileChooser] = await Promise.all([
             page.waitForEvent('filechooser'),
             uploadButton.click()
         ]);
-        
+
         await fileChooser.setFiles(filePath);
         logger.info('视频文件已选择');
-        
+
         await this.pageOperator.delay(2000);
     }
 
@@ -151,12 +151,13 @@ class KuaishouPublisher {
         try {
             const newFeatureButton = page.locator('button[type="button"] span:text("我知道了")');
             const count = await newFeatureButton.count();
-            
+
             if (count > 0) {
                 await newFeatureButton.click();
                 logger.info('已关闭新功能提示');
             }
         } catch (error) {
+            if (this.pageOperator.isFatalError(error)) throw error;
             logger.debug('无新功能提示弹窗');
         }
     }
@@ -166,34 +167,34 @@ class KuaishouPublisher {
      */
     async fillDescriptionAndTags(page, publishInfo) {
         logger.info('开始填充描述和话题...');
-        
+
         // 点击描述输入框
         await page.locator('text=描述').locator('xpath=following-sibling::div').click();
-        
+
         // 清空现有内容
         logger.info('清空现有标题');
         await page.keyboard.press('Backspace');
         await page.keyboard.press('Control+KeyA');
         await page.keyboard.press('Delete');
-        
+
         // 输入新标题
         logger.info('填写新标题');
         await page.keyboard.type(publishInfo.title);
         await page.keyboard.press('Enter');
-        
+
         // 添加话题标签（快手最多3个）
         if (publishInfo.tags && publishInfo.tags.length > 0) {
             const tagsToAdd = publishInfo.tags.slice(0, this.maxTags);
-            
+
             for (let i = 0; i < tagsToAdd.length; i++) {
                 const tag = tagsToAdd[i];
                 logger.info(`正在添加第 ${i + 1} 个话题: #${tag}`);
                 await page.keyboard.type(`#${tag} `);
                 await this.pageOperator.delay(2000);
             }
-            
+
             logger.info(`总共添加了 ${tagsToAdd.length} 个话题`);
-            
+
             if (publishInfo.tags.length > this.maxTags) {
                 logger.warn(`快手最多支持 ${this.maxTags} 个话题，已忽略多余的 ${publishInfo.tags.length - this.maxTags} 个`);
             }
@@ -205,15 +206,15 @@ class KuaishouPublisher {
      */
     async waitForVideoUploadComplete(page) {
         logger.info('等待视频上传完成...');
-        
+
         const maxRetries = 60; // 最多等待2分钟
         let retryCount = 0;
-        
+
         while (retryCount < maxRetries) {
             try {
                 // 检查"上传中"文本是否消失
                 const uploadingCount = await page.locator('text=上传中').count();
-                
+
                 if (uploadingCount === 0) {
                     logger.success('视频上传完毕');
                     break;
@@ -224,13 +225,14 @@ class KuaishouPublisher {
                     await this.pageOperator.delay(2000);
                 }
             } catch (error) {
+                if (this.pageOperator.isFatalError(error)) throw error;
                 logger.error('检查上传状态时发生错误:', error);
                 await this.pageOperator.delay(2000);
             }
-            
+
             retryCount++;
         }
-        
+
         if (retryCount >= maxRetries) {
             logger.warn('超过最大重试次数，视频上传可能未完成');
         }
@@ -241,7 +243,7 @@ class KuaishouPublisher {
      */
     async setScheduleTime(page, scheduleTime) {
         logger.info('开始设置定时发布...');
-        
+
         try {
             // 点击定时发布单选框
             await page.locator("label:text('发布时间')")
@@ -249,22 +251,22 @@ class KuaishouPublisher {
                 .locator('.ant-radio-input')
                 .nth(1)
                 .click();
-            
+
             await this.pageOperator.delay(1000);
-            
+
             // 格式化时间
             const publishDate = new Date(scheduleTime);
             const formattedTime = publishDate.toISOString().slice(0, 19).replace('T', ' ');
-            
+
             // 点击日期时间选择器
             await page.locator('div.ant-picker-input input[placeholder="选择日期时间"]').click();
             await this.pageOperator.delay(1000);
-            
+
             // 输入时间
             await page.keyboard.press('Control+KeyA');
             await page.keyboard.type(formattedTime);
             await page.keyboard.press('Enter');
-            
+
             await this.pageOperator.delay(1000);
             logger.success('定时发布设置完成');
         } catch (error) {
@@ -277,18 +279,18 @@ class KuaishouPublisher {
      */
     async clickPublishButton(page) {
         logger.info('准备点击发布按钮...');
-        
+
         // 第一步：点击"发布"按钮
         const publishButton = page.locator('button:has-text("发布")').filter({ hasText: /^发布$/ });
         await publishButton.click();
         logger.info('已点击发布按钮');
-        
+
         await this.pageOperator.delay(1000);
-        
+
         // 第二步：点击"确认发布"按钮
         const confirmButton = page.locator('button:has-text("确认发布")');
         const confirmCount = await confirmButton.count();
-        
+
         if (confirmCount > 0) {
             await confirmButton.click();
             logger.info('已点击确认发布按钮');
@@ -300,11 +302,11 @@ class KuaishouPublisher {
      */
     async waitForPublishComplete(page) {
         logger.info('等待发布完成...');
-        
+
         const targetUrl = 'https://cp.kuaishou.com/article/manage/video?status=2&from=publish';
         const maxRetries = 60;
         let retryCount = 0;
-        
+
         while (retryCount < maxRetries) {
             try {
                 // 检查是否跳转到作品管理页面
@@ -312,8 +314,9 @@ class KuaishouPublisher {
                 logger.success('发布成功，已跳转到作品管理页面');
                 return true;
             } catch (error) {
+                if (this.pageOperator.isFatalError(error)) throw error;
                 logger.debug(`等待发布完成... (${retryCount + 1}/${maxRetries})`);
-                
+
                 // 截图记录
                 if (retryCount % 10 === 0) {
                     try {
@@ -322,12 +325,12 @@ class KuaishouPublisher {
                         // 忽略截图错误
                     }
                 }
-                
+
                 await this.pageOperator.delay(1000);
                 retryCount++;
             }
         }
-        
+
         throw new Error('发布超时');
     }
 }

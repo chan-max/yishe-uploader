@@ -207,6 +207,7 @@ class WeiboPublisher {
                 logger.info(`第 ${imageIndex + 1} 张图片仍在上传中...`);
 
             } catch (error) {
+                if (this.pageOperator.isFatalError(error)) throw error;
                 logger.warn(`检查图片 ${imageIndex + 1} 上传状态时出错:`, error);
             }
 

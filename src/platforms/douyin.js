@@ -208,6 +208,7 @@ class DouyinPublisher {
                     entered = true;
                     break;
                 } catch (e2) {
+                    if (this.pageOperator.isFatalError(e2)) throw e2;
                     logger.debug(`等待发布页面... (${i + 1}/${maxRetries})`);
                     await this.pageOperator.delay(500);
                 }
@@ -358,32 +359,40 @@ class DouyinPublisher {
 
         // ===== 3. 填写话题标签 =====
         if (publishInfo.tags && publishInfo.tags.length > 0) {
-            logger.info(`开始填写 ${publishInfo.tags.length} 个话题标签`);
+            const tags = publishInfo.tags.slice(0, 5);
+            logger.info(`开始填写话题标签（共 ${publishInfo.tags.length} 个，取前 ${tags.length} 个）`);
 
             try {
                 const cssSelector = '.zone-container';
 
                 // 等待话题输入区域出现
                 await page.waitForSelector(cssSelector, { timeout: 5000 });
+
+                // 只在开始时点击一次，并确保光标在末尾
+                await page.locator(cssSelector).click();
                 await this.pageOperator.delay(500);
+                await page.keyboard.press('End');
+                await this.pageOperator.delay(300);
 
-                for (let i = 0; i < publishInfo.tags.length; i++) {
-                    const tag = publishInfo.tags[i];
-                    logger.info(`正在添加话题 ${i + 1}/${publishInfo.tags.length}: #${tag}`);
-
-                    // 点击输入区域
-                    await page.locator(cssSelector).click();
-                    await this.pageOperator.delay(300);
+                for (let i = 0; i < tags.length; i++) {
+                    const tag = tags[i];
+                    logger.info(`正在添加话题 ${i + 1}/${tags.length}: #${tag}`);
 
                     // 输入话题（带#号）
                     await page.keyboard.type(`#${tag}`, { delay: 50 });
+
+                    // 等待话题建议窗口弹出
+                    await this.pageOperator.delay(800);
+
+                    // 按回车确认（回车通常比空格更可靠，能选中建议列表中的第一个或直接确认）
+                    await page.keyboard.press('Enter');
                     await this.pageOperator.delay(500);
 
-                    // 按空格确认
+                    // 再次按空格/回车确保生成标签气泡
                     await page.keyboard.press('Space');
                     await this.pageOperator.delay(500);
 
-                    logger.info(`话题 #${tag} 添加成功`);
+                    logger.info(`话题 #${tag} 添加步骤已执行`);
                 }
 
                 logger.success(`总共添加了 ${publishInfo.tags.length} 个话题`);
@@ -435,6 +444,7 @@ class DouyinPublisher {
                 retryCount++;
 
             } catch (error) {
+                if (this.pageOperator.isFatalError(error)) throw error;
                 logger.warn('检查上传状态时出错:', error.message);
                 await this.pageOperator.delay(2000);
                 retryCount++;
@@ -677,10 +687,13 @@ class DouyinPublisher {
                 logger.success('发布成功，已跳转到作品管理页面');
                 return true;
             } catch (error) {
+                if (this.pageOperator.isFatalError(error)) throw error;
+
                 // 检查是否需要自动选择封面
                 try {
                     await this.handleAutoVideoCover(page);
                 } catch (e) {
+                    if (this.pageOperator.isFatalError(e)) throw e;
                     // 忽略
                 }
 

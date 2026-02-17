@@ -17,6 +17,21 @@ export class PageOperator {
     }
 
     /**
+     * 检查是否为致命错误（浏览器/页面已关闭）
+     */
+    isFatalError(error) {
+        if (!error || !error.message) return false;
+        const msg = error.message;
+        return (
+            msg.includes('Target page, context or browser has been closed') ||
+            msg.includes('browser has been closed') ||
+            msg.includes('context has been closed') ||
+            msg.includes('Page closed') ||
+            msg.includes('Browser closed')
+        );
+    }
+
+    /**
      * 设置反检测脚本
      */
     async setupAntiDetection(page) {

@@ -412,6 +412,7 @@ class XiaohongshuPublisher {
                             break;
                         }
                     } catch (error) {
+                        if (this.pageOperator.isFatalError(error)) throw error;
                         // 继续检查其他选择器
                     }
                 }
@@ -442,6 +443,7 @@ class XiaohongshuPublisher {
                                 }
                             }
                         } catch (error) {
+                            if (this.pageOperator.isFatalError(error)) throw error;
                             // 继续检查
                         }
                     }
@@ -474,6 +476,7 @@ class XiaohongshuPublisher {
             await this.pageOperator.delay(1500);
 
         } catch (error) {
+            if (this.pageOperator.isFatalError(error)) throw error;
             logger.warn(`等待图片上传完成时出错: ${error.message}`);
             // 即使出错也继续执行
         }

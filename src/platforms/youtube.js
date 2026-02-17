@@ -220,15 +220,21 @@ class YouTubePublisher {
 
         // 循环点击 Next 直到出现 Visibility 选项
         for (let i = 0; i < 5; i++) {
-            logger.info(`步骤 ${i + 1}: 点击 Next`);
-            await nextButton.click();
-            await this.pageOperator.delay(2000);
+            try {
+                logger.info(`步骤 ${i + 1}: 点击 Next`);
+                await nextButton.click();
+                await this.pageOperator.delay(2000);
 
-            // 检查是否到达 Visibility 页面 (包含 Public/Private 选项)
-            const visibilityOption = page.locator('tp-yt-paper-radio-button[name="PUBLIC"]');
-            if (await visibilityOption.isVisible()) {
-                logger.info('已到达可见性设置页面');
-                break;
+                // 检查是否到达 Visibility 页面 (包含 Public/Private 选项)
+                const visibilityOption = page.locator('tp-yt-paper-radio-button[name="PUBLIC"]');
+                if (await visibilityOption.isVisible()) {
+                    logger.info('已到达可见性设置页面');
+                    break;
+                }
+            } catch (error) {
+                if (this.pageOperator.isFatalError(error)) throw error;
+                logger.warn(`点击下一步失败 (${i + 1}/5):`, error.message);
+                await this.pageOperator.delay(1000);
             }
         }
 

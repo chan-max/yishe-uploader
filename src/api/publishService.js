@@ -125,11 +125,12 @@ class PublishService {
             // 统计结果
             const successCount = results.filter(r => r.success).length;
             const failedCount = results.filter(r => !r.success).length;
+            const allSuccess = successCount === platforms.length && platforms.length > 0;
 
             logger.info(`批量发布完成: 成功 ${successCount}/${platforms.length}, 失败 ${failedCount}/${platforms.length}`);
 
             return {
-                success: successCount > 0,
+                success: allSuccess,
                 total: platforms.length,
                 successCount,
                 failedCount,
