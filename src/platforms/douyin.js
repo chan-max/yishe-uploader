@@ -256,6 +256,7 @@ class DouyinPublisher {
                 // 策略 2: 通过 placeholder 属性
                 if (!titleInput) {
                     const selectors = [
+                        'input[placeholder*="填写作品标题"]',
                         'input[placeholder*="作品标题"]',
                         'input[placeholder*="填写标题"]',
                         'input[placeholder*="添加标题"]',
