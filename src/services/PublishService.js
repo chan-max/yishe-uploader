@@ -21,6 +21,9 @@ import {
     publishToXianyu
 } from '../platforms/xianyu.js';
 import {
+    publishToTiktok
+} from '../platforms/tiktok.js';
+import {
     getOrCreateBrowser,
     isBrowserAvailable,
     updateBrowserActivity
@@ -168,6 +171,9 @@ export class PublishService {
                 case 'xianyu':
                     result = await publishToXianyu(publishInfo);
                     break;
+                case 'tiktok':
+                    result = await publishToTiktok(publishInfo);
+                    break;
                 default:
                     result = {
                         success: false,
@@ -231,6 +237,7 @@ export class PublishService {
                 {
                     name: 'weibo',
                     checker: new GenericLoginChecker('微博', { selectors: PLATFORM_CONFIGS.weibo.loginSelectors }),
+                    config: PLATFORM_CONFIGS.weibo
                 },
                 {
                     name: 'youtube',
@@ -241,6 +248,11 @@ export class PublishService {
                     name: 'xianyu',
                     checker: new GenericLoginChecker('咸鱼', { selectors: PLATFORM_CONFIGS.xianyu.loginSelectors }),
                     config: PLATFORM_CONFIGS.xianyu
+                },
+                {
+                    name: 'tiktok',
+                    checker: new GenericLoginChecker('TikTok', { selectors: PLATFORM_CONFIGS.tiktok.loginSelectors }),
+                    config: PLATFORM_CONFIGS.tiktok
                 }
             ];
 
