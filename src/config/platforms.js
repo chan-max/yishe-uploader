@@ -159,7 +159,7 @@ export const PLATFORM_CONFIGS = {
     },
     kuaishou: {
         name: '快手',
-        uploadUrl: 'https://cp.kuaishou.com/article/publish/video?tabType=2',
+        uploadUrl: 'https://cp.kuaishou.com/article/publish/video',
         waitUntil: 'domcontentloaded',
         timeout: 30000,
         antiDetection: false,

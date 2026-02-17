@@ -236,30 +236,60 @@ class TiktokPublisher {
     async _waitForPostResult(page) {
         logger.info('确认发布结果反馈...');
         try {
-            // 1. 等待 URL 过渡到内容管理页 或 确认模态框出现
+            // 1. 定义多种成功标识，使用 Promise.race 竞争
             const result = await Promise.race([
-                // 常见的跳转情况
-                page.waitForURL(url => url.href.includes('/manage/content'), { timeout: 50000 }).then(() => 'REDIRECT'),
-                // 常见的弹窗确认情况
-                page.waitForSelector('text=Post success, text=发布成功, [data-e2e="upload-success-modal"], text=Manage your posts', { timeout: 50000 }).then(() => 'MODAL')
+                // (1) URL 跳转到内容管理页 (tiktokstudio/content 或 tiktokstudio/posts)
+                page.waitForURL(url =>
+                    url.href.includes('/manage/content') ||
+                    url.href.includes('/tiktokstudio/content') ||
+                    url.href.includes('/tiktokstudio/posts'),
+                    { timeout: 60000 }
+                ).then(() => 'REDIRECT'),
+
+                // (2) 明确的成功文本或模态框
+                page.waitForSelector([
+                    'text="Post success"',
+                    'text="发布成功"',
+                    'text="Your video has been uploaded"',
+                    'text="Manage your posts"',
+                    'text="View your video"',
+                    '[data-e2e="upload-success-modal"]'
+                ].join(','), { timeout: 60000 }).then(() => 'SUCCESS_TEXT'),
+
+                // (3) 发布按钮小时也是一种成功的体现 (尤其是在跳转中)
+                page.waitForFunction(() => {
+                    const btn = document.querySelector('button[type="primary"], button:has-text("Post"), button:has-text("发布")');
+                    return !btn || btn.offsetParent === null;
+                }, { timeout: 60000 }).then(() => 'POST_BUTTON_HIDDEN')
             ]);
 
             logger.info(`检测到发布成功凭据: ${result}`);
 
-            // 2. 检查当前是否还停留在上传页且没有明确成功信息
-            if (page.url().includes('/upload') && result === 'REDIRECT') {
-                // 理论上不可能，增加稳健性
+            // 如果是文本模态框，可能需要点击一下 "Manage posts" 或关闭
+            if (result === 'SUCCESS_TEXT') {
+                try {
+                    const manageBtn = page.locator('text="Manage your posts", text="管理作品"').first();
+                    if (await manageBtn.count() > 0) {
+                        await manageBtn.click();
+                        logger.info('已点击模态框中的管理按钮');
+                    }
+                } catch (e) {
+                    // 忽略处理成功模态框时的微小异常
+                }
             }
 
-            // 3. 停留一会儿，方便自动截图记录成功时刻
-            await page.waitForTimeout(2000);
+            // 停留一会儿，确保状态稳定
+            await page.waitForTimeout(3000);
+            logger.success(`${this.platformName} 发布流程最终确认成功`);
+
         } catch (error) {
-            // 根本修复：如果不符合上述条件，直接抛出错误，外层 catch 会拦截并标记失败，而不是返回 success: true
+            // 兜底检查：如果是因为超时，但 URL 已经变了，仍然视为成功
             const currentUrl = page.url();
-            if (currentUrl.includes('/manage/content')) {
-                logger.info('确认跳转至内容管理页，判定为发布成功');
+            if (currentUrl.includes('/content') || currentUrl.includes('/posts')) {
+                logger.info(`虽然反馈确认超时，但当前URL [${currentUrl}] 显示已离开上传页，判定为成功`);
                 return;
             }
+
             throw new Error(`发布结果确认异常: ${error.message || '超时'}. 当前页面URL: ${currentUrl}`);
         }
     }

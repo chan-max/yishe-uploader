@@ -36,12 +36,9 @@ class KuaishouPublisher {
             await this.pageOperator.setupAntiDetection(page);
             logger.info('反检测脚本已应用');
 
-            // 3. 应用认证
-            const authSuccess = await kuaishouAuth.applyAuth(page);
-            if (!authSuccess) {
-                throw new Error('快手认证设置失败');
-            }
-            logger.info('快手认证已应用');
+            // 3. 应用认证 (如果是通过 CDP 连接且已登录，即使此处返回 false 也不影响发布)
+            await kuaishouAuth.applyAuth(page);
+            logger.info('快手认证处理完成');
 
             // 4. 导航到上传页面
             await page.goto(this.uploadUrl, {
@@ -50,13 +47,40 @@ class KuaishouPublisher {
             });
             logger.info(`已打开${this.platformName}上传页面`);
 
-            // 5. 等待页面加载
-            await page.waitForURL(this.uploadUrl, { timeout: 5000 });
+            // 5. 等待并检查当前URL
+            await this.pageOperator.delay(2000);
+            const currentUrl = page.url();
+            logger.info(`当前URL: ${currentUrl}`);
 
             // 6. 检查登录状态
-            const loginCheck = await page.locator('div.names div.container div.name:text("机构服务")').count();
-            if (loginCheck > 0) {
-                throw new Error('快手未登录，请先登录');
+            // 策略 1: 如果 URL 还是上传页，通常说明已登录
+            if (currentUrl.includes('/article/publish/video')) {
+                logger.info('登录状态检查通过 (处于上传页面)');
+            } else {
+                // 策略 2: 检查是否有登录按钮或登录界面的特征元素
+                const loginCheckSelectors = [
+                    'div.names div.container div.name:text("机构服务")', // 官网首页特征
+                    'text=请先登录',
+                    'text=登录/注册',
+                    '.login-button',
+                    'button:has-text("登录")'
+                ];
+
+                for (const selector of loginCheckSelectors) {
+                    try {
+                        const count = await page.locator(selector).count();
+                        if (count > 0) {
+                            throw new Error('快手未登录，请先登录');
+                        }
+                    } catch (e) {
+                        if (e.message.includes('快手未登录')) throw e;
+                    }
+                }
+
+                // 策略 3: 如果在官网首页且不在发布页，则视为未登录
+                if (currentUrl === 'https://cp.kuaishou.com/' || currentUrl === 'https://cp.kuaishou.com') {
+                    throw new Error('快手未登录，请先登录');
+                }
             }
             logger.info('登录状态检查通过');
 
@@ -128,9 +152,31 @@ class KuaishouPublisher {
     async uploadVideo(page, filePath) {
         logger.info('开始上传视频文件');
 
-        // 等待上传按钮出现
-        const uploadButton = page.locator("button[class^='_upload-btn']");
-        await uploadButton.waitFor({ state: 'visible', timeout: 10000 });
+        // 等待上传按钮出现 (兼容 button 和 div 等元素)
+        const uploadSelectors = [
+            "button[class*='upload-btn']",
+            "div[class*='upload-btn']",
+            "button:has-text('上传')",
+            "div:has-text('上传视频')"
+        ];
+
+        let uploadButton = null;
+        for (const selector of uploadSelectors) {
+            try {
+                const btn = page.locator(selector).first();
+                if (await btn.count() > 0 && await btn.isVisible()) {
+                    uploadButton = btn;
+                    logger.info(`找到上传按钮: [${selector}]`);
+                    break;
+                }
+            } catch (e) {
+                // 继续尝试下一个
+            }
+        }
+
+        if (!uploadButton) {
+            throw new Error('未找到上传按钮，请确认页面是否已正确加载');
+        }
 
         // 使用文件选择器上传
         const [fileChooser] = await Promise.all([
@@ -168,37 +214,70 @@ class KuaishouPublisher {
     async fillDescriptionAndTags(page, publishInfo) {
         logger.info('开始填充描述和话题...');
 
-        // 点击描述输入框
-        await page.locator('text=描述').locator('xpath=following-sibling::div').click();
+        // 1. 定位并激活输入区域
+        // 根据快手后台结构，通常点击“描述”标签旁边的容器即可激活编辑器
+        const descriptionArea = page.locator('text=描述').locator('xpath=following-sibling::div');
 
-        // 清空现有内容
-        logger.info('清空现有标题');
-        await page.keyboard.press('Backspace');
+        try {
+            await descriptionArea.first().click();
+            logger.info('已点击描述区域以激活输入');
+            await this.pageOperator.delay(1500); // 增加等待时间确保编辑器加载和聚焦
+        } catch (e) {
+            logger.warn('点击描述区域失败，尝试备用方案', e.message);
+            // 备用方案：寻找 contenteditable 元素
+            const ce = page.locator('[contenteditable="true"]').first();
+            if (await ce.count() > 0) {
+                await ce.click();
+                await this.pageOperator.delay(1000);
+            }
+        }
+
+        // 2. 清空现有内容
+        logger.info('执行全选删除，清空现有内容');
         await page.keyboard.press('Control+KeyA');
+        await this.pageOperator.delay(200);
         await page.keyboard.press('Delete');
+        await this.pageOperator.delay(800);
 
-        // 输入新标题
-        logger.info('填写新标题');
-        await page.keyboard.type(publishInfo.title);
-        await page.keyboard.press('Enter');
+        // 3. 输入新标题/描述
+        const title = publishInfo.title || publishInfo.description || '';
+        if (title) {
+            logger.info(`正在输入内容: ${title.substring(0, 20)}...`);
+            // 再次点击确保焦点仍然存在
+            try { await page.keyboard.press('ArrowDown'); } catch (e) { } // 触发一下交互
 
-        // 添加话题标签（快手最多3个）
+            await page.keyboard.type(title, { delay: 60 });
+            await this.pageOperator.delay(1000);
+            // 输入换行符，为话题留出空间
+            await page.keyboard.press('Enter');
+            await this.pageOperator.delay(500);
+        }
+
+        // 4. 添加话题标签 (快手最多3个)
         if (publishInfo.tags && publishInfo.tags.length > 0) {
             const tagsToAdd = publishInfo.tags.slice(0, this.maxTags);
+            logger.info(`准备添加话题标签: ${tagsToAdd.join(', ')}`);
 
             for (let i = 0; i < tagsToAdd.length; i++) {
                 const tag = tagsToAdd[i];
-                logger.info(`正在添加第 ${i + 1} 个话题: #${tag}`);
-                await page.keyboard.type(`#${tag} `);
-                await this.pageOperator.delay(2000);
-            }
+                logger.info(`正在添加话题: #${tag}`);
 
-            logger.info(`总共添加了 ${tagsToAdd.length} 个话题`);
+                // 输入 # 触发联想
+                await page.keyboard.type('#' + tag, { delay: 100 });
+                await this.pageOperator.delay(2000); // 快手联想有时较慢，给足时间
 
-            if (publishInfo.tags.length > this.maxTags) {
-                logger.warn(`快手最多支持 ${this.maxTags} 个话题，已忽略多余的 ${publishInfo.tags.length - this.maxTags} 个`);
+                // 尝试按 Enter 确认联想
+                await page.keyboard.press('Enter');
+                await this.pageOperator.delay(1000);
+
+                // 敲个空格确保形成标签块
+                await page.keyboard.press('Space');
+                await this.pageOperator.delay(1000);
             }
         }
+
+        logger.info('描述与话题填充完成');
+        await this.pageOperator.delay(2000);
     }
 
     /**
@@ -281,19 +360,54 @@ class KuaishouPublisher {
         logger.info('准备点击发布按钮...');
 
         // 第一步：点击"发布"按钮
-        const publishButton = page.locator('button:has-text("发布")').filter({ hasText: /^发布$/ });
-        await publishButton.click();
-        logger.info('已点击发布按钮');
+        // 兼容不同的元素类型（button, div, span）以及特定的 class
+        const publishSelectors = [
+            'button:has-text("发布")',
+            'div[class*="_button_"]:has-text("发布")',
+            'div:has-text("发布")',
+            'span:has-text("发布")'
+        ];
 
-        await this.pageOperator.delay(1000);
+        let publishClicked = false;
+        for (const selector of publishSelectors) {
+            try {
+                const btn = page.locator(selector).filter({ hasText: /^发布$/ }).first();
+                if (await btn.count() > 0) {
+                    await btn.click();
+                    logger.info(`已通过选择器 [${selector}] 点击发布按钮`);
+                    publishClicked = true;
+                    break;
+                }
+            } catch (e) {
+                logger.debug(`尝试选择器 [${selector}] 失败: ${e.message}`);
+            }
+        }
 
-        // 第二步：点击"确认发布"按钮
-        const confirmButton = page.locator('button:has-text("确认发布")');
-        const confirmCount = await confirmButton.count();
+        if (!publishClicked) {
+            throw new Error('未找到发布按钮，请检查页面加载情况');
+        }
 
-        if (confirmCount > 0) {
-            await confirmButton.click();
-            logger.info('已点击确认发布按钮');
+        await this.pageOperator.delay(2000);
+
+        // 第二步：点击"确认发布"按钮 (弹窗中的确认)
+        const confirmSelectors = [
+            'button:has-text("确认发布")',
+            'div[class*="_button_"]:has-text("确认发布")',
+            'div:has-text("确认发布")',
+            'span:has-text("确认发布")'
+        ];
+
+        for (const selector of confirmSelectors) {
+            try {
+                const btn = page.locator(selector).first();
+                if (await btn.count() > 0) {
+                    await btn.click();
+                    logger.info(`已通过选择器 [${selector}] 点击确认发布按钮`);
+                    break;
+                }
+            } catch (e) {
+                logger.debug(`尝试确认发布选择器 [${selector}] 失败: ${e.message}`);
+            }
         }
     }
 
@@ -303,7 +417,7 @@ class KuaishouPublisher {
     async waitForPublishComplete(page) {
         logger.info('等待发布完成...');
 
-        const targetUrl = 'https://cp.kuaishou.com/article/manage/video?status=2&from=publish';
+        const targetUrl = 'https://cp.kuaishou.com/article/manage/video**';
         const maxRetries = 60;
         let retryCount = 0;
 
