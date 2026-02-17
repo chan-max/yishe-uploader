@@ -90,17 +90,29 @@ class XiaohongshuPublisher {
                 logger.info(`${this.platformName}已登录，继续发布流程`);
             }
 
-            // 5. 执行平台特定的预处理
-            if (this.config.preProcess) {
-                await this.config.preProcess(page);
+            // 5. 执行平台特定的预处理 (如果是视频任务且当前在图片页，则需要跳转)
+            const isVideoTask = !!(publishInfo.filePath || (publishInfo.videos && publishInfo.videos.length > 0));
+            const targetType = isVideoTask ? 'video' : 'image';
+            const currentUrl = page.url();
+
+            if (!currentUrl.includes(`target=${targetType}`)) {
+                logger.info(`切换到${targetType === 'video' ? '视频' : '图片'}发布模式`);
+                const newUrl = `https://creator.xiaohongshu.com/publish/publish?target=${targetType}`;
+                await page.goto(newUrl, { waitUntil: 'networkidle', timeout: 30000 });
+                await this.pageOperator.delay(2000);
             }
 
-            // 6. 处理图片上传
-            if (publishInfo.images && publishInfo.images.length > 0) {
+            // 6. 处理视频或图片上传
+            if (isVideoTask) {
+                const videoPath = publishInfo.filePath || (publishInfo.videos && publishInfo.videos[0]);
+                await this.handleVideoUpload(page, videoPath);
+            } else if (publishInfo.images && publishInfo.images.length > 0) {
                 await this.handleImageUpload(page, publishInfo.images);
+            } else {
+                throw new Error('发布小红书缺少图片或视频资源');
             }
 
-            // 7. 填写内容
+            // 7. 填写标题、正文和话题
             await this.fillContent(page, publishInfo);
 
             // 8. 执行平台特定的后处理
@@ -135,6 +147,40 @@ class XiaohongshuPublisher {
                     logger.warn(`${this.platformName}关闭页面时出错:`, closeError);
                 }
             }
+        }
+    }
+
+    /**
+     * 处理视频上传
+     */
+    async handleVideoUpload(page, videoPath) {
+        logger.info(`开始上传视频: ${videoPath}`);
+
+        // 如果是远程路径，先下载
+        let actualPath = videoPath;
+        if (typeof videoPath === 'string' && videoPath.startsWith('http')) {
+            actualPath = await this.imageManager.downloadImage(videoPath, `xhs_video_${Date.now()}`);
+        }
+
+        try {
+            // 等待上传按钮或直接定位 input
+            const inputSelector = 'input[type="file"][accept*="video"]';
+            const fileInput = page.locator(inputSelector).first();
+
+            await fileInput.waitFor({ state: 'attached', timeout: 10000 });
+            await fileInput.setInputFiles(actualPath);
+            logger.info('视频文件已选择，等待上传及处理...');
+
+            // 等待上传进度消失或出现完成标识
+            // 小红书视频上传后会出现转码、版权检查等
+            await page.waitForSelector('.video-upload-success, .video-preview, .upload-success', { timeout: 300000 }).catch(() => {
+                logger.warn('等待视频上传完成超时，尝试继续');
+            });
+
+            await this.pageOperator.delay(3000);
+        } catch (error) {
+            logger.error('视频上传失败:', error);
+            throw error;
         }
     }
 
@@ -291,7 +337,7 @@ class XiaohongshuPublisher {
                 try {
                     const elements = await page.$$(selector);
                     if (elements && elements.length > 0) {
-                        // 如果有多个，优先选择可见的
+                        // If there are multiple, prioritize visible ones
                         for (let element of elements) {
                             const isVisible = await element.evaluate(el => {
                                 return el.offsetParent !== null;
@@ -314,7 +360,7 @@ class XiaohongshuPublisher {
             }
 
             if (!fileInput) {
-                // 如果找不到文件输入框，尝试点击上传区域
+                // If file input not found, try clicking upload area
                 logger.info('尝试点击上传区域');
                 const uploadAreaSelectors = [
                     '.upload-area',
@@ -333,7 +379,7 @@ class XiaohongshuPublisher {
                         for (let uploadArea of elements) {
                             try {
                                 const text = await uploadArea.evaluate(el => el.textContent || el.innerText);
-                                // 检查是否是上传按钮
+                                // Check if it's an upload button
                                 if (text && (text.includes('上传') || text.includes('选择') || text.includes('添加'))) {
                                     logger.info(`点击上传按钮: ${selector}, 文本: ${text}`);
                                     await uploadArea.click({
@@ -341,10 +387,10 @@ class XiaohongshuPublisher {
                                     });
                                     await this.pageOperator.delay(1500);
 
-                                    // 再次尝试查找文件输入框
+                                    // Try finding file input again
                                     const inputs = await page.$$('input[type="file"]');
                                     if (inputs && inputs.length > 0) {
-                                        fileInput = inputs[inputs.length - 1]; // 使用最后一个（通常是新出现的）
+                                        fileInput = inputs[inputs.length - 1]; // Use the last one (usually the newly appeared one)
                                         logger.info('找到文件输入框');
                                         break;
                                     }
@@ -364,13 +410,13 @@ class XiaohongshuPublisher {
                 throw new Error('未找到文件选择器，请检查页面是否已加载完成');
             }
 
-            // 上传文件
+            // Upload file
             logger.info(`开始上传文件: ${tempPath}`);
-            // Playwright: setInputFiles 替代 Puppeteer 的 uploadFile
+            // Playwright: setInputFiles replaces Puppeteer's uploadFile
             await fileInput.setInputFiles(tempPath);
             logger.info(`文件已选择，等待上传...`);
 
-            // 等待图片上传完成
+            // Wait for image upload to complete
             await this.waitForImageUploadComplete(page, imageIndex);
 
         } catch (error) {
@@ -384,7 +430,7 @@ class XiaohongshuPublisher {
      */
     async waitForImageUploadComplete(page, imageIndex) {
         try {
-            // 等待图片上传完成，检查多种可能的完成状态
+            // Wait for image upload to complete, check for various possible completion states
             const uploadCompleteSelectors = [
                 '.upload-success',
                 '.image-preview',
@@ -397,12 +443,12 @@ class XiaohongshuPublisher {
             ];
 
             let uploadComplete = false;
-            const maxWaitTime = 20000; // 增加到20秒超时
+            const maxWaitTime = 20000; // Increased to 20 seconds timeout
             const startTime = Date.now();
             let lastLoadingState = false;
 
             while (!uploadComplete && (Date.now() - startTime) < maxWaitTime) {
-                // 检查完成状态
+                // Check completion status
                 for (const selector of uploadCompleteSelectors) {
                     try {
                         const elements = await page.$$(selector);
@@ -413,12 +459,12 @@ class XiaohongshuPublisher {
                         }
                     } catch (error) {
                         if (this.pageOperator.isFatalError(error)) throw error;
-                        // 继续检查其他选择器
+                        // Continue checking other selectors
                     }
                 }
 
                 if (!uploadComplete) {
-                    // 检查是否还有loading状态
+                    // Check if there's still a loading state
                     const loadingSelectors = [
                         '.upload-loading',
                         '.loading',
@@ -444,11 +490,11 @@ class XiaohongshuPublisher {
                             }
                         } catch (error) {
                             if (this.pageOperator.isFatalError(error)) throw error;
-                            // 继续检查
+                            // Continue checking
                         }
                     }
 
-                    // 如果之前有loading状态，现在没有了，认为上传完成
+                    // If there was a loading state before and now it's gone, assume upload is complete
                     if (lastLoadingState && !hasLoading) {
                         logger.info('检测到loading状态消失，上传可能已完成');
                         uploadComplete = true;
@@ -456,7 +502,7 @@ class XiaohongshuPublisher {
                     }
 
                     if (!hasLoading && (Date.now() - startTime) > 3000) {
-                        // 3秒后如果没有loading状态，假设已完成
+                        // After 3 seconds, if no loading state, assume complete
                         uploadComplete = true;
                         logger.info('未检测到loading状态，假设上传完成');
                         break;
@@ -472,13 +518,13 @@ class XiaohongshuPublisher {
                 logger.info(`图片 ${imageIndex + 1} 上传完成确认`);
             }
 
-            // 额外等待确保页面稳定
+            // Additional wait to ensure page stability
             await this.pageOperator.delay(1500);
 
         } catch (error) {
             if (this.pageOperator.isFatalError(error)) throw error;
             logger.warn(`等待图片上传完成时出错: ${error.message}`);
-            // 即使出错也继续执行
+            // Continue execution even if error occurs
         }
     }
 
@@ -486,20 +532,33 @@ class XiaohongshuPublisher {
      * 填写内容
      */
     async fillContent(page, publishInfo) {
-        // 填写标题
-        if (publishInfo.title) {
-            await this.pageOperator.fillInput(page, this.config.selectors.titleInput, publishInfo.title, {
+        // 1. 填写标题
+        const title = publishInfo.title || publishInfo.description || '';
+        if (title) {
+            await this.pageOperator.fillInput(page, this.config.selectors.titleInput, title.substring(0, 20), {
                 delay: 100
             });
             logger.info('已填写标题');
         }
 
-        // 填写正文内容
-        if (publishInfo.content) {
-            await this.pageOperator.fillInput(page, this.config.selectors.contentInput, publishInfo.content, {
-                delay: 50
-            });
-            logger.info('已填写正文内容');
+        // 2. 填写正文内容 (小红书支持正文最后加话题)
+        let content = publishInfo.content || publishInfo.description || '';
+
+        // 附加话题
+        if (publishInfo.tags && publishInfo.tags.length > 0) {
+            const tagsStr = publishInfo.tags.map(t => `#${t}`).join(' ');
+            content += '\n\n' + tagsStr;
+        }
+
+        if (content) {
+            // 小红书编辑器有时是 ProseMirror，使用 pageOperator.fillInput 或 keyboard.type
+            const editorSelector = this.config.selectors.contentInput;
+            const editor = page.locator(editorSelector).first();
+            await editor.click();
+            await page.keyboard.press('Control+A');
+            await page.keyboard.press('Backspace');
+            await page.keyboard.type(content, { delay: 30 });
+            logger.info('已填写正文内容（含话题）');
         }
 
         // 等待内容填写完成
@@ -575,7 +634,23 @@ class XiaohongshuPublisher {
      * 等待发布完成
      */
     async waitForPublishComplete(page) {
-        await this.pageOperator.delay(5000);
+        logger.info('等待发布结果反馈...');
+        try {
+            await Promise.race([
+                // (1) 等待跳转回内容管理页
+                page.waitForURL(url => url.href.includes('/publish/manage'), { timeout: 45000 }),
+                // (2) 等待成功提示出现
+                page.waitForSelector('text=发布成功, text=Post success, .success-tip', { timeout: 45000 })
+            ]);
+            logger.info('检测到发布成功标识');
+        } catch (error) {
+            logger.warn('等待发布确认超时或失败，尝试检查当前URL:', page.url());
+            if (page.url().includes('/publish/manage')) {
+                logger.info('当前已在管理页，判定为发布成功');
+            } else {
+                throw new Error('未检测到发布成功标识，请手动检查');
+            }
+        }
     }
 
     /**

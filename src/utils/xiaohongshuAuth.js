@@ -15,149 +15,149 @@ import {
 export class XiaohongshuAuth {
     constructor() {
         this.realCookies = [{
-                name: 'abRequestId',
-                value: '35328789-b536-51f7-952d-7867750a6dd4',
-                domain: '.xiaohongshu.com',
-                path: '/',
-                httpOnly: false,
-                secure: true,
-                sameSite: 'Lax'
-            },
-            {
-                name: 'a1',
-                value: '199dad7771a8rzviphr8p5q1kiv1ezy9cig6fvf8p30000125998',
-                domain: '.xiaohongshu.com',
-                path: '/',
-                httpOnly: false,
-                secure: true,
-                sameSite: 'Lax'
-            },
-            {
-                name: 'webId',
-                value: '5be556998523bb3cea465804755c0551',
-                domain: '.xiaohongshu.com',
-                path: '/',
-                httpOnly: false,
-                secure: true,
-                sameSite: 'Lax'
-            },
-            {
-                name: 'gid',
-                value: 'yjjf0fWj4dS4yjjf0fWWW3hiy0YFuh3UxFYUkYU2AyT3hKq8yduvji888yJ2jjY8Dqi240SY',
-                domain: '.xiaohongshu.com',
-                path: '/',
-                httpOnly: false,
-                secure: true,
-                sameSite: 'Lax'
-            },
-            {
-                name: 'web_session',
-                value: '040069b674b14d2468cc1a77d93a4b56c3ba5c',
-                domain: '.xiaohongshu.com',
-                path: '/',
-                httpOnly: true,
-                secure: true,
-                sameSite: 'Lax'
-            },
-            {
-                name: 'xsecappid',
-                value: 'ugc',
-                domain: '.xiaohongshu.com',
-                path: '/',
-                httpOnly: false,
-                secure: true,
-                sameSite: 'Lax'
-            },
-            {
-                name: 'customer-sso-sid',
-                value: '68c517565058608251437058hxpaclpo5lt28ue0',
-                domain: '.xiaohongshu.com',
-                path: '/',
-                httpOnly: true,
-                secure: true,
-                sameSite: 'Lax'
-            },
-            {
-                name: 'x-user-id-creator.xiaohongshu.com',
-                value: '6700f205000000001d02389a',
-                domain: 'creator.xiaohongshu.com',
-                path: '/',
-                httpOnly: false,
-                secure: true,
-                sameSite: 'Lax'
-            },
-            {
-                name: 'customerClientId',
-                value: '177768468521187',
-                domain: '.xiaohongshu.com',
-                path: '/',
-                httpOnly: false,
-                secure: true,
-                sameSite: 'Lax'
-            },
-            {
-                name: 'access-token-creator.xiaohongshu.com',
-                value: 'customer.creator.AT-68c517565058608251437059eudli7beb6egewuq',
-                domain: 'creator.xiaohongshu.com',
-                path: '/',
-                httpOnly: true,
-                secure: true,
-                sameSite: 'Lax'
-            },
-            {
-                name: 'galaxy_creator_session_id',
-                value: 'ffusSv4aGlsaeWmW2KdcOp6L4IGgXEX21CUM',
-                domain: '.xiaohongshu.com',
-                path: '/',
-                httpOnly: false,
-                secure: true,
-                sameSite: 'Lax'
-            },
-            {
-                name: 'galaxy.creator.beaker.session.id',
-                value: '1761377465550066229511',
-                domain: '.xiaohongshu.com',
-                path: '/',
-                httpOnly: false,
-                secure: true,
-                sameSite: 'Lax'
-            },
-            {
-                name: 'websectiga',
-                value: '3633fe24d49c7dd0eb923edc8205740f10fdb18b25d424d2a2322c6196d2a4ad',
-                domain: '.xiaohongshu.com',
-                path: '/',
-                httpOnly: false,
-                secure: true,
-                sameSite: 'Lax'
-            },
-            {
-                name: 'loadts',
-                value: '1761379591896',
-                domain: '.xiaohongshu.com',
-                path: '/',
-                httpOnly: false,
-                secure: false,
-                sameSite: 'Lax'
-            },
-            {
-                name: 'sec_poison_id',
-                value: '58366717-1d2d-4342-b8e0-b50d7b939770',
-                domain: '.xiaohongshu.com',
-                path: '/',
-                httpOnly: false,
-                secure: true,
-                sameSite: 'Lax'
-            },
-            {
-                name: 'acw_tc',
-                value: '0a4a8a3717613795963032135e8ed9b9fc2d361b23e59045593b939ca39fc9',
-                domain: '.xiaohongshu.com',
-                path: '/',
-                httpOnly: false,
-                secure: true,
-                sameSite: 'Lax'
-            }
+            name: 'abRequestId',
+            value: '35328789-b536-51f7-952d-7867750a6dd4',
+            domain: '.xiaohongshu.com',
+            path: '/',
+            httpOnly: false,
+            secure: true,
+            sameSite: 'Lax'
+        },
+        {
+            name: 'a1',
+            value: '199dad7771a8rzviphr8p5q1kiv1ezy9cig6fvf8p30000125998',
+            domain: '.xiaohongshu.com',
+            path: '/',
+            httpOnly: false,
+            secure: true,
+            sameSite: 'Lax'
+        },
+        {
+            name: 'webId',
+            value: '5be556998523bb3cea465804755c0551',
+            domain: '.xiaohongshu.com',
+            path: '/',
+            httpOnly: false,
+            secure: true,
+            sameSite: 'Lax'
+        },
+        {
+            name: 'gid',
+            value: 'yjjf0fWj4dS4yjjf0fWWW3hiy0YFuh3UxFYUkYU2AyT3hKq8yduvji888yJ2jjY8Dqi240SY',
+            domain: '.xiaohongshu.com',
+            path: '/',
+            httpOnly: false,
+            secure: true,
+            sameSite: 'Lax'
+        },
+        {
+            name: 'web_session',
+            value: '040069b674b14d2468cc1a77d93a4b56c3ba5c',
+            domain: '.xiaohongshu.com',
+            path: '/',
+            httpOnly: true,
+            secure: true,
+            sameSite: 'Lax'
+        },
+        {
+            name: 'xsecappid',
+            value: 'ugc',
+            domain: '.xiaohongshu.com',
+            path: '/',
+            httpOnly: false,
+            secure: true,
+            sameSite: 'Lax'
+        },
+        {
+            name: 'customer-sso-sid',
+            value: '68c517565058608251437058hxpaclpo5lt28ue0',
+            domain: '.xiaohongshu.com',
+            path: '/',
+            httpOnly: true,
+            secure: true,
+            sameSite: 'Lax'
+        },
+        {
+            name: 'x-user-id-creator.xiaohongshu.com',
+            value: '6700f205000000001d02389a',
+            domain: 'creator.xiaohongshu.com',
+            path: '/',
+            httpOnly: false,
+            secure: true,
+            sameSite: 'Lax'
+        },
+        {
+            name: 'customerClientId',
+            value: '177768468521187',
+            domain: '.xiaohongshu.com',
+            path: '/',
+            httpOnly: false,
+            secure: true,
+            sameSite: 'Lax'
+        },
+        {
+            name: 'access-token-creator.xiaohongshu.com',
+            value: 'customer.creator.AT-68c517565058608251437059eudli7beb6egewuq',
+            domain: 'creator.xiaohongshu.com',
+            path: '/',
+            httpOnly: true,
+            secure: true,
+            sameSite: 'Lax'
+        },
+        {
+            name: 'galaxy_creator_session_id',
+            value: 'ffusSv4aGlsaeWmW2KdcOp6L4IGgXEX21CUM',
+            domain: '.xiaohongshu.com',
+            path: '/',
+            httpOnly: false,
+            secure: true,
+            sameSite: 'Lax'
+        },
+        {
+            name: 'galaxy.creator.beaker.session.id',
+            value: '1761377465550066229511',
+            domain: '.xiaohongshu.com',
+            path: '/',
+            httpOnly: false,
+            secure: true,
+            sameSite: 'Lax'
+        },
+        {
+            name: 'websectiga',
+            value: '3633fe24d49c7dd0eb923edc8205740f10fdb18b25d424d2a2322c6196d2a4ad',
+            domain: '.xiaohongshu.com',
+            path: '/',
+            httpOnly: false,
+            secure: true,
+            sameSite: 'Lax'
+        },
+        {
+            name: 'loadts',
+            value: '1761379591896',
+            domain: '.xiaohongshu.com',
+            path: '/',
+            httpOnly: false,
+            secure: false,
+            sameSite: 'Lax'
+        },
+        {
+            name: 'sec_poison_id',
+            value: '58366717-1d2d-4342-b8e0-b50d7b939770',
+            domain: '.xiaohongshu.com',
+            path: '/',
+            httpOnly: false,
+            secure: true,
+            sameSite: 'Lax'
+        },
+        {
+            name: 'acw_tc',
+            value: '0a4a8a3717613795963032135e8ed9b9fc2d361b23e59045593b939ca39fc9',
+            domain: '.xiaohongshu.com',
+            path: '/',
+            httpOnly: false,
+            secure: true,
+            sameSite: 'Lax'
+        }
         ];
     }
 
@@ -183,56 +183,16 @@ export class XiaohongshuAuth {
             // 等待页面加载
             await new Promise(resolve => setTimeout(resolve, 2000));
 
-            // 设置Cookie，按域名分组设置
-            const cookiesByDomain = {};
-            for (const cookie of cookiesToUse) {
-                const domain = cookie.domain || '.xiaohongshu.com';
-                if (!cookiesByDomain[domain]) {
-                    cookiesByDomain[domain] = [];
-                }
-                cookiesByDomain[domain].push(cookie);
-            }
-
-            // 为每个域名设置Cookie
-            for (const [domain, cookies] of Object.entries(cookiesByDomain)) {
-                try {
-                    // 先导航到对应域名
-                    if (domain.includes('creator')) {
-                        await page.goto('https://creator.xiaohongshu.com/', {
-                            waitUntil: 'domcontentloaded',
-                            timeout: 10000
-                        });
-                    } else if (domain.includes('edith')) {
-                        await page.goto('https://edith.xiaohongshu.com/', {
-                            waitUntil: 'domcontentloaded',
-                            timeout: 10000
-                        });
-                    } else {
-                        await page.goto('https://www.xiaohongshu.com/', {
-                            waitUntil: 'domcontentloaded',
-                            timeout: 10000
-                        });
-                    }
-
-                    // 设置该域名的Cookie
-                    for (const cookie of cookies) {
-                        try {
-                            await page.setCookie(cookie);
-                            logger.debug(`设置Cookie: ${cookie.name} = ${cookie.value.substring(0, 20)}... (domain: ${domain})`);
-                        } catch (error) {
-                            logger.warn(`设置Cookie失败: ${cookie.name} - ${error.message}`);
-                        }
-                    }
-
-                    // 等待一下再设置下一个域名
-                    await new Promise(resolve => setTimeout(resolve, 1000));
-                } catch (error) {
-                    logger.warn(`设置域名${domain}的Cookie失败: ${error.message}`);
-                }
+            // 设置所有 Cookie 到 Context
+            try {
+                await page.context().addCookies(cookiesToUse);
+                logger.debug('已批量注入所有 Cookie');
+            } catch (error) {
+                logger.error('注入 Cookie 失败:', error);
             }
 
             // 验证Cookie是否设置成功
-            const setCookies = await page.cookies();
+            const setCookies = await page.context().cookies();
             const xiaohongshuCookies = setCookies.filter(c =>
                 c.domain.includes('xiaohongshu.com')
             );
@@ -241,7 +201,7 @@ export class XiaohongshuAuth {
 
             // 重新导航到发布页面，确保Cookie生效
             await page.goto('https://creator.xiaohongshu.com/publish/publish?target=image', {
-                waitUntil: 'domcontentloaded',
+                waitUntil: 'networkidle',
                 timeout: 30000
             });
 

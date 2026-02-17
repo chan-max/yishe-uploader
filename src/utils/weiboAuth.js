@@ -132,18 +132,16 @@ export class WeiboAuth {
 
             await new Promise(resolve => setTimeout(resolve, 2000));
 
-            // 设置Cookie
-            for (const cookie of authData.cookies) {
-                try {
-                    await page.setCookie(cookie);
-                    logger.debug(`设置Cookie: ${cookie.name} = ${cookie.value.substring(0, 20)}...`);
-                } catch (error) {
-                    logger.warn(`设置Cookie失败: ${cookie.name} - ${error.message}`);
-                }
+            // 设置所有 Cookie 到 Context
+            try {
+                await page.context().addCookies(authData.cookies);
+                logger.debug('已批量注入微博 Cookie');
+            } catch (error) {
+                logger.error('注入微博 Cookie 失败:', error);
             }
 
             // 验证Cookie是否设置成功
-            const setCookies = await page.cookies();
+            const setCookies = await page.context().cookies();
             const weiboCookies = setCookies.filter(c =>
                 c.domain.includes('weibo.com')
             );
