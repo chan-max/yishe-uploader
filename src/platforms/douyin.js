@@ -35,28 +35,51 @@ class DouyinPublisher {
             // logger.info('反检测脚本已应用');
 
             // 3. 导航到上传页面（浏览器应已通过CDP模式登录）
+            logger.info(`正在导航至: ${this.uploadUrl}`);
             await page.goto(this.uploadUrl, {
                 waitUntil: 'domcontentloaded',
-                timeout: 30000
+                timeout: 15000 // 缩短超时时间
             });
             logger.info(`已打开${this.platformName}上传页面`);
 
-            // 4. 等待页面加载
-            await page.waitForURL(this.uploadUrl, { timeout: 5000 });
+            // 4. 等待页面加载 (goto 已等待 domcontentloaded，此处检查重定向)
+            await this.pageOperator.delay(1000);
 
             // 5. 检查登录状态
-            const loginCheckSelectors = [
-                'text=手机号登录',
-                'text=扫码登录'
-            ];
+            const currentUrl = page.url();
+            logger.info(`当前URL: ${currentUrl}`);
 
-            for (const selector of loginCheckSelectors) {
-                const count = await page.locator(selector).count();
-                if (count > 0) {
-                    throw new Error('抖音未登录，请先登录');
+            // 如果被重定向到非上传页面，通常意味着未登录
+            if (!currentUrl.includes('/content/upload') && !currentUrl.includes('/content/publish') && !currentUrl.includes('/content/post/video')) {
+                logger.warn('检测到页面重定向，可能未登录');
+                // 进一步检查页面内容
+                const loginCheckSelectors = [
+                    'text=手机号登录',
+                    'text=扫码登录',
+                    'text=密码登录',
+                    '.login-mask',
+                    '.login-container',
+                    '[data-testid="login-button"]'
+                ];
+
+                for (const selector of loginCheckSelectors) {
+                    try {
+                        const count = await page.locator(selector).count();
+                        if (count > 0) {
+                            throw new Error('抖音未登录，请先登录');
+                        }
+                    } catch (e) {
+                        // 忽略某些 selector 报错
+                    }
                 }
+
+                // 如果 URL 不对且没有任何登录提示，但又不在上传页，也视为未登录或状态异常
+                if (currentUrl.includes('creator.douyin.com') && !currentUrl.includes('/creator-micro/')) {
+                    throw new Error('抖音登录状态异常或未登录，请先登录');
+                }
+            } else {
+                logger.info('登录状态检查通过 (URL匹配)');
             }
-            logger.info('登录状态检查通过');
 
             // 6. 上传视频
             await this.uploadVideo(page, publishInfo.videoUrl || publishInfo.filePath);
@@ -145,10 +168,17 @@ class DouyinPublisher {
     async uploadVideo(page, filePath) {
         logger.info('开始上传视频文件');
 
-        const fileInput = await page.locator("div[class^='container'] input").first();
-        await fileInput.setInputFiles(filePath);
-
-        logger.info('视频文件已选择');
+        // 等待选择器出现，增加超时控制
+        const selector = "div[class^='container'] input";
+        try {
+            await page.waitForSelector(selector, { timeout: 10000 });
+            const fileInput = await page.locator(selector).first();
+            await fileInput.setInputFiles(filePath);
+            logger.info('视频文件已选择');
+        } catch (error) {
+            logger.error('未找到视频上传输入框，可能未登录或页面结构已变', error.message);
+            throw new Error('未找到视频上传入口，请确认是否已登录或页面是否正确加载');
+        }
     }
 
     /**
@@ -199,39 +229,95 @@ class DouyinPublisher {
         await this.pageOperator.delay(2000);
 
         logger.info(`准备填写标题: ${publishInfo.title || '(无)'}`);
-        logger.info(`准备填写描述: ${publishInfo.description || '(无)'}`);
+        logger.info(`准备填写描述: ${publishInfo.description || publishInfo.content || '(无)'}`);
         logger.info(`准备填写标签: ${JSON.stringify(publishInfo.tags || [])}`);
 
         // ===== 1. 填写标题（第一个输入框）=====
         if (publishInfo.title) {
             try {
-                logger.info('开始填写标题...');
+                logger.info('开始查找标题输入框...');
 
-                // 尝试通过 "作品标题" 文本定位
-                const titleLabel = page.locator('text=作品标题');
-                const titleInput = titleLabel.locator('..').locator('xpath=following-sibling::div[1]').locator('input');
+                let titleInput = null;
 
-                const count = await titleInput.count();
-                logger.info(`找到 ${count} 个标题输入框`);
+                // 策略 1: 通过 "作品标题" 文本定位
+                try {
+                    const titleLabel = page.locator('text=作品标题');
+                    if (await titleLabel.count() > 0) {
+                        const target = titleLabel.locator('..').locator('xpath=following-sibling::div[1]').locator('input');
+                        if (await target.count() > 0) {
+                            titleInput = target;
+                            logger.info('已通过 "作品标题" 标签找到输入框');
+                        }
+                    }
+                } catch (e) {
+                    logger.debug('策略 1 (标签) 失败');
+                }
 
-                if (count > 0) {
+                // 策略 2: 通过 placeholder 属性
+                if (!titleInput) {
+                    const selectors = [
+                        'input[placeholder*="作品标题"]',
+                        'input[placeholder*="填写标题"]',
+                        'input[placeholder*="添加标题"]',
+                        'input[placeholder*="作品名称"]',
+                        '.title-input input',
+                        '.title-container input'
+                    ];
+
+                    for (const selector of selectors) {
+                        try {
+                            const target = page.locator(selector).first();
+                            if (await target.count() > 0) {
+                                titleInput = target;
+                                logger.info(`已通过选择器 "${selector}" 找到输入框`);
+                                break;
+                            }
+                        } catch (e) {
+                            // 继续下一个
+                        }
+                    }
+                }
+
+                // 策略 3: 这里的输入框可能是第一个 input
+                if (!titleInput) {
+                    try {
+                        const allInputs = page.locator('input[type="text"]');
+                        const inputCount = await allInputs.count();
+                        for (let i = 0; i < inputCount; i++) {
+                            const placeholder = await allInputs.nth(i).getAttribute('placeholder') || '';
+                            if (placeholder.includes('标题') || placeholder.includes('名称') || placeholder.includes('作品')) {
+                                titleInput = allInputs.nth(i);
+                                logger.info(`已通过遍历 input 找到疑似标题框: "${placeholder}"`);
+                                break;
+                            }
+                        }
+                    } catch (e) {
+                        // 忽略
+                    }
+                }
+
+                if (titleInput) {
                     await titleInput.click();
                     await this.pageOperator.delay(300);
+                    // 清空并输入
                     await titleInput.fill('');
                     await this.pageOperator.delay(200);
+                    // 抖音标题限制通常为 30 字
                     await titleInput.fill(publishInfo.title.substring(0, 30));
                     await this.pageOperator.delay(500);
                     logger.success(`标题填写成功: ${publishInfo.title.substring(0, 30)}`);
                 } else {
-                    logger.warn('未找到标题输入框');
+                    logger.warn('未找到特定的标题输入框，尝试直接在当前焦点处输入');
+                    // 如果没找到，尝试按 Tab 或者根据位置猜
+                    // 但通常 description 框是 rich text，title 是普通 input
                 }
             } catch (error) {
-                logger.error('填写标题失败:', error.message);
+                logger.error('填写标题异常:', error.message);
             }
         }
 
         // ===== 2. 填写描述（.notranslate 或第二个输入区域）=====
-        const description = publishInfo.description || publishInfo.title || '';
+        const description = publishInfo.description || publishInfo.content || publishInfo.title || '';
         if (description) {
             try {
                 logger.info('开始填写描述...');

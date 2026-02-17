@@ -20,14 +20,14 @@ export class LoginChecker {
         try {
             // 等待页面完全加载
             await this.waitForPageLoad(page);
-            
+
             // 获取当前URL，检查是否被重定向到登录页面
             const currentUrl = page.url();
             logger.info(`${this.platformName}当前URL:`, currentUrl);
-            
+
             // 检查是否在登录页面
             const isOnLoginPage = this.isOnLoginPage(currentUrl);
-            
+
             if (isOnLoginPage) {
                 logger.info('检测到在登录页面，未登录');
                 return {
@@ -38,13 +38,13 @@ export class LoginChecker {
                     }
                 };
             }
-            
+
             // 执行页面内的登录状态检测
             const loginStatus = await this.checkPageElements(page);
-            
+
             logger.info(`${this.platformName}登录状态检测结果:`, loginStatus);
             return loginStatus;
-            
+
         } catch (error) {
             logger.error(`${this.platformName}登录状态检测失败:`, error);
             return {
@@ -78,11 +78,11 @@ export class LoginChecker {
     async checkPageElements(page) {
         return await page.evaluate((config) => {
             const { userElements, loginElements } = config.selectors;
-            
+
             // 查找用户元素
             const foundUserElements = [];
             let hasUserElement = false;
-            
+
             userElements.forEach(selector => {
                 try {
                     const element = document.querySelector(selector);
@@ -94,11 +94,11 @@ export class LoginChecker {
                     // 忽略无效选择器
                 }
             });
-            
+
             // 查找登录元素
             const foundLoginElements = [];
             let hasLoginElement = false;
-            
+
             loginElements.forEach(selector => {
                 try {
                     const element = document.querySelector(selector);
@@ -110,10 +110,10 @@ export class LoginChecker {
                     // 忽略无效选择器
                 }
             });
-            
+
             // 判断登录状态：有用户元素且没有登录元素
             const isLoggedIn = hasUserElement && !hasLoginElement;
-            
+
             const details = {
                 userElementsFound: foundUserElements,
                 loginElementsFound: foundLoginElements,
@@ -122,7 +122,7 @@ export class LoginChecker {
                 hasUserElement,
                 hasLoginElement
             };
-            
+
             return {
                 isLoggedIn,
                 details
@@ -149,7 +149,7 @@ export class LoginChecker {
                     }
             }
         }
-        
+
         if (result.details?.hasUserElement) {
             return `${this.platformName}: 已登录 (检测到用户元素)`;
         } else {
@@ -178,12 +178,14 @@ export class DouyinLoginChecker extends LoginChecker {
                     '.login-button',
                     '.login-entry',
                     'button[data-testid="login-button"]',
+                    '.login-mask',
+                    '.login-container',
+                    'text=手机号登录',
+                    'text=扫码登录',
+                    'text=密码登录',
                     '.login-text',
-                    '.login-link',
-                    '.login-prompt',
-                    '[class*="login"]',
                     '.auth-btn',
-                    '.sign-in-btn'
+                    '[class*="login"]'
                 ]
             }
         });
