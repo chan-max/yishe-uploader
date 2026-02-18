@@ -238,28 +238,35 @@ class TiktokPublisher {
         try {
             // 1. 定义多种成功标识，使用 Promise.race 竞争
             const result = await Promise.race([
-                // (1) URL 跳转到内容管理页 (tiktokstudio/content 或 tiktokstudio/posts)
+                // (1) URL 跳转到内容管理页 (更全面的路径匹配)
                 page.waitForURL(url =>
                     url.href.includes('/manage/content') ||
                     url.href.includes('/tiktokstudio/content') ||
-                    url.href.includes('/tiktokstudio/posts'),
+                    url.href.includes('/tiktokstudio/posts') ||
+                    url.href.includes('/creator-center/content') ||
+                    url.href.includes('/creator-center/posts'),
                     { timeout: 60000 }
                 ).then(() => 'REDIRECT'),
 
-                // (2) 明确的成功文本或模态框
-                page.waitForSelector([
-                    'text="Post success"',
-                    'text="发布成功"',
-                    'text="Your video has been uploaded"',
-                    'text="Manage your posts"',
-                    'text="View your video"',
-                    '[data-e2e="upload-success-modal"]'
-                ].join(','), { timeout: 60000 }).then(() => 'SUCCESS_TEXT'),
-
-                // (3) 发布按钮小时也是一种成功的体现 (尤其是在跳转中)
+                // (2) 明确的成功文本或模态框 (通过 evaluate 检查，避免无效 CSS 选择器)
                 page.waitForFunction(() => {
-                    const btn = document.querySelector('button[type="primary"], button:has-text("Post"), button:has-text("发布")');
-                    return !btn || btn.offsetParent === null;
+                    const textPatterns = ['Post success', '发布成功', 'Your video has been uploaded', 'Manage your posts', 'View your video'];
+                    const bodyText = document.body.innerText;
+                    const hasModal = !!document.querySelector('[data-e2e="upload-success-modal"]');
+                    return hasModal || textPatterns.some(p => bodyText.includes(p));
+                }, { timeout: 60000 }).then(() => 'SUCCESS_TEXT'),
+
+                // (3) 发布按钮消失也是一种成功的体现 (尤其是在跳转中)
+                page.waitForFunction(() => {
+                    const buttons = Array.from(document.querySelectorAll('button'));
+                    // 查找主发布按钮：通常带有 primary 属性或特定文本
+                    const postBtn = buttons.find(b => {
+                        const txt = b.innerText || '';
+                        return (txt.includes('Post') || txt.includes('发布')) &&
+                            (b.classList.contains('arco-btn-primary') || b.offsetParent !== null);
+                    });
+                    // 如果找不到按钮或者按钮已隐藏，视为可能已成功（进入跳转流程）
+                    return !postBtn || postBtn.offsetParent === null;
                 }, { timeout: 60000 }).then(() => 'POST_BUTTON_HIDDEN')
             ]);
 
