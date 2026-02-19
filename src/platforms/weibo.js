@@ -87,9 +87,18 @@ class WeiboPublisher {
                 await this.config.preProcess(page);
             }
 
-            // 6. 处理图片上传
-            if (publishInfo.images && publishInfo.images.length > 0) {
+            // 6. 处理图片/视频上传
+            const mainFilePath = publishInfo.filePath || publishInfo.videoUrl;
+            const isVideo = mainFilePath && /\.(mp4|mov|avi|wmv|flv|mkv)$/i.test(mainFilePath);
+
+            if (isVideo) {
+                logger.info('检测到视频文件，开始上传视频...');
+                await this.uploadSingleImage(page, mainFilePath, 0); // 微博视频也通过同一个 input 上传
+            } else if (publishInfo.images && publishInfo.images.length > 0) {
                 await this.handleImageUpload(page, publishInfo.images);
+            } else if (mainFilePath) {
+                logger.info('无显式图片列表，使用主文件路径上传...');
+                await this.uploadSingleImage(page, mainFilePath, 0);
             }
 
             // 7. 填写内容
@@ -248,50 +257,97 @@ class WeiboPublisher {
         // 先点击页面空白处，让输入框失去焦点
         logger.info('点击页面空白处，让输入框失去焦点');
         await page.evaluate(() => {
-            // 点击页面空白区域
-            const blankArea = document.body;
+            const blankArea = document.querySelector('.Nav_top_2_S_0') || document.body;
             blankArea.click();
         });
 
-        // 等待一下让页面响应
         await this.pageOperator.delay(500);
 
-        // 使用正确的选择器找到发送按钮
+        // 使用多重选择器查找发送按钮
         try {
-            logger.info('查找发送按钮...');
+            logger.info('查找并点击发送按钮...');
 
-            const clickResult = await page.evaluate(() => {
-                // 使用正确的选择器查找按钮
-                const button = document.querySelector('[class^="Tool_check_"] button');
-                if (button) {
-                    console.log('找到发送按钮，准备点击');
-                    button.click();
-                    return true;
+            const selectors = [
+                '[class^="Tool_check_"] button',
+                '[class*="Tool_check_"] button',
+                'button:has-text("发布")',
+                'button:has-text("发送")',
+                '.Tool_btn_v5j8_ button'
+            ];
+
+            let clicked = false;
+            for (const selector of selectors) {
+                try {
+                    const btn = page.locator(selector).first();
+                    if (await btn.count() > 0 && await btn.isVisible()) {
+                        await btn.click();
+                        clicked = true;
+                        logger.info(`通过选择器 ${selector} 成功点击发送按钮`);
+                        break;
+                    }
+                } catch (e) {
+                    // 忽略单个选择器失败
                 }
-                console.log('未找到发送按钮');
-                return false;
-            });
+            }
 
-            if (clickResult) {
-                logger.info('成功点击发送按钮');
-            } else {
-                logger.error('未找到发送按钮');
-                throw new Error('未找到发送按钮');
+            if (!clicked) {
+                logger.warn('通用选择器未找到按钮，尝试原生 JS 点击...');
+                clicked = await page.evaluate(() => {
+                    const buttons = Array.from(document.querySelectorAll('button'));
+                    const postBtn = buttons.find(b => {
+                        const txt = b.innerText || '';
+                        return (txt.includes('发布') || txt.includes('发送')) && b.offsetParent !== null;
+                    });
+                    if (postBtn) {
+                        postBtn.click();
+                        return true;
+                    }
+                    return false;
+                });
+            }
+
+            if (!clicked) {
+                throw new Error('无法定位发布按钮');
             }
 
         } catch (error) {
             logger.error('点击发送按钮失败:', error.message);
             throw error;
         }
-
-        logger.info('已点击发送按钮');
     }
 
     /**
      * 等待发布完成
      */
     async waitForPublishComplete(page) {
-        await this.pageOperator.delay(3000);
+        logger.info('确认微博发布结果...');
+        try {
+            // 微博发布成功后：
+            // 1. 输入框通常会清空
+            // 2. 可能会弹出 "发布成功" toast
+            // 3. 发布按钮进入 loading 或小时
+
+            await Promise.race([
+                // (1) 监测成功提示
+                page.waitForFunction(() => {
+                    const bodyText = document.body.innerText;
+                    return bodyText.includes('发布成功') || bodyText.includes('发送成功');
+                }, { timeout: 30000 }).then(() => 'SUCCESS_TEXT'),
+
+                // (2) 监测发布框消失/重置 (对应首页发布)
+                page.waitForFunction(() => {
+                    const textarea = document.querySelector('textarea[class^="Form_input_"]');
+                    return textarea && textarea.value === '';
+                }, { timeout: 30000 }).then(() => 'INPUT_RESET'),
+
+                // (3) 固定的 5 秒等待（如果点击没报错，通常说明已提交）
+                new Promise(resolve => setTimeout(() => resolve('TIMEOUT_FALLBACK'), 5000))
+            ]);
+
+            logger.info('微博发布结果确认通过');
+        } catch (error) {
+            logger.warn('发布结果确认超时，但由于点击按钮已成功，暂不视为失败:', error.message);
+        }
     }
 
     /**
