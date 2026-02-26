@@ -23,6 +23,8 @@ import {
     logger
 } from '../utils/logger.js';
 import os from 'os';
+import AdmZip from 'adm-zip';
+import fs from 'fs-extra';
 
 // 全局：Playwright Browser / BrowserContext
 let browserInstance = null;    // playwright Browser（cdp模式使用）
@@ -584,6 +586,72 @@ export async function clearUserData() {
     }
 }
 
+/**
+ * 导出用户数据为 ZIP 压缩包
+ * @param {string} userDataDir 用户数据目录路径
+ * @returns {Promise<Buffer>} ZIP 文件 Buffer
+ */
+export async function exportUserData(userDataDir) {
+    try {
+        if (!userDataDir || !fs.existsSync(userDataDir)) {
+            throw new Error(`User Data 目录不存在: ${userDataDir}`);
+        }
+
+        // 确保浏览器已关闭
+        logger.info('正在关闭浏览器以准备导出数据...');
+        await closeBrowser();
+
+        logger.info(`正在压缩用户数据目录: ${userDataDir} ...`);
+        const zip = new AdmZip();
+
+        // 我们递归添加目录内容
+        // 注意：全量导出。虽然体积大，但最稳。
+        zip.addLocalFolder(userDataDir);
+
+        const buffer = zip.toBuffer();
+        logger.info(`用户数据压缩完成，大小: ${(buffer.length / 1024 / 1024).toFixed(2)} MB`);
+        return buffer;
+    } catch (error) {
+        logger.error('导出用户数据失败:', error);
+        throw error;
+    }
+}
+
+/**
+ * 从 ZIP 压缩包导入用户数据
+ * @param {string} zipPath ZIP 文件路径
+ * @param {string} userDataDir 目标用户数据目录
+ */
+export async function importUserData(zipPath, userDataDir) {
+    try {
+        if (!fs.existsSync(zipPath)) {
+            throw new Error(`待导入的 ZIP 文件不存在: ${zipPath}`);
+        }
+
+        // 确保浏览器已关闭
+        logger.info('正在关闭浏览器以准备导入数据...');
+        await closeBrowser();
+
+        // 清理目标目录
+        if (fs.existsSync(userDataDir)) {
+            logger.info(`正在清理旧的目标目录: ${userDataDir}`);
+            fs.removeSync(userDataDir);
+        }
+
+        fs.ensureDirSync(userDataDir);
+
+        logger.info(`正在从 ${zipPath} 导入用户数据到 ${userDataDir} ...`);
+        const zip = new AdmZip(zipPath);
+        zip.extractAllTo(userDataDir, true);
+
+        logger.info('用户数据导入完成');
+        return true;
+    } catch (error) {
+        logger.error('导入用户数据失败:', error);
+        throw error;
+    }
+}
+
 
 /**
  * 清理资源
@@ -632,5 +700,13 @@ export class BrowserService {
 
     static keepOpen() {
         return keepBrowserOpen();
+    }
+
+    static async exportUserData(userDataDir) {
+        return exportUserData(userDataDir);
+    }
+
+    static async importUserData(zipPath, userDataDir) {
+        return importUserData(zipPath, userDataDir);
     }
 }

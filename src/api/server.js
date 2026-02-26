@@ -8,7 +8,7 @@ import fs from 'fs';
 import path from 'path';
 import { URL, fileURLToPath } from 'url';
 import publishService from './publishService.js';
-import { getBrowserStatus, getOrCreateBrowser, closeBrowser, launchWithDebugPort, checkAndReconnectBrowser } from '../services/BrowserService.js';
+import { getBrowserStatus, getOrCreateBrowser, closeBrowser, launchWithDebugPort, checkAndReconnectBrowser, exportUserData, importUserData } from '../services/BrowserService.js';
 import { PublishService } from '../services/PublishService.js';
 import { logger } from '../utils/logger.js';
 import { PLATFORM_CONFIGS } from '../config/platforms.js';
@@ -147,6 +147,10 @@ class ApiServer {
                     await this.handleUpload(req, res);
                 } else if (reqPath === '/api/login-status' && method === 'GET') {
                     await this.handleLoginStatus(req, res);
+                } else if (reqPath === '/api/browser/export-user-data' && method === 'GET') {
+                    await this.handleExportUserData(req, res);
+                } else if (reqPath === '/api/browser/import-user-data' && method === 'POST') {
+                    await this.handleImportUserData(req, res);
                 } else {
                     this.sendResponse(res, 404, { success: false, error: 'Not Found' });
                 }
@@ -185,7 +189,9 @@ class ApiServer {
                 { method: 'POST', path: '/api/browser/check-port', description: '检测 CDP 端口' },
                 { method: 'POST', path: '/api/browser/open-platform', description: '在已连接浏览器中打开指定平台创作页' },
                 { method: 'POST', path: '/api/browser/check-and-reconnect', description: '检测浏览器实例并可选重连（body: { reconnect?: boolean }）' },
-                { method: 'GET', path: '/api/browser/check', description: '仅检测浏览器实例（不重连）' }
+                { method: 'GET', path: '/api/browser/check', description: '仅检测浏览器实例（不重连）' },
+                { method: 'GET', path: '/api/browser/export-user-data', description: '导出 User Data 压缩包' },
+                { method: 'POST', path: '/api/browser/import-user-data', description: '导入 User Data 压缩包' }
             ]
         });
     }
@@ -419,6 +425,77 @@ class ApiServer {
             });
         } catch (error) {
             this.sendResponse(res, 500, { success: false, message: error.message || '检测失败' });
+        }
+    }
+
+    /**
+     * 导出 User Data
+     */
+    async handleExportUserData(req, res) {
+        try {
+            const url = new URL(req.url, `http://${req.headers.host}`);
+            const userDataDir = (url.searchParams.get('userDataDir') || getDefaultCdpUserDataDir()).trim();
+
+            logger.info(`开始导出 User Data: ${userDataDir}`);
+            const buffer = await exportUserData(userDataDir);
+
+            const filename = `yishe-uploader-userdata-${new Date().toISOString().split('T')[0]}.zip`;
+            res.writeHead(200, {
+                'Content-Type': 'application/zip',
+                'Content-Disposition': `attachment; filename="${filename}"`,
+                'Content-Length': buffer.length,
+                'Access-Control-Expose-Headers': 'Content-Disposition'
+            });
+            res.end(buffer);
+        } catch (error) {
+            logger.error('导出失败:', error);
+            this.sendResponse(res, 500, { success: false, message: error.message });
+        }
+    }
+
+    /**
+     * 导入 User Data
+     */
+    async handleImportUserData(req, res) {
+        try {
+            const contentType = req.headers['content-type'] || '';
+            if (!contentType.includes('multipart/form-data')) {
+                this.sendResponse(res, 400, { success: false, message: '需要 multipart/form-data' });
+                return;
+            }
+
+            const m = contentType.match(/boundary=([^;\s]+)/);
+            const boundary = m ? m[1].trim().replace(/^["']|["']$/g, '') : null;
+            if (!boundary) {
+                this.sendResponse(res, 400, { success: false, message: '缺少 boundary' });
+                return;
+            }
+
+            if (!fs.existsSync(UPLOAD_DIR)) {
+                await fs.promises.mkdir(UPLOAD_DIR, { recursive: true });
+            }
+
+            const uploadResult = await this.parseMultipart(req, Buffer.from(`--${boundary}`));
+            if (!uploadResult.savedPath) {
+                this.sendResponse(res, 400, { success: false, message: '未找到上传的文件' });
+                return;
+            }
+
+            const url = new URL(req.url, `http://${req.headers.host}`);
+            const userDataDir = (url.searchParams.get('userDataDir') || getDefaultCdpUserDataDir()).trim();
+
+            logger.info(`开始导入 User Data 到: ${userDataDir}，文件: ${uploadResult.savedPath}`);
+            await importUserData(uploadResult.savedPath, userDataDir);
+
+            // 导入成功后删除临时 zip
+            if (fs.existsSync(uploadResult.savedPath)) {
+                fs.unlinkSync(uploadResult.savedPath);
+            }
+
+            this.sendResponse(res, 200, { success: true, message: '导入成功' });
+        } catch (error) {
+            logger.error('导入失败:', error);
+            this.sendResponse(res, 500, { success: false, message: error.message });
         }
     }
 
