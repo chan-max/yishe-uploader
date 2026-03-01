@@ -63,9 +63,33 @@ export class PageOperator {
 
     /**
      * 填写输入框
+     * @param {import('playwright').Page} page
+     * @param {string | string[]} selector - 单个选择器或备选选择器数组（按顺序尝试，直到有一个可见）
+     * @param {string} text
+     * @param {object} options
      */
     async fillInput(page, selector, text, options = {}) {
-        await page.waitForSelector(selector, { timeout: 10000 });
+        const selectors = Array.isArray(selector) ? selector : [selector];
+        const timeoutEach = Math.max(3000, Math.floor(10000 / selectors.length)); // 总等待约 10s 内分摊
+        let resolvedSelector = null;
+
+        for (const sel of selectors) {
+            try {
+                await page.waitForSelector(sel, { timeout: timeoutEach, state: 'visible' });
+                resolvedSelector = sel;
+                if (selectors.length > 1) {
+                    logger.info(`fillInput: 使用选择器 ${sel}`);
+                }
+                break;
+            } catch (e) {
+                // 当前选择器超时，尝试下一个
+                continue;
+            }
+        }
+
+        if (!resolvedSelector) {
+            throw new Error(`未找到可见的输入框，已尝试选择器: ${selectors.join(', ')}`);
+        }
 
         const defaultOptions = {
             delay: 100,
@@ -75,11 +99,11 @@ export class PageOperator {
         const fillOptions = { ...defaultOptions, ...options };
 
         if (fillOptions.clear) {
-            await page.click(selector, { clickCount: 3 }); // 全选
+            await page.click(resolvedSelector, { clickCount: 3 }); // 全选
             await page.keyboard.press('Backspace'); // 删除
         }
 
-        await page.type(selector, text, { delay: fillOptions.delay });
+        await page.type(resolvedSelector, text, { delay: fillOptions.delay });
     }
 
     /**

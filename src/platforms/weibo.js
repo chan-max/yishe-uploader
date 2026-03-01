@@ -77,6 +77,17 @@ class WeiboPublisher {
                 publishInfo.tags = publishInfo.tags || [];
             }
 
+            // 规范 keywords（与 tags 一致），用于生成 #话题
+            if (publishInfo.keywords && !Array.isArray(publishInfo.keywords)) {
+                if (typeof publishInfo.keywords === 'string') {
+                    publishInfo.keywords = publishInfo.keywords.split(/[,，\s]+/).map(k => String(k).replace(/^#/, '').trim()).filter(Boolean);
+                } else {
+                    publishInfo.keywords = [];
+                }
+            } else {
+                publishInfo.keywords = publishInfo.keywords || [];
+            }
+
             // 微博发布仅处理图文：如果传入视频字段则忽略并记录
             if (publishInfo.videos || publishInfo.videoUrl || (publishInfo.filePath && /\.(mp4|mov|avi|wmv|flv|mkv)$/i.test(publishInfo.filePath))) {
                 logger.warn('微博发布当前只支持图文，已忽略视频相关字段');
@@ -277,22 +288,35 @@ class WeiboPublisher {
     }
 
     /**
-     * 填写内容
+     * 填写内容：微博只有一个输入框，将标题+描述合并写入，关键词转为 #话题 追加
      */
     async fillContent(page, publishInfo) {
-        // 填写标题
-        if (this.config.selectors.titleInput && publishInfo.title) {
-            await this.pageOperator.fillInput(page, this.config.selectors.titleInput, publishInfo.title);
-            logger.info('已填写标题');
+        // 合并标题与描述（正文）
+        const titlePart = (publishInfo.title || '').trim();
+        const descPart = (publishInfo.content || '').trim();
+        const bodyParts = [titlePart, descPart].filter(Boolean);
+        const body = bodyParts.join('\n\n');
+
+        // 关键词/标签 转为带 # 的话题（去重、去已有 #）
+        const tagList = [...(publishInfo.tags || []), ...(publishInfo.keywords || [])]
+            .map(t => String(t).replace(/^#/, '').trim())
+            .filter(Boolean);
+        const uniqueTags = [...new Set(tagList)];
+        // 微博话题规则：用一个 # 将词包起来，如 #好物#
+        const hashtags = uniqueTags.length ? uniqueTags.map(t => `#${t}#`).join(' ') : '';
+
+        const combinedContent = [body, hashtags].filter(Boolean).join('\n\n');
+        if (!combinedContent) {
+            logger.warn('标题、描述与话题均为空，跳过填写');
+            await this.pageOperator.delay(500);
+            return;
         }
 
-        // 填写正文内容
-        if (this.config.selectors.contentInput && publishInfo.content) {
-            await this.pageOperator.fillInput(page, this.config.selectors.contentInput, publishInfo.content);
-            logger.info('已填写正文内容');
+        if (this.config.selectors.contentInput) {
+            await this.pageOperator.fillInput(page, this.config.selectors.contentInput, combinedContent);
+            logger.info('已填写正文（标题+描述+话题）');
         }
 
-        // 等待内容填写完成
         await this.pageOperator.delay(2000);
     }
 
@@ -383,10 +407,16 @@ class WeiboPublisher {
                     return bodyText.includes('发布成功') || bodyText.includes('发送成功');
                 }, { timeout: 30000 }).then(() => 'SUCCESS_TEXT'),
 
-                // (2) 监测发布框消失/重置 (对应首页发布)
+                // (2) 监测发布框重置：任一可见 textarea 变为空（不依赖 Form_input_ 类名）
                 page.waitForFunction(() => {
-                    const textarea = document.querySelector('textarea[class^="Form_input_"]');
-                    return textarea && textarea.value === '';
+                    const sel = ['textarea[class^="Form_input_"]', 'textarea[placeholder*="新鲜事"]', 'textarea[placeholder*="想说"]', 'textarea'];
+                    for (const s of sel) {
+                        try {
+                            const el = document.querySelector(s);
+                            if (el && el.offsetParent !== null && (el.value || '').trim() === '') return true;
+                        } catch (_) {}
+                    }
+                    return false;
                 }, { timeout: 30000 }).then(() => 'INPUT_RESET'),
 
                 // (3) 固定的 5 秒等待（如果点击没报错，通常说明已提交）

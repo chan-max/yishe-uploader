@@ -1,6 +1,6 @@
 {
     "name": "yishe-uploader",
-    "version": "2.0.7",
+    "version": "2.0.8",
     "description": "Yishe Uploader - 多平台自动发布（抖音、快手、小红书、微博等）",
     "main": "src/index.js",
     "type": "module",

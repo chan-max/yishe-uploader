@@ -11,7 +11,17 @@ export const PLATFORM_CONFIGS = {
         antiDetection: false,
         checkLogin: false,
         selectors: {
-            contentInput: 'textarea[class^="Form_input_"]',
+            // 微博发博文输入框：类名常随前端构建变化，提供多组备选
+            contentInput: [
+                'textarea[class^="Form_input_"]',
+                'textarea[placeholder*="新鲜事"]',
+                'textarea[placeholder*="想说"]',
+                'textarea[placeholder*="发布"]',
+                '[class*="composer"] textarea',
+                '[class*="Editor"] textarea',
+                '.woo-box-flex textarea',
+                'textarea'
+            ],
             fileInput: 'input[type="file"]',
             submitButton: '[class*="Tool_check_"] button, [class*="send_"] button, button[role="button"]:has-text("发布"), button:has-text("发送"), .tool-bar button[role="button"]'
         },
