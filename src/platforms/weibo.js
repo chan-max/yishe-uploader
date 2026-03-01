@@ -46,6 +46,61 @@ class WeiboPublisher {
         try {
             logger.info(`开始执行${this.platformName}发布操作，参数:`, publishInfo);
 
+            // 基本参数规范化：保证 images 为数组，title/content/tags 为字符串或数组
+            publishInfo = publishInfo || {};
+
+            // 规范 images 字段：支持字符串（逗号分隔）或数组
+            if (publishInfo.images && !Array.isArray(publishInfo.images)) {
+                if (typeof publishInfo.images === 'string') {
+                    publishInfo.images = publishInfo.images.split(/[,，\s]+/).map(s => s.trim()).filter(Boolean);
+                } else if (typeof publishInfo.images === 'object') {
+                    publishInfo.images = Object.values(publishInfo.images).map(String).filter(Boolean);
+                } else {
+                    publishInfo.images = [];
+                }
+            } else {
+                publishInfo.images = publishInfo.images || [];
+            }
+
+            // 规范 title 与 content
+            publishInfo.title = (publishInfo.title || publishInfo.description || publishInfo.content || '').toString();
+            publishInfo.content = (publishInfo.content || publishInfo.description || '').toString();
+
+            // 规范 tags：支持字符串或数组
+            if (publishInfo.tags && !Array.isArray(publishInfo.tags)) {
+                if (typeof publishInfo.tags === 'string') {
+                    publishInfo.tags = publishInfo.tags.split(/[,，\s]+/).map(t => t.replace(/^#/, '').trim()).filter(Boolean);
+                } else {
+                    publishInfo.tags = [];
+                }
+            } else {
+                publishInfo.tags = publishInfo.tags || [];
+            }
+
+            // 微博发布仅处理图文：如果传入视频字段则忽略并记录
+            if (publishInfo.videos || publishInfo.videoUrl || (publishInfo.filePath && /\.(mp4|mov|avi|wmv|flv|mkv)$/i.test(publishInfo.filePath))) {
+                logger.warn('微博发布当前只支持图文，已忽略视频相关字段');
+                delete publishInfo.videos;
+                delete publishInfo.videoUrl;
+                // 不删除 filePath，因为可能为图片路径，后面会判断
+            }
+
+            // 如果 images 为空但给了 filePath 且为图片，使用 filePath 作为单图上传
+            const mainFilePath = publishInfo.filePath || '';
+            const isImageFilePath = typeof mainFilePath === 'string' && /\.(jpe?g|png|gif|webp|bmp)$/i.test(mainFilePath);
+            if ((!publishInfo.images || publishInfo.images.length === 0) && isImageFilePath) {
+                publishInfo.images = [mainFilePath];
+            }
+
+            // 至少需要一张图片，否则返回错误
+            if (!publishInfo.images || publishInfo.images.length === 0) {
+                logger.error('微博发布缺少图片资源，终止发布');
+                return {
+                    success: false,
+                    message: '微博发布需要至少一张图片'
+                };
+            }
+
             // 1. 获取浏览器和页面
             const browser = await getOrCreateBrowser();
             page = await browser.newPage();
@@ -87,18 +142,12 @@ class WeiboPublisher {
                 await this.config.preProcess(page);
             }
 
-            // 6. 处理图片/视频上传
-            const mainFilePath = publishInfo.filePath || publishInfo.videoUrl;
-            const isVideo = mainFilePath && /\.(mp4|mov|avi|wmv|flv|mkv)$/i.test(mainFilePath);
-
-            if (isVideo) {
-                logger.info('检测到视频文件，开始上传视频...');
-                await this.uploadSingleImage(page, mainFilePath, 0); // 微博视频也通过同一个 input 上传
-            } else if (publishInfo.images && publishInfo.images.length > 0) {
+            // 6. 处理图片上传（仅图文）
+            try {
                 await this.handleImageUpload(page, publishInfo.images);
-            } else if (mainFilePath) {
-                logger.info('无显式图片列表，使用主文件路径上传...');
-                await this.uploadSingleImage(page, mainFilePath, 0);
+            } catch (e) {
+                logger.error('图片上传过程出错:', e);
+                throw e;
             }
 
             // 7. 填写内容

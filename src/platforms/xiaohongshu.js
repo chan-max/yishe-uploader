@@ -44,6 +44,44 @@ class XiaohongshuPublisher {
         try {
             logger.info(`开始执行${this.platformName}发布操作，参数:`, publishInfo);
 
+            // 基本参数规范化：保证 images 为数组，title/content/tags 为字符串或数组
+            publishInfo = publishInfo || {};
+
+            // 规范 images 字段：支持字符串（逗号分隔）或数组
+            if (publishInfo.images && !Array.isArray(publishInfo.images)) {
+                if (typeof publishInfo.images === 'string') {
+                    publishInfo.images = publishInfo.images.split(/[,，\s]+/).map(s => s.trim()).filter(Boolean);
+                } else if (typeof publishInfo.images === 'object') {
+                    publishInfo.images = Object.values(publishInfo.images).map(String).filter(Boolean);
+                } else {
+                    publishInfo.images = [];
+                }
+            } else {
+                publishInfo.images = publishInfo.images || [];
+            }
+
+            // 规范 title 与 content
+            publishInfo.title = (publishInfo.title || publishInfo.description || publishInfo.content || '').toString();
+            publishInfo.content = (publishInfo.content || publishInfo.description || '').toString();
+
+            // 规范 tags：支持字符串（以空格或逗号分隔，或带#）或数组
+            if (publishInfo.tags && !Array.isArray(publishInfo.tags)) {
+                if (typeof publishInfo.tags === 'string') {
+                    publishInfo.tags = publishInfo.tags.split(/[,，\s]+/).map(t => t.replace(/^#/, '').trim()).filter(Boolean);
+                } else {
+                    publishInfo.tags = [];
+                }
+            } else {
+                publishInfo.tags = publishInfo.tags || [];
+            }
+
+            // 小红书此处仅支持图文发布，忽略视频相关字段并给出警告日志
+            if ((publishInfo.videos && publishInfo.videos.length > 0) || publishInfo.filePath) {
+                logger.warn('小红书发布当前只支持图文，已忽略视频相关字段 (videos/filePath)');
+                delete publishInfo.videos;
+                delete publishInfo.filePath;
+            }
+
             // 1. 获取浏览器和页面
             const browser = await getOrCreateBrowser();
             page = await browser.newPage();
@@ -97,8 +135,19 @@ class XiaohongshuPublisher {
 
             if (!currentUrl.includes(`target=${targetType}`)) {
                 logger.info(`切换到${targetType === 'video' ? '视频' : '图片'}发布模式`);
-                const newUrl = `https://creator.xiaohongshu.com/publish/publish?target=${targetType}`;
-                await page.goto(newUrl, { waitUntil: 'networkidle', timeout: 30000 });
+                try {
+                    // 基于配置的 uploadUrl 构造目标 URL，保留原有 query 并覆盖 target
+                    const configUrl = this.config.uploadUrl || 'https://creator.xiaohongshu.com/publish/publish?target=' + targetType;
+                    const [base, rawQuery] = configUrl.split('?');
+                    const params = new URLSearchParams(rawQuery || '');
+                    params.set('target', targetType);
+                    const newUrl = `${base}?${params.toString()}`;
+                    await page.goto(newUrl, { waitUntil: this.config.waitUntil || 'networkidle', timeout: this.config.timeout || 30000 });
+                } catch (e) {
+                    // 退回到默认行为
+                    const newUrl = `https://creator.xiaohongshu.com/publish/publish?target=${targetType}`;
+                    await page.goto(newUrl, { waitUntil: 'networkidle', timeout: 30000 });
+                }
                 await this.pageOperator.delay(2000);
             }
 
