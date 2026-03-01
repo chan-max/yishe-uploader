@@ -56,23 +56,7 @@
       </div>
     </div>
 
-    <div class="ui segment" style="margin-top: 1rem;">
-      <h3 class="ui dividing header">打开平台链接</h3>
-      <p class="ui small text" style="color: #666; margin-bottom: 0.75rem;">在已连接的浏览器中打开对应平台的创作/发布页（需先连接浏览器）</p>
-      <div class="ui small buttons">
-        <button
-          v-for="item in platformLinks"
-          :key="item.id"
-          type="button"
-          class="ui button"
-          :class="{ loading: openingPlatform === item.id }"
-          :disabled="!browserStatus?.hasInstance || !!openingPlatform"
-          @click="openPlatform(item.id)"
-        >
-          {{ item.name }}
-        </button>
-      </div>
-    </div>
+    <!-- 打开平台链接功能已移除 -->
 
     <div class="ui segment" style="margin-top: 1rem;">
       <h3 class="ui dividing header">用户数据管理 (Export / Import)</h3>
@@ -95,16 +79,9 @@
 
 <script setup>
 import { reactive, ref, computed, onMounted, onUnmounted } from 'vue'
-import { openPlatformUrl } from '@/api/browser'
 
 const API_BASE = ''
-const platformLinks = [
-  { id: 'douyin', name: '抖音' },
-  { id: 'xiaohongshu', name: '小红书' },
-  { id: 'weibo', name: '微博' },
-  { id: 'kuaishou', name: '快手' }
-]
-const openingPlatform = ref(null)
+// 平台打开功能已移除
 const browserConnecting = ref(false)
 const portChecking = ref(false)
 const defaultUserDataDir = (() => {
@@ -212,18 +189,7 @@ async function closeBrowser() {
   }
 }
 
-async function openPlatform(platform) {
-  openingPlatform.value = platform
-  setStatus(`正在打开${platformLinks.find(p => p.id === platform)?.name || platform}...`, 'info')
-  try {
-    await openPlatformUrl(platform)
-    setStatus('已在新标签页打开', 'success')
-  } catch (e) {
-    setStatus(e?.response?.data?.message || e?.message || '打开失败', 'error')
-  } finally {
-    openingPlatform.value = null
-  }
-}
+// openPlatform 功能已移除
 
 async function exportUserData() {
   dataExporting.value = true
