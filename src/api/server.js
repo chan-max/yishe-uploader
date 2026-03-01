@@ -6,6 +6,7 @@
 import http from 'http';
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 import { URL, fileURLToPath } from 'url';
 import publishService from './publishService.js';
 import { getBrowserStatus, getOrCreateBrowser, closeBrowser, launchWithDebugPort, checkAndReconnectBrowser, exportUserData, importUserData } from '../services/BrowserService.js';
@@ -21,9 +22,21 @@ const UPLOAD_DIR = path.resolve(__dirname, '../../temp');
 
 /** 与前端一致的默认 CDP 独立配置目录（避免占用系统 Chrome profile） */
 function getDefaultCdpUserDataDir() {
-    return process.platform === 'win32'
-        ? (process.env.UPLOADER_CDP_USER_DATA_DIR || 'C:\\temp\\yishe-uploader-cdp-1s')
-        : (process.env.UPLOADER_CDP_USER_DATA_DIR || '/tmp/yishe-uploader-cdp-1s');
+    const envDir = process.env.YISHE_AUTO_BROWSER_CDP_USER_DATA_DIR || process.env.UPLOADER_CDP_USER_DATA_DIR;
+    if (envDir) {
+        return envDir;
+    }
+
+    if (process.platform === 'win32') {
+        return 'C:\\temp\\yishe-auto-browser-cdp-1s';
+    }
+
+    const homeDir = os.homedir();
+    const safeBase = homeDir && typeof homeDir === 'string'
+        ? homeDir
+        : process.cwd();
+
+    return path.resolve(safeBase, '.yishe-auto-browser', 'cdp-1s');
 }
 
 function sleep(ms) {
@@ -171,7 +184,7 @@ class ApiServer {
     async handleApiIndex(req, res) {
         const base = `http://${req.headers.host}`;
         this.sendResponse(res, 200, {
-            name: 'Yishe Uploader API',
+            name: 'Yishe Auto Browser API',
             version: '2.0',
             docs: `${base}/api/docs`,
             endpoints: [
@@ -203,7 +216,7 @@ class ApiServer {
         const base = `http://${req.headers.host}`;
         this.sendResponse(res, 200, {
             openapi: '3.0.0',
-            info: { title: 'Yishe Uploader API', version: '2.0' },
+            info: { title: 'Yishe Auto Browser API', version: '2.0' },
             servers: [{ url: base }],
             paths: {
                 '/api/publish': {
@@ -439,7 +452,7 @@ class ApiServer {
             logger.info(`开始导出 User Data: ${userDataDir}`);
             const buffer = await exportUserData(userDataDir);
 
-            const filename = `yishe-uploader-userdata-${new Date().toISOString().split('T')[0]}.zip`;
+            const filename = `yishe-auto-browser-userdata-${new Date().toISOString().split('T')[0]}.zip`;
             res.writeHead(200, {
                 'Content-Type': 'application/zip',
                 'Content-Disposition': `attachment; filename="${filename}"`,

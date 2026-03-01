@@ -1,4 +1,4 @@
-# Yishe Uploader API 文档
+# Yishe Auto Browser API 文档
 
 **Base URL**: `http://localhost:7010`（默认端口 7010）
 

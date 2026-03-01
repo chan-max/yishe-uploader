@@ -4,7 +4,7 @@
       <div class="sidebar-header">
         <h2>
           <i class="cloud upload icon"></i>
-          Yishe Uploader
+          Yishe Auto Browser
         </h2>
         <div class="sidebar-tagline">多平台发布 · v{{ packageJson.version }}</div>
       </div>
@@ -48,7 +48,7 @@ const menuItems = [
 ]
 const currentTitle = computed(() => {
   const r = route.matched.find(m => m.meta?.title)
-  return r?.meta?.title || 'Yishe Uploader'
+  return r?.meta?.title || 'Yishe Auto Browser'
 })
 const currentSubtitle = computed(() => {
   const r = route.matched.find(m => m.meta?.subtitle)

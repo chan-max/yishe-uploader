@@ -27,8 +27,14 @@
           <div class="ui small form">
             <div class="field">
               <label>CDP User Data Dir</label>
-              <input v-model="browserConfig.cdpUserDataDir" type="text" placeholder="例如：C:\temp\yishe-uploader-cdp" />
-              <small style="color: #999;">独立浏览器配置目录，首次需在该 Chrome 内登录一次</small>
+              <input
+                v-model="browserConfig.cdpUserDataDir"
+                type="text"
+                placeholder="例如：C:\temp\yishe-auto-browser-cdp-1s；留空则使用推荐目录"
+              />
+              <small style="color: #999;">
+                独立浏览器配置目录，首次需在该 Chrome 内登录一次；如留空，将使用服务端基于用户目录的推荐路径（推荐）。
+              </small>
             </div>
             <div class="field">
               <label>CDP 端口</label>
@@ -85,8 +91,12 @@ const API_BASE = ''
 const browserConnecting = ref(false)
 const portChecking = ref(false)
 const defaultUserDataDir = (() => {
-  const isWin = navigator.userAgent?.toLowerCase?.().includes('windows')
-  return isWin ? 'C:\\temp\\yishe-uploader-cdp-1s' : '/tmp/yishe-uploader-cdp-1s'
+  const ua = navigator.userAgent?.toLowerCase?.() || ''
+  const isWin = ua.includes('windows')
+  // Windows 下给出一个合理的本地目录，避免每次手填
+  if (isWin) return 'C:\\temp\\yishe-auto-browser-cdp-1s'
+  // 非 Windows（macOS / Linux）默认留空，后端将使用基于家目录的推荐路径
+  return ''
 })()
 const status = reactive({ message: '', type: 'info' })
 const browserStatus = ref(null)

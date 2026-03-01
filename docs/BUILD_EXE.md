@@ -19,15 +19,15 @@ npm run build:exe
 构建过程包括三个步骤：
 1. **构建前端**: 自动运行 `npm run web:build` 生成 `web/dist` 目录
 2. **打包后端**: 使用 esbuild 将 ESM 格式的后端代码打包成单一的 CommonJS 文件
-3. **生成 EXE**: 使用 nexe 将打包后的代码编译成 `yishe-uploader.exe`
+3. **生成 EXE**: 使用 nexe 将打包后的代码编译成 `yishe-auto-browser.exe`
 
 ### 3. 运行 EXE
 
-构建完成后，会在项目根目录生成 `yishe-uploader.exe` 文件。
+构建完成后，会在项目根目录生成 `yishe-auto-browser.exe` 文件。
 
 ```bash
 # 直接运行
-.\yishe-uploader.exe
+.\yishe-auto-browser.exe
 ```
 
 然后访问 `http://localhost:7010` 即可使用。
@@ -50,7 +50,7 @@ npm run build:exe
 可以通过环境变量自定义配置：
 
 - `FRONTEND_DIST`: 指定前端静态文件目录（默认为 `./web/dist`）
-- `UPLOADER_CDP_USER_DATA_DIR`: 指定 Chrome CDP 用户数据目录
+- `YISHE_AUTO_BROWSER_CDP_USER_DATA_DIR` 或 `UPLOADER_CDP_USER_DATA_DIR`: 指定 Chrome CDP 用户数据目录
 
 ## 发布部署
 
@@ -58,7 +58,7 @@ npm run build:exe
 
 ```
 your-app/
-├── yishe-uploader.exe
+├── yishe-auto-browser.exe
 ├── node_modules/          # playwright 等原生依赖
 ├── web/
 │   └── dist/              # 前端静态文件

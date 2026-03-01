@@ -1,20 +1,24 @@
-# Yishe Uploader
+# Yishe Auto Browser
 
-一个功能强大的多平台社交媒体自动发布系统，支持抖音、快手、小红书、微博等多个主流平台。采用 Vue3 + Playwright 技术栈，提供友好的 Web 界面和完善的 API 接口。
+**Yishe Auto Browser** 是一个提供浏览器自动化相关接口的项目，支持基于 CDP 的远程控制、多平台自动发布等能力。通过 RESTful API 与 Web 管理界面，可集成到其他系统中，实现浏览器操作自动化。
+
+## 项目定位
+
+- 提供**浏览器自动化**相关的 HTTP API 接口
+- 支持浏览器连接与管理（CDP 模式、持久化模式）
+- 支持多平台内容发布（抖音、快手、小红书、微博等）
+- 面向需要自动化操作的场景，可与其他系统集成
 
 ## ✨ 特性
 
 - 🎯 **多平台支持**: 支持抖音、快手、小红书、微博、腾讯视频号、B站等主流平台
-- 🎨 **现代化UI**: 基于 Vue3 + Element Plus 的美观界面
+- 🎨 **现代化 UI**: 基于 Vue3 的美观管理界面
 - 🔄 **批量发布**: 一键发布到多个平台，支持并发和顺序模式
 - ⏰ **定时发布**: 支持设置定时发布任务
 - 🎬 **多媒体支持**: 支持视频和图片内容发布
-- 🏷️ **话题标签**: 自动添加话题标签
-- 📍 **地理位置**: 支持设置发布地理位置
-- 🔗 **商品链接**: 支持添加商品链接（抖音）
 - 🤖 **反检测**: 内置反检测机制，模拟真实用户操作
 - 📊 **发布历史**: 完整的发布记录和状态追踪
-- 🔌 **API接口**: 提供 RESTful API，方便集成到其他系统
+- 🔌 **API 接口**: 提供 RESTful API，方便集成到其他系统
 
 ## 🚀 快速开始
 
@@ -27,8 +31,8 @@
 
 ```bash
 # 克隆项目
-git clone https://github.com/your-username/yishe-uploader.git
-cd yishe-uploader
+git clone https://github.com/your-username/yishe-auto-browser.git
+cd yishe-auto-browser
 
 # 安装依赖（前后端共用同一 package.json 和 node_modules）
 npm install
@@ -64,20 +68,20 @@ npm run build:exe
 
 ### Web 界面使用
 
-1. **账号管理**
-   - 进入"账号管理"页面
-   - 点击"添加账号"
-   - 选择平台并完成登录授权
+1. **浏览器连接**
+   - 进入「浏览器」页面
+   - 配置 CDP User Data Dir（留空使用推荐目录）
+   - 点击「连接」启动并连接 Chrome
 
 2. **内容发布**
-   - 进入"内容发布"页面
+   - 进入「内容发布」页面
    - 选择要发布的平台
    - 填写本机视频/图片路径（无需上传）
    - 填写标题、描述和话题标签
-   - 点击"立即发布"或设置定时发布
+   - 点击「立即发布」或设置定时发布
 
 3. **查看历史**
-   - 进入"发布历史"页面
+   - 进入「发布历史」页面
    - 查看所有发布记录和状态
    - 支持按平台、状态、时间筛选
 
@@ -98,31 +102,6 @@ POST /api/publish  { "platforms": ["douyin"], "title": "标题", "filePath": "C:
 POST /api/publish  { "platforms": ["douyin", "xiaohongshu"], "title": "标题", "filePath": "C:\\videos\\demo.mp4", "concurrent": false }
 ```
 
-#### 创建定时发布任务
-
-```javascript
-POST /api/schedule
-
-{
-  "platforms": ["douyin", "kuaishou"],
-  "title": "视频标题",
-  "content": "视频描述",
-  "videoUrl": "/path/to/video.mp4",
-  "scheduleTime": "2026-02-04T10:00:00Z"
-}
-```
-
-#### 获取支持的平台列表
-
-```javascript
-GET /api/platforms
-
-// 响应
-{
-  "platforms": ["douyin", "kuaishou", "xiaohongshu", "weibo"]
-}
-```
-
 ## 🎯 支持的平台
 
 | 平台 | 状态 | 视频 | 图片 | 定时发布 | 特殊功能 |
@@ -141,46 +120,20 @@ GET /api/platforms
 ## 🏗️ 项目结构
 
 ```
-yishe-uploader/
-├── frontend/                 # Vue3 前端项目
+yishe-auto-browser/
+├── web/                     # Vue3 前端项目
 │   ├── src/
-│   │   ├── api/             # API 接口封装
-│   │   ├── components/      # 公共组件
-│   │   ├── layout/          # 布局组件
-│   │   ├── router/          # 路由配置
-│   │   ├── stores/          # Pinia 状态管理
-│   │   ├── styles/          # 全局样式
-│   │   └── views/           # 页面组件
-│   ├── index.html
-│   ├── package.json
+│   │   ├── views/           # 页面组件
+│   │   ├── layout/          # 布局
+│   │   └── ...
 │   └── vite.config.js
 ├── src/                      # 后端源码
 │   ├── api/                 # API 服务层
-│   │   ├── publishService.js  # 发布服务
-│   │   └── server.js          # HTTP 服务器
 │   ├── config/              # 配置文件
-│   │   ├── constants.js
-│   │   └── platforms.js
-│   ├── platforms/           # 平台实现（独立模块）
-│   │   ├── douyin.js        # 抖音
-│   │   ├── kuaishou.js      # 快手
-│   │   ├── xiaohongshu.js   # 小红书
-│   │   ├── weibo.js         # 微博
-│   │   └── ...
-│   ├── services/            # 核心服务
-│   │   ├── BrowserService.js  # 浏览器管理
-│   │   ├── ImageManager.js    # 图片管理
-│   │   ├── LoginChecker.js    # 登录检查
-│   │   ├── PageOperator.js    # 页面操作
-│   │   └── PublishService.js  # 发布服务
+│   ├── platforms/           # 各平台实现
+│   ├── services/            # 核心服务（浏览器、发布等）
 │   └── utils/               # 工具函数
-│       ├── logger.js        # 日志工具
-│       ├── *Auth.js         # 各平台认证
-│       └── ...
-├── auth-data/               # 认证数据（gitignore）
-├── temp/                    # 临时文件
-├── package.json
-└── README.md
+└── docs/                    # 文档
 ```
 
 ## 🔧 配置说明
@@ -191,7 +144,6 @@ yishe-uploader/
 
 1. **持久化模式（默认）**: 使用本地 Chrome 的用户数据目录，自动继承登录状态
    ```bash
-   # 环境变量
    BROWSER_MODE=persistent
    CHROME_USER_DATA_DIR=/path/to/chrome/user/data
    CHROME_PROFILE_DIR=Default
@@ -199,90 +151,15 @@ yishe-uploader/
 
 2. **CDP 模式**: 连接已启动的 Chrome 实例
    ```bash
-   # 环境变量
    BROWSER_MODE=cdp
    CDP_ENDPOINT=http://127.0.0.1:9222
-   
-   # 启动 Chrome（需先完全关闭 Chrome）
-   chrome --remote-debugging-port=9222
    ```
 
-### 平台认证
-
-每个平台需要先进行认证授权：
-
-1. 通过 Web 界面的"账号管理"添加账号
-2. 选择"浏览器登录"方式，系统会打开浏览器
-3. 手动完成登录流程
-4. 登录成功后，系统自动保存认证信息
-
-## 📝 开发指南
-
-### 添加新平台
-
-1. 在 `src/platforms/` 创建新平台文件，如 `newplatform.js`
-2. 实现发布器类，参考现有平台实现
-3. 在 `src/api/publishService.js` 注册新平台
-4. 在前端 `stores/platform.js` 添加平台信息
-
-示例代码结构：
-
-```javascript
-// src/platforms/newplatform.js
-class NewPlatformPublisher {
-    constructor() {
-        this.platformName = '新平台';
-        this.uploadUrl = 'https://...';
-    }
-
-    async publish(publishInfo) {
-        // 1. 获取浏览器
-        // 2. 应用认证
-        // 3. 导航到上传页面
-        // 4. 上传文件
-        // 5. 填写信息
-        // 6. 点击发布
-        // 7. 等待完成
-    }
-}
-
-export async function publishToNewPlatform(publishInfo) {
-    const publisher = new NewPlatformPublisher();
-    return await publisher.publish(publishInfo);
-}
-```
-
-### 调试技巧
-
-1. **查看浏览器操作**: 设置 `headless: false` 可以看到浏览器操作过程
-2. **截图调试**: 代码中已内置错误截图功能
-3. **日志输出**: 使用 `logger` 输出详细日志
-4. **元素定位**: 使用 Playwright Inspector 工具
-
-```bash
-# 启动 Playwright Inspector
-npx playwright inspector
-```
-
-## 🤝 参考项目
-
-本项目参考了以下优秀开源项目：
-
-- [social-auto-upload](https://github.com/dreammis/social-auto-upload) - Python 版本的社交媒体自动发布工具
-- 感谢原作者提供的详细实现思路和平台操作流程
+CDP 用户数据目录可通过 `YISHE_AUTO_BROWSER_CDP_USER_DATA_DIR` 或 `UPLOADER_CDP_USER_DATA_DIR`（兼容）指定。
 
 ## 📄 许可证
 
 MIT License
-
-## 🙏 致谢
-
-感谢所有为本项目做出贡献的开发者！
-
-## 📮 联系方式
-
-- 问题反馈: [GitHub Issues](https://github.com/your-username/yishe-uploader/issues)
-- 邮箱: your-email@example.com
 
 ---
 

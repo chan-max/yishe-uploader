@@ -1,14 +1,25 @@
 /**
  * 常量配置
  */
+import os from 'os';
+import path from 'path';
+
+const defaultPuppeteerUserDataDir = (() => {
+  if (process.platform === 'win32') {
+    return 'C:\\temp\\puppeteer-user-data';
+  }
+  const homeDir = os.homedir();
+  const safeBase = homeDir && typeof homeDir === 'string'
+    ? homeDir
+    : process.cwd();
+  return path.resolve(safeBase, '.yishe-auto-browser', 'puppeteer-user-data');
+})();
 
 export const DEFAULT_CONFIG = {
   // 浏览器配置
   browser: {
     headless: false,
-    userDataDir: process.platform === 'win32' 
-      ? 'C:\\temp\\puppeteer-user-data'
-      : '/tmp/puppeteer-user-data',
+    userDataDir: defaultPuppeteerUserDataDir,
     timeout: 30000,
     viewport: {
       width: 1920,

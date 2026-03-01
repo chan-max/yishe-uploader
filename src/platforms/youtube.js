@@ -1,6 +1,6 @@
 /**
  * YouTube 发布功能 - 实现
- * 也就是参考 social-auto-upload 的实现思路，移植到 yishe-uploader
+ * 也就是参考 social-auto-upload 的实现思路，移植到 yishe-auto-browser
  */
 
 import { getOrCreateBrowser } from '../services/BrowserService.js';
