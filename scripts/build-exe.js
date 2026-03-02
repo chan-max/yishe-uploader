@@ -13,7 +13,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
 const tempDir = path.join(rootDir, 'temp');
 const bundlePath = path.join(tempDir, 'server-bundle.cjs');
-const exePath = path.join(rootDir, 'yishe-auto-browser.exe');
+const exePath = path.join(rootDir, 'yishe-uploader.exe');
 
 console.log('🚀 开始构建 EXE 可执行文件...\n');
 
