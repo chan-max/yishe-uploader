@@ -9,7 +9,7 @@ import path from 'path';
 import os from 'os';
 import { URL, fileURLToPath } from 'url';
 import publishService from './publishService.js';
-import { getBrowserStatus, getOrCreateBrowser, closeBrowser, launchWithDebugPort, checkAndReconnectBrowser, exportUserData, importUserData } from '../services/BrowserService.js';
+import { getBrowserStatus, getOrCreateBrowser, closeBrowser, launchWithDebugPort, checkAndReconnectBrowser, exportUserData } from '../services/BrowserService.js';
 import { PublishService } from '../services/PublishService.js';
 import { logger } from '../utils/logger.js';
 import { PLATFORM_CONFIGS } from '../config/platforms.js';
@@ -162,8 +162,6 @@ class ApiServer {
                     await this.handleLoginStatus(req, res);
                 } else if (reqPath === '/api/browser/export-user-data' && method === 'GET') {
                     await this.handleExportUserData(req, res);
-                } else if (reqPath === '/api/browser/import-user-data' && method === 'POST') {
-                    await this.handleImportUserData(req, res);
                 } else {
                     this.sendResponse(res, 404, { success: false, error: 'Not Found' });
                 }
@@ -203,8 +201,7 @@ class ApiServer {
                 { method: 'POST', path: '/api/browser/open-platform', description: '在已连接浏览器中打开指定平台创作页' },
                 { method: 'POST', path: '/api/browser/check-and-reconnect', description: '检测浏览器实例并可选重连（body: { reconnect?: boolean }）' },
                 { method: 'GET', path: '/api/browser/check', description: '仅检测浏览器实例（不重连）' },
-                { method: 'GET', path: '/api/browser/export-user-data', description: '导出 User Data 压缩包' },
-                { method: 'POST', path: '/api/browser/import-user-data', description: '导入 User Data 压缩包' }
+                { method: 'GET', path: '/api/browser/export-user-data', description: '导出 User Data 压缩包' }
             ]
         });
     }
@@ -467,52 +464,6 @@ class ApiServer {
     }
 
     /**
-     * 导入 User Data
-     */
-    async handleImportUserData(req, res) {
-        try {
-            const contentType = req.headers['content-type'] || '';
-            if (!contentType.includes('multipart/form-data')) {
-                this.sendResponse(res, 400, { success: false, message: '需要 multipart/form-data' });
-                return;
-            }
-
-            const m = contentType.match(/boundary=([^;\s]+)/);
-            const boundary = m ? m[1].trim().replace(/^["']|["']$/g, '') : null;
-            if (!boundary) {
-                this.sendResponse(res, 400, { success: false, message: '缺少 boundary' });
-                return;
-            }
-
-            if (!fs.existsSync(UPLOAD_DIR)) {
-                await fs.promises.mkdir(UPLOAD_DIR, { recursive: true });
-            }
-
-            const uploadResult = await this.parseMultipart(req, Buffer.from(`--${boundary}`));
-            if (!uploadResult.savedPath) {
-                this.sendResponse(res, 400, { success: false, message: '未找到上传的文件' });
-                return;
-            }
-
-            const url = new URL(req.url, `http://${req.headers.host}`);
-            const userDataDir = (url.searchParams.get('userDataDir') || getDefaultCdpUserDataDir()).trim();
-
-            logger.info(`开始导入 User Data 到: ${userDataDir}，文件: ${uploadResult.savedPath}`);
-            await importUserData(uploadResult.savedPath, userDataDir);
-
-            // 导入成功后删除临时 zip
-            if (fs.existsSync(uploadResult.savedPath)) {
-                fs.unlinkSync(uploadResult.savedPath);
-            }
-
-            this.sendResponse(res, 200, { success: true, message: '导入成功' });
-        } catch (error) {
-            logger.error('导入失败:', error);
-            this.sendResponse(res, 500, { success: false, message: error.message });
-        }
-    }
-
-    /**
      * 处理文件上传（发布用视频/图片）- 使用内置流解析 multipart，无第三方依赖
      */
     async handleUpload(req, res) {
@@ -551,6 +502,11 @@ class ApiServer {
 
     /**
      * 简易 multipart 解析：只提取第一个带 filename 的文件并写入 temp
+     * 改进：
+     * 1. 确保文件完整写入
+     * 2. 正确处理 writeStream 的异步关闭
+     * 3. 改进缓冲区管理，防止 OOM
+     * 4. 添加磁盘空间检查
      */
     parseMultipart(req, boundaryPrefix) {
         return new Promise((resolve, reject) => {
@@ -563,32 +519,70 @@ class ApiServer {
             let savedPath = null;
             let buffer = Buffer.alloc(0);
             let resolved = false;
+            let fileBodyEnded = false;
+            let bytesWritten = 0;
             const maxBuffer = 1024 * 1024; // 1MB 用于边界检测
+            const MAX_MEMORY_BUFFER = 100 * 1024 * 1024; // 100MB 最大内存缓冲
+            let writeQueue = Promise.resolve();
 
             function flushToFile(chunk) {
-                if (writeStream && chunk.length) writeStream.write(chunk);
+                if (!writeStream || !chunk || !chunk.length) {
+                    return Promise.resolve();
+                }
+
+                // 排队写入，避免并发
+                writeQueue = writeQueue.then(() => {
+                    return new Promise((resolve, reject) => {
+                        if (!writeStream) {
+                            reject(new Error('writeStream 已关闭'));
+                            return;
+                        }
+                        
+                        writeStream.write(chunk, (err) => {
+                            if (err) {
+                                // 捕获磁盘相关错误
+                                if (err.code === 'ENOSPC') {
+                                    reject(new Error('磁盘空间不足，无法完成上传'));
+                                } else if (err.code === 'EAGAIN' || err.code === 'EWOULDBLOCK') {
+                                    reject(new Error('文件系统繁忙，请稍后重试'));
+                                } else {
+                                    reject(new Error(`文件写入失败: ${err.message}`));
+                                }
+                            } else {
+                                bytesWritten += chunk.length;
+                                resolve();
+                            }
+                        });
+                    });
+                });
+                return writeQueue;
             }
 
             function finishFile() {
-                if (writeStream) {
+                if (!writeStream) return false;
+                
+                return new Promise((resolve) => {
+                    // 确保流正确关闭
+                    writeStream.once('finish', () => {
+                        writeStream = null;
+                        if (savedPath && !resolved) {
+                            resolved = true;
+                            resolve(true);
+                        } else {
+                            resolve(false);
+                        }
+                    });
+                    writeStream.once('error', (err) => {
+                        logger.error('写入文件流错误:', err);
+                        writeStream = null;
+                        resolve(false);
+                    });
                     writeStream.end();
-                    writeStream = null;
-                }
-                if (savedPath && !resolved) {
-                    resolved = true;
-                    resolve({ savedPath });
-                    return true;
-                }
-                return false;
+                });
             }
 
-            req.on('data', (chunk) => {
-                if (resolved) return;
-                buffer = Buffer.concat([buffer, chunk]);
-                if (buffer.length > 256 * 1024 * 1024) {
-                    buffer = buffer.subarray(buffer.length - maxBuffer);
-                }
-                while (buffer.length > 0) {
+            const processChunk = async () => {
+                while (buffer.length > 0 && !resolved) {
                     if (state === 'preamble' || state === 'between') {
                         const i = buffer.indexOf(B);
                         if (i === -1) {
@@ -597,9 +591,9 @@ class ApiServer {
                             break;
                         }
                         buffer = buffer.subarray(i + B.length);
-                        if (buffer[0] === 0x2d && buffer[1] === 0x2d) {
+                        if (buffer.length >= 2 && buffer[0] === 0x2d && buffer[1] === 0x2d) {
                             buffer = buffer.subarray(2);
-                            if (finishFile()) return;
+                            if (await finishFile()) return;
                             state = 'between';
                             continue;
                         }
@@ -631,6 +625,7 @@ class ApiServer {
                             const base = `${Date.now()}_${Math.random().toString(36).slice(2, 10)}${ext}`;
                             savedPath = path.join(UPLOAD_DIR, base);
                             writeStream = fs.createWriteStream(savedPath);
+                            logger.info(`开始接收上传文件: ${base}`);
                         }
                         state = 'body';
                         continue;
@@ -640,28 +635,130 @@ class ApiServer {
                         if (i === -1) {
                             const safe = Math.max(0, buffer.length - B.length - 4);
                             if (safe > 0) {
-                                flushToFile(buffer.subarray(0, safe));
+                                await flushToFile(buffer.subarray(0, safe));
                                 buffer = buffer.subarray(safe);
                             }
                             break;
                         }
                         const trim = i >= 2 && buffer[i - 2] === 0x0d && buffer[i - 1] === 0x0a ? 2 : 0;
-                        flushToFile(buffer.subarray(0, i - trim));
+                        await flushToFile(buffer.subarray(0, i - trim));
                         buffer = buffer.subarray(i);
+                        fileBodyEnded = true;
                         state = 'between';
                     }
                 }
-            });
-            req.on('end', () => {
+            };
+
+            req.on('data', async (chunk) => {
                 if (resolved) return;
-                if (buffer.length) flushToFile(buffer);
-                if (!finishFile()) {
-                    resolved = true;
-                    resolve({ savedPath: savedPath || null });
+                try {
+                    // 安全的缓冲区连接 - 捕获内存分配错误
+                    try {
+                        buffer = Buffer.concat([buffer, chunk]);
+                    } catch (bufErr) {
+                        if (bufErr instanceof RangeError) {
+                            throw new Error(`内存分配失败: 缓冲区过大 (${(buffer.length + chunk.length) / 1024 / 1024}MB)。请减小文件大小或增加系统内存。`);
+                        }
+                        throw bufErr;
+                    }
+                    
+                    // 防止缓冲区无限增长
+                    if (buffer.length > MAX_MEMORY_BUFFER) {
+                        logger.warn(`缓冲区超过 ${MAX_MEMORY_BUFFER / 1024 / 1024}MB，仅保留最后 ${maxBuffer / 1024}KB`);
+                        buffer = buffer.subarray(buffer.length - maxBuffer);
+                    }
+                    
+                    await processChunk();
+                } catch (err) {
+                    if (!resolved) {
+                        resolved = true;
+                        reject(err);
+                    }
                 }
             });
-            req.on('error', reject);
+
+            req.on('end', async () => {
+                if (resolved) return;
+                try {
+                    // 等待所有待处理的写入完成
+                    await writeQueue;
+                    
+                    if (buffer.length) {
+                        try {
+                            await flushToFile(buffer);
+                        } catch (flushErr) {
+                            throw flushErr;
+                        }
+                    }
+                    
+                    // 确保文件流正确关闭
+                    if (writeStream) {
+                        if (!fileBodyEnded) {
+                            await finishFile();
+                        } else if (writeStream && !writeStream.closed) {
+                            writeStream.destroy();
+                        }
+                    }
+                    
+                    if (!resolved) {
+                        resolved = true;
+                        resolve({ savedPath: savedPath || null });
+                    }
+                } catch (err) {
+                    if (!resolved) {
+                        resolved = true;
+                        reject(err);
+                    }
+                }
+            });
+
+            req.on('error', (err) => {
+                if (!resolved) {
+                    resolved = true;
+                    // 清理资源
+                    if (writeStream) {
+                        writeStream.destroy();
+                    }
+                    // 删除部分上传的文件
+                    if (savedPath && fs.existsSync(savedPath)) {
+                        try {
+                            fs.unlinkSync(savedPath);
+                        } catch (e) {
+                            logger.warn(`清理临时文件失败: ${e.message}`);
+                        }
+                    }
+                    reject(err);
+                }
+            });
         });
+    }
+
+    /**
+     * 检查磁盘剩余空间
+     */
+    async checkDiskSpace(dirPath) {
+        try {
+            // 使用 fs.statfs 检查磁盘空间（仅 Unix）
+            // Windows 用户需要其他方式
+            if (process.platform !== 'win32') {
+                const util = require('util');
+                const statfs = util.promisify(require('fs').statfs);
+                const stats = await statfs(dirPath);
+                const freeSpace = stats.bavail * stats.bsize; // 可用空间（字节）
+                const requiredSpace = 500 * 1024 * 1024; // 需要 500MB
+                if (freeSpace < requiredSpace) {
+                    return {
+                        ok: false,
+                        available: Math.floor(freeSpace / 1024 / 1024),
+                        required: Math.floor(requiredSpace / 1024 / 1024)
+                    };
+                }
+            }
+            return { ok: true };
+        } catch (err) {
+            logger.warn(`磁盘空间检查失败: ${err.message}`);
+            return { ok: true }; // 如果检查失败，允许继续
+        }
     }
 
     /**

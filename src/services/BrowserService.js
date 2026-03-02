@@ -10,6 +10,7 @@
 
 import { chromium } from 'playwright';
 import { spawn } from 'child_process';
+import path from 'path';
 import {
     join as pathJoin
 } from 'path';
@@ -628,6 +629,59 @@ export async function importUserData(zipPath, userDataDir) {
             throw new Error(`待导入的 ZIP 文件不存在: ${zipPath}`);
         }
 
+        // 验证 ZIP 文件大小
+        const fileStats = fs.statSync(zipPath);
+        logger.info(`ZIP 文件大小: ${(fileStats.size / 1024 / 1024).toFixed(2)} MB`);
+
+        if (fileStats.size < 100) {
+            throw new Error(`ZIP 文件过小 (${fileStats.size} 字节)，可能不是有效的 ZIP 文件或文件损坏`);
+        }
+
+        if (fileStats.size > 10 * 1024 * 1024 * 1024) {
+            throw new Error(`ZIP 文件过大 (${(fileStats.size / 1024 / 1024 / 1024).toFixed(2)} GB)，超过 10GB 限制`);
+        }
+
+        // 检查磁盘空间（预估需要 3 倍 ZIP 大小的临时空间）
+        const requiredSpace = fileStats.size * 3;
+        const targetDir = path.dirname(userDataDir);
+        try {
+            if (process.platform !== 'win32') {
+                const util = require('util');
+                const statfs = util.promisify(fs.statfs);
+                const stats = await statfs(targetDir);
+                const freeSpace = stats.bavail * stats.bsize;
+                if (freeSpace < requiredSpace) {
+                    throw new Error(
+                        `磁盘空间不足。需要: ${(requiredSpace / 1024 / 1024 / 1024).toFixed(2)} GB, ` +
+                        `可用: ${(freeSpace / 1024 / 1024 / 1024).toFixed(2)} GB`
+                    );
+                }
+            }
+        } catch (diskErr) {
+            if (!diskErr.message.includes('磁盘空间不足')) {
+                logger.warn(`磁盘空间检查失败: ${diskErr.message}（继续尝试导入）`);
+            } else {
+                throw diskErr;
+            }
+        }
+
+        // 验证 ZIP 格式完整性
+        let zipInstance;
+        try {
+            zipInstance = new AdmZip(zipPath);
+            const entries = zipInstance.getEntries();
+            if (!entries || entries.length === 0) {
+                throw new Error('ZIP 文件为空或格式无效');
+            }
+            logger.info(`ZIP 文件包含 ${entries.length} 个条目`);
+        } catch (zipErr) {
+            const errMsg = zipErr.message || String(zipErr);
+            if (errMsg.includes('Invalid') || errMsg.includes('No END header')) {
+                throw new Error(`ZIP 文件格式错误或已损坏: ${errMsg}。请确保上传的文件是完整的有效 ZIP 文件。`);
+            }
+            throw zipErr;
+        }
+
         // 确保浏览器已关闭
         logger.info('正在关闭浏览器以准备导入数据...');
         await closeBrowser();
@@ -641,8 +695,15 @@ export async function importUserData(zipPath, userDataDir) {
         fs.ensureDirSync(userDataDir);
 
         logger.info(`正在从 ${zipPath} 导入用户数据到 ${userDataDir} ...`);
-        const zip = new AdmZip(zipPath);
-        zip.extractAllTo(userDataDir, true);
+        try {
+            zipInstance.extractAllTo(userDataDir, true);
+        } catch (extractErr) {
+            // 捕获解压过程中的错误
+            if (extractErr.code === 'ENOSPC' || extractErr.message.includes('空间')) {
+                throw new Error(`解压失败: 磁盘空间不足。请检查目标路径的可用空间。`);
+            }
+            throw new Error(`解压 ZIP 文件失败: ${extractErr.message}`);
+        }
 
         logger.info('用户数据导入完成');
         return true;

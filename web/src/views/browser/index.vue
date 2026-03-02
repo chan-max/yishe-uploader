@@ -65,19 +65,15 @@
     <!-- 打开平台链接功能已移除 -->
 
     <div class="ui segment" style="margin-top: 1rem;">
-      <h3 class="ui dividing header">用户数据管理 (Export / Import)</h3>
-      <p class="ui small text" style="color: #666; margin-bottom: 0.75rem;">导出当前 User Data Dir 下的所有登录态、缓存等，以便在另一台设备导入继续使用。</p>
+      <h3 class="ui dividing header">用户数据管理 (Export)</h3>
+      <p class="ui small text" style="color: #666; margin-bottom: 0.75rem;">导出当前 User Data Dir 下的所有登录态、缓存等。</p>
       <div class="ui small buttons">
         <button type="button" class="ui olive button" :class="{ loading: dataExporting }" :disabled="dataExporting" @click="exportUserData">
           导出数据文件 (.zip)
         </button>
-        <button type="button" class="ui teal button" :class="{ loading: dataImporting }" :disabled="dataImporting" @click="triggerImport">
-          导入数据文件
-        </button>
       </div>
-      <input ref="importFileInput" type="file" accept=".zip" style="display: none;" @change="handleImportFile" />
-      <div v-if="dataImporting || dataExporting" class="ui tiny warning message">
-        提示：该操作会自动关闭已运行的浏览器窗口以确保数据完整，且大型目录可能需要几分钟压缩/解压时间。
+      <div v-if="dataExporting" class="ui tiny warning message">
+        提示：该操作会自动关闭已运行的浏览器窗口以确保数据完整，且大型目录可能需要几分钟压缩时间。
       </div>
     </div>
   </div>
@@ -102,8 +98,6 @@ const status = reactive({ message: '', type: 'info' })
 const browserStatus = ref(null)
 const browserConfig = reactive({ cdpUserDataDir: defaultUserDataDir, cdpPort: 9222 })
 const dataExporting = ref(false)
-const dataImporting = ref(false)
-const importFileInput = ref(null)
 
 const lastActivityText = computed(() => {
   const ts = browserStatus.value?.lastActivity
@@ -221,41 +215,11 @@ async function exportUserData() {
 }
 
 function triggerImport() {
-  importFileInput.value.click()
+  // 导入功能已移除
 }
 
 async function handleImportFile(event) {
-  const file = event.target.files[0]
-  if (!file) return
-  
-  if (!confirm('导入数据将彻底覆盖当前的 User Data Dir 目录，建议先备份重要数据。是否继续？')) {
-    event.target.value = ''
-    return
-  }
-  
-  dataImporting.value = true
-  setStatus('正在上传并导入数据，大型文件耗时较长，请在此期间不要刷新或关闭页面...', 'info')
-  try {
-    const userDataDir = (browserConfig.cdpUserDataDir || '').trim()
-    const formData = new FormData()
-    formData.append('file', file)
-    
-    const res = await fetch(`${API_BASE}/api/browser/import-user-data?userDataDir=${encodeURIComponent(userDataDir)}`, {
-      method: 'POST',
-      body: formData
-    })
-    
-    const data = await res.json()
-    if (!res.ok || !data.success) throw new Error(data.message || '导入失败')
-    
-    setStatus('用户数据导入成功！您可以点击“连接”重新开启浏览器。', 'success')
-    refreshBrowserStatus()
-  } catch (e) {
-    setStatus(e.message || '导入失败', 'error')
-  } finally {
-    dataImporting.value = false
-    event.target.value = ''
-  }
+  // 导入功能已移除
 }
 
 let pollTimer
