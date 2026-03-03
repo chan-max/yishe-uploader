@@ -558,6 +558,7 @@ class ApiServer {
                     post: {
                         tags: ['Crawler'],
                         summary: '按 URL 执行通用抓取',
+                        description: '通用 URL 爬取接口，可应用于任意网站。支持自定义选择器和等待策略。',
                         requestBody: {
                             required: true,
                             content: {
@@ -566,17 +567,45 @@ class ApiServer {
                                         type: 'object',
                                         required: ['url'],
                                         properties: {
-                                            url: { type: 'string', description: '要抓取的页面 URL' },
-                                            waitUntil: { type: 'string', description: '页面加载等待策略，默认 domcontentloaded' },
+                                            url: { type: 'string', description: '要抓取的页面 URL，如 https://example.com' },
+                                            waitUntil: { type: 'string', enum: ['domcontentloaded', 'load', 'networkidle'], description: '页面加载等待策略，默认 domcontentloaded' },
                                             timeout: { type: 'number', description: '超时时间（毫秒），默认 30000' },
                                             rules: {
                                                 type: 'object',
                                                 description: '提取规则（可选）',
                                                 properties: {
-                                                    titleSelector: { type: 'string' },
-                                                    contentSelector: { type: 'string' },
-                                                    linksSelector: { type: 'string' },
-                                                    maxLinks: { type: 'number' }
+                                                    titleSelector: { type: 'string', description: 'CSS 选择器，用于提取页面标题，默认 "title"' },
+                                                    contentSelector: { type: 'string', description: 'CSS 选择器，用于提取页面内容，默认 "body"' },
+                                                    linksSelector: { type: 'string', description: 'CSS 选择器，用于提取链接，默认 "a[href]"' },
+                                                    maxLinks: { type: 'number', description: '提取链接最大数量，默认 20' }
+                                                }
+                                            }
+                                        }
+                                    },
+                                    examples: {
+                                        'basic': {
+                                            summary: '基础示例（仅传 URL）',
+                                            value: {
+                                                url: 'https://example.com'
+                                            }
+                                        },
+                                        'with-wait-until': {
+                                            summary: '自定义等待策略',
+                                            value: {
+                                                url: 'https://example.com',
+                                                waitUntil: 'networkidle',
+                                                timeout: 60000
+                                            }
+                                        },
+                                        'with-rules': {
+                                            summary: '自定义提取规则',
+                                            value: {
+                                                url: 'https://example.com',
+                                                rules: {
+                                                    titleSelector: 'h1.main-title',
+                                                    contentSelector: 'div.article-content',
+                                                    linksSelector: 'a.featured-link',
+                                                    maxLinks: 50
                                                 }
                                             }
                                         }
@@ -584,13 +613,14 @@ class ApiServer {
                                 }
                             }
                         },
-                        responses: { 200: { description: '抓取结果' } }
+                        responses: { 200: { description: '抓取结果，包含标题、内容、链接等' } }
                     }
                 },
                 '/api/crawler/run': {
                     post: {
                         tags: ['Crawler'],
                         summary: '执行指定站点爬虫',
+                        description: '针对特定网站（sora、pinterest等）的专门爬虫。每个网站有不同的参数和优化策略。',
                         requestBody: {
                             required: true,
                             content: {
@@ -599,14 +629,74 @@ class ApiServer {
                                         type: 'object',
                                         required: ['site'],
                                         properties: {
-                                            site: { type: 'string', description: '站点爬虫标识，如 demo' },
-                                            params: { type: 'object', description: '站点爬虫参数' }
+                                            site: { type: 'string', enum: ['sora', 'pinterest', 'demo'], description: '站点爬虫标识' },
+                                            params: {
+                                                type: 'object',
+                                                description: '站点爬虫参数（见示例）',
+                                                properties: {
+                                                    maxImages: { type: 'number', description: '[Sora/Pinterest] 最大图片数量，默认 20' },
+                                                    scrollTimes: { type: 'number', description: '[Sora/Pinterest] 滚动加载次数，默认 8' },
+                                                    url: { type: 'string', description: '[Pinterest] 目标 URL，默认首页' },
+                                                    titleSelector: { type: 'string', description: '[Demo] CSS 选择器' }
+                                                }
+                                            }
+                                        }
+                                    },
+                                    examples: {
+                                        'sora-default': {
+                                            summary: 'Sora 爬虫 - 默认参数',
+                                            description: '爬取 Sora 首页图片，返回 20 张',
+                                            value: {
+                                                site: 'sora',
+                                                params: {}
+                                            }
+                                        },
+                                        'sora-custom': {
+                                            summary: 'Sora 爬虫 - 自定义参数',
+                                            description: '设置最大图片数、增加滚动次数提升命中率',
+                                            value: {
+                                                site: 'sora',
+                                                params: {
+                                                    maxImages: 50,
+                                                    scrollTimes: 12
+                                                }
+                                            }
+                                        },
+                                        'pinterest-default': {
+                                            summary: 'Pinterest 爬虫 - 首页爬取',
+                                            description: '爬取 Pinterest 首页图片',
+                                            value: {
+                                                site: 'pinterest',
+                                                params: {}
+                                            }
+                                        },
+                                        'pinterest-custom-url': {
+                                            summary: 'Pinterest 爬虫 - 自定义页面',
+                                            description: '爬取特定 Pinterest 页面（如用户主页、分类等）',
+                                            value: {
+                                                site: 'pinterest',
+                                                params: {
+                                                    url: 'https://www.pinterest.com/search/pins/?q=nature',
+                                                    maxImages: 30,
+                                                    scrollTimes: 10
+                                                }
+                                            }
+                                        },
+                                        'demo': {
+                                            summary: 'Demo 爬虫 - 通用示例',
+                                            description: '演示性爬虫，抓取任意 URL 并提取内容',
+                                            value: {
+                                                site: 'demo',
+                                                params: {
+                                                    url: 'https://example.com'
+                                                }
+                                            }
                                         }
                                     }
                                 }
                             }
                         },
-                        responses: { 200: { description: '爬虫任务结果' } }
+                        responses: { 200: { description: '爬虫任务结果，包含提取的图片或内容' } }
                     }
                 }
             }

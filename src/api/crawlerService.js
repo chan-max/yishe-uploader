@@ -11,7 +11,8 @@ import { logger } from '../utils/logger.js';
 
 const siteCrawlers = {
     demo: demoCrawler,
-    sora: soraCrawler
+    sora: soraCrawler,
+    pinterest: pinterestCrawler
 };
 
 function sleep(ms) {
@@ -327,6 +328,184 @@ async function soraCrawler(params = {}) {
     } catch (error) {
         logger.error(`Sora 爬虫执行失败: ${error.message}`);
         throw new Error(`Sora 爬虫失败: ${error.message}`);
+    } finally {
+        await page.close().catch(() => { });
+    }
+}
+
+/**
+ * Pinterest 图片爬虫 - 抓取首页/任意 Pinterest 页面图片
+ * 默认页面：https://www.pinterest.com/
+ */
+async function pinterestCrawler(params = {}) {
+    const targetUrl = params.url || 'https://www.pinterest.com/';
+    const maxImages = Number(params.maxImages) > 0 ? Number(params.maxImages) : 20;
+    const scrollTimes = Number(params.scrollTimes) > 0 ? Number(params.scrollTimes) : 8;
+
+    const browser = await getOrCreateBrowser();
+    const page = await browser.newPage();
+
+    try {
+        logger.info(`开始爬取 Pinterest 图片: ${targetUrl}`);
+
+        await page.setExtraHTTPHeaders({
+            'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8'
+        });
+
+        const navResult = await gotoWithFallback(page, targetUrl, 60000);
+        logger.info(`Pinterest 页面已打开，waitUntil=${navResult.waitUntil}, status=${navResult.status ?? 'unknown'}`);
+
+        logger.info('等待图片容器加载...');
+        await page.waitForSelector('img[src], img[data-src], img[srcset]', { timeout: 20000 }).catch(() => {
+            logger.warn('未能等待到 img 选择器，继续尝试提取现有内容');
+        });
+
+        for (let i = 0; i < scrollTimes; i++) {
+            await page.mouse.wheel(0, 1200).catch(() => { });
+            await page.waitForTimeout(600);
+        }
+
+        const images = await page.evaluate((maxImages) => {
+            const extracted = [];
+            const seenUrls = new Set();
+
+            const toAbsoluteUrl = (value) => {
+                if (!value) return '';
+                try {
+                    return new URL(value, window.location.origin).toString();
+                } catch {
+                    return '';
+                }
+            };
+
+            const looksLikeAvatarOrIcon = (url = '', alt = '', cls = '') => {
+                const s = `${url} ${alt} ${cls}`.toLowerCase();
+                return [
+                    'avatar',
+                    'profile',
+                    'user',
+                    'icon',
+                    'logo',
+                    'favicon',
+                    'emoji',
+                    'badge'
+                ].some((k) => s.includes(k));
+            };
+
+            const validVisualSize = (width, height) => {
+                const w = Number(width) || 0;
+                const h = Number(height) || 0;
+                return (w >= 180 && h >= 180) || (w * h >= 45000);
+            };
+
+            const pickSrcFromSrcSet = (srcset = '') => {
+                if (!srcset) return '';
+                const parts = srcset.split(',').map((item) => item.trim().split(' ')[0]).filter(Boolean);
+                return parts[parts.length - 1] || parts[0] || '';
+            };
+
+            const pushImage = ({ url, alt = '', title = '', description = '', width = 0, height = 0 }) => {
+                const finalUrl = toAbsoluteUrl(url);
+                const cleanAlt = (alt || '').trim();
+                const cleanTitle = (title || '').trim();
+                const cleanDesc = (description || '').trim();
+
+                if (!finalUrl || seenUrls.has(finalUrl)) return;
+                if (finalUrl.startsWith('data:') || finalUrl.startsWith('blob:')) return;
+                if (looksLikeAvatarOrIcon(finalUrl, cleanAlt, cleanTitle)) return;
+                if (!validVisualSize(width, height)) return;
+
+                seenUrls.add(finalUrl);
+                extracted.push({
+                    url: finalUrl,
+                    alt: cleanAlt || cleanTitle || cleanDesc || '图片',
+                    title: cleanTitle || cleanAlt || '',
+                    description: cleanDesc,
+                    index: extracted.length + 1
+                });
+            };
+
+            const cardSelectors = [
+                'a[href*="/pin/"]',
+                '[data-test-id*="pin"]',
+                '[data-test-id*="pinWrapper"]',
+                'article',
+                '[role="listitem"]'
+            ];
+
+            const cardNodes = Array.from(new Set(cardSelectors.flatMap((selector) => Array.from(document.querySelectorAll(selector)))));
+
+            for (const node of cardNodes) {
+                if (extracted.length >= maxImages) break;
+
+                const img = node.querySelector('img');
+                const source = node.querySelector('source[srcset]');
+
+                const src =
+                    (img && (img.currentSrc || img.getAttribute('src') || img.getAttribute('data-src') || pickSrcFromSrcSet(img.getAttribute('srcset') || ''))) ||
+                    (source && pickSrcFromSrcSet(source.getAttribute('srcset') || ''));
+
+                const width = img ? (img.naturalWidth || img.width || img.clientWidth || node.clientWidth) : (node.clientWidth || 0);
+                const height = img ? (img.naturalHeight || img.height || img.clientHeight || node.clientHeight) : (node.clientHeight || 0);
+                const title = img?.getAttribute('title') || node.getAttribute('title') || '';
+                const alt = img?.getAttribute('alt') || '';
+
+                const textEl = node.querySelector('span, p, div[class*="description"], div[class*="text"], h1, h2, h3, h4');
+                const description = textEl ? (textEl.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 220) : '';
+
+                pushImage({ url: src, alt, title, description, width, height });
+            }
+
+            if (extracted.length < maxImages) {
+                const fallbackImgs = Array.from(document.querySelectorAll('img'));
+                for (const img of fallbackImgs) {
+                    if (extracted.length >= maxImages) break;
+
+                    const src = img.currentSrc || img.getAttribute('src') || img.getAttribute('data-src') || pickSrcFromSrcSet(img.getAttribute('srcset') || '');
+                    const alt = img.getAttribute('alt') || '';
+                    const title = img.getAttribute('title') || '';
+
+                    let context = img.closest('a[href*="/pin/"], article, div[role="listitem"], section');
+                    if (!context) context = img.parentElement;
+
+                    const textEl = context?.querySelector?.('span, p, div[class*="description"], div[class*="text"], h1, h2, h3, h4');
+                    const description = textEl ? (textEl.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 220) : '';
+
+                    pushImage({
+                        url: src,
+                        alt,
+                        title,
+                        description,
+                        width: img.naturalWidth || img.width || img.clientWidth,
+                        height: img.naturalHeight || img.height || img.clientHeight
+                    });
+                }
+            }
+
+            return extracted;
+        }, maxImages);
+
+        if (!images.length) {
+            throw new Error('页面已打开但未提取到图片，可能需要先在浏览器中登录 Pinterest，或当前网络对该域名连接不稳定');
+        }
+
+        logger.info(`成功提取 ${images.length} 张图片`);
+
+        return {
+            success: true,
+            mode: 'site',
+            site: 'pinterest',
+            data: {
+                title: 'Pinterest',
+                url: targetUrl,
+                images,
+                totalImages: images.length,
+                crawledAt: new Date().toISOString()
+            }
+        };
+    } catch (error) {
+        logger.error(`Pinterest 爬虫执行失败: ${error.message}`);
+        throw new Error(`Pinterest 爬虫失败: ${error.message}`);
     } finally {
         await page.close().catch(() => { });
     }
