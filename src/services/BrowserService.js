@@ -9,7 +9,7 @@
  */
 
 import { chromium } from 'playwright';
-import { spawn } from 'child_process';
+import { spawn, exec } from 'child_process';
 import path from 'path';
 import {
     join as pathJoin
@@ -149,6 +149,69 @@ function withTimeout(promise, ms, label) {
     return Promise.race([promise.finally(() => clearTimeout(t)), timeout]);
 }
 
+function execCommand(command, timeoutMs = 8000) {
+    return new Promise((resolve, reject) => {
+        exec(command, { timeout: timeoutMs, windowsHide: true }, (error, stdout, stderr) => {
+            if (error) {
+                const msg = stderr ? String(stderr).trim() : error.message;
+                reject(new Error(msg || error.message));
+                return;
+            }
+            resolve(String(stdout || '').trim());
+        });
+    });
+}
+
+async function getListeningPids(port) {
+    const pids = new Set();
+    if (process.platform === 'win32') {
+        let output = '';
+        try {
+            output = await execCommand(`netstat -ano -p tcp | findstr :${port}`);
+        } catch {
+            return [];
+        }
+        const lines = output.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+        for (const line of lines) {
+            if (!line.includes(`:${port}`)) continue;
+            const parts = line.split(/\s+/);
+            const pid = parts[parts.length - 1];
+            if (pid && /^\d+$/.test(pid)) {
+                pids.add(pid);
+            }
+        }
+        return Array.from(pids);
+    }
+
+    try {
+        const output = await execCommand(`lsof -nP -iTCP:${port} -sTCP:LISTEN -t`);
+        output.split(/\s+/).filter(Boolean).forEach(pid => pids.add(pid));
+        return Array.from(pids);
+    } catch (e) {
+        const fallback = await execCommand(`sh -lc "ss -lptn 'sport = :${port}' | awk '{print $6}' | sed 's/.*pid=\\([0-9]*\\).*/\\1/'"`);
+        fallback.split(/\s+/).filter(Boolean).forEach(pid => pids.add(pid));
+        return Array.from(pids);
+    }
+}
+
+async function killPids(pids = []) {
+    const killed = [];
+    const errors = [];
+    for (const pid of pids) {
+        try {
+            if (process.platform === 'win32') {
+                await execCommand(`taskkill /PID ${pid} /T /F`);
+            } else {
+                await execCommand(`kill -9 ${pid}`);
+            }
+            killed.push(pid);
+        } catch (e) {
+            errors.push({ pid, error: e.message || String(e) });
+        }
+    }
+    return { killed, errors };
+}
+
 /** 是否为「浏览器/上下文已关闭」类错误（用户关闭了由本服务启动的窗口后仍用旧引用会报此错） */
 function isBrowserClosedError(err) {
     const msg = (err && err.message) ? String(err.message) : '';
@@ -212,7 +275,6 @@ function tryListProfiles(userDataDir) {
 
 /**
  * 启动带远程调试端口的 Chrome（仅 --remote-debugging-port，使用默认 profile = 你的登录态）
- * 使用前请先完全关闭 Chrome，否则会提示 profile 被占用。
  * 支持无头模式通过 headless 参数或 HEADLESS 环境变量
  */
 export function launchWithDebugPort({ port = 9222, headless = null } = {}) {
@@ -226,7 +288,8 @@ export function launchWithDebugPort({ port = 9222, headless = null } = {}) {
             : '';
 
     // 确定是否使用无头模式
-    const useHeadless = headless !== null ? headless : getHeadlessMode();
+    const useHeadless = headless !== undefined ? headless : getHeadlessMode();
+    logger.info(`launchWithDebugPort - 输入 headless: ${headless}, 最终使用 useHeadless: ${useHeadless}`);
     
     const args = [
         '--remote-debugging-address=127.0.0.1',
@@ -250,7 +313,6 @@ export function launchWithDebugPort({ port = 9222, headless = null } = {}) {
     logger.info(`已启动 Chrome pid=${pid} port=${port}，模式: ${modeStr}，使用默认 profile`);
     return { port, browserName: 'chrome', pid, headless: useHeadless };
 }
-
 /**
  * 检查浏览器是否可用
  */
@@ -344,6 +406,7 @@ export async function getOrCreateBrowser(options = {}) {
 
         connectPromise = (async () => {
             const headless = options.headless !== undefined ? options.headless : getHeadlessMode();
+            logger.info(`getOrCreateBrowser - options.headless: ${options.headless}, 最终使用 headless: ${headless}`);
             const modeStr = headless ? '无头' : '有界面';
             
             if (mode === 'cdp') {
@@ -587,6 +650,26 @@ export async function closeBrowser() {
 }
 
 /**
+ * 强制关闭指定调试端口的浏览器实例（默认 9222）
+ */
+export async function forceCloseBrowserByPort({ port = 9222 } = {}) {
+    const safePort = Number(port) || 9222;
+    await closeBrowser();
+
+    try {
+        const pids = await getListeningPids(safePort);
+        if (!pids.length) {
+            return { ok: true, port: safePort, message: '未发现占用端口的进程', pids: [], killed: [] };
+        }
+        const { killed, errors } = await killPids(pids);
+        const ok = killed.length > 0 && errors.length === 0;
+        return { ok, port: safePort, pids, killed, errors };
+    } catch (e) {
+        return { ok: false, port: safePort, error: e.message || String(e) };
+    }
+}
+
+/**
  * 清除用户数据
  */
 export async function clearUserData() {
@@ -805,5 +888,9 @@ export class BrowserService {
 
     static async importUserData(zipPath, userDataDir) {
         return importUserData(zipPath, userDataDir);
+    }
+
+    static async forceCloseByPort(options = {}) {
+        return forceCloseBrowserByPort(options);
     }
 }

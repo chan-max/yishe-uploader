@@ -41,6 +41,19 @@
               <input v-model.number="browserConfig.cdpPort" type="number" placeholder="9222" style="max-width: 8rem;" />
               <small style="color: #999;">→ http://127.0.0.1:{{ browserConfig.cdpPort || 9222 }}</small>
             </div>
+            <div class="field">
+              <div class="ui checkbox">
+                <input type="checkbox" v-model="browserConfig.headless" id="headless-mode" />
+                <label for="headless-mode">
+                  <strong>无头模式</strong>
+                  <span style="color: #666; margin-left: 0.5rem;">（不显示浏览器窗口，后台运行）</span>
+                </label>
+              </div>
+              <small style="display: block; color: #999; margin-top: 0.25rem;">
+                <i class="info circle icon" style="margin: 0;"></i>
+                启用后浏览器将在后台运行，适合服务器环境或无需查看浏览器界面的场景。
+              </small>
+            </div>
           </div>
           <div class="ui small info message" style="margin-top: 0.75rem;">
             为保证 9222 稳定可用，默认使用独立的 <code>--user-data-dir</code> 启动 Chrome。首次使用需在新打开的 Chrome 内登录一次，之后会复用该目录的登录态。
@@ -52,13 +65,19 @@
     <div class="ui segment" style="margin-top: 1rem;">
       <div class="ui small buttons">
         <button type="button" class="ui primary button" :class="{ loading: browserConnecting }" :disabled="browserConnecting" @click="launchAndConnect">
-          连接
+          连接{{ browserConfig.headless ? '（无头）' : '' }}
         </button>
         <button type="button" class="ui button" :disabled="browserConnecting" @click="refreshBrowserStatus">刷新</button>
         <button type="button" class="ui button" :class="{ loading: portChecking }" :disabled="portChecking" @click="checkPort">
           检测端口
         </button>
         <button type="button" class="ui red button" :disabled="browserConnecting" @click="closeBrowser">断开</button>
+        <button type="button" class="ui orange button" :disabled="browserConnecting" @click="forceCloseBrowser">
+          强制关闭 9222
+        </button>
+      </div>
+      <div class="ui tiny warning message" style="margin-top: 0.75rem;">
+        强制关闭会终止占用端口的进程，请仅在异常残留时使用。
       </div>
     </div>
 
@@ -96,7 +115,11 @@ const defaultUserDataDir = (() => {
 })()
 const status = reactive({ message: '', type: 'info' })
 const browserStatus = ref(null)
-const browserConfig = reactive({ cdpUserDataDir: defaultUserDataDir, cdpPort: 9222 })
+const browserConfig = reactive({ 
+  cdpUserDataDir: defaultUserDataDir, 
+  cdpPort: 9222,
+  headless: false  // 无头模式开关
+})
 const dataExporting = ref(false)
 
 const lastActivityText = computed(() => {
@@ -140,14 +163,18 @@ async function launchAndConnect() {
     const connectRes = await fetch(`${API_BASE}/api/browser/connect`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ port, cdpUserDataDir: cdpUserDataDir || undefined }),
+      body: JSON.stringify({ 
+        port, 
+        cdpUserDataDir: cdpUserDataDir || undefined,
+        headless: browserConfig.headless  // 添加无头模式参数
+      }),
       signal: controller.signal
     })
     clearTimeout(timer)
     const connectData = await connectRes.json()
     if (!connectRes.ok || !connectData.success) throw new Error(connectData.message || '连接失败')
     browserStatus.value = connectData.data
-    setStatus('浏览器已连接', 'success')
+    setStatus(`浏览器已连接${browserConfig.headless ? '（无头模式）' : ''}`, 'success')
   } catch (e) {
     const msg = e?.name === 'AbortError' ? '连接超时' : (e.message || '启动并连接失败')
     setStatus(msg, 'error')
@@ -188,6 +215,32 @@ async function closeBrowser() {
     setStatus('浏览器已断开', 'success')
   } catch (e) {
     setStatus(e.message || '断开浏览器失败', 'error')
+  } finally {
+    browserConnecting.value = false
+  }
+}
+
+async function forceCloseBrowser() {
+  browserConnecting.value = true
+  setStatus('正在强制关闭端口占用进程...', 'info')
+  try {
+    const port = getCdpPort()
+    const res = await fetch(`${API_BASE}/api/browser/force-close`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ port })
+    })
+    const data = await res.json()
+    if (!res.ok || !data.success) throw new Error(data.message || '强制关闭失败')
+    await refreshBrowserStatus()
+    const d = data.data
+    if (d?.killed?.length) {
+      setStatus(`已强制关闭端口 ${port} 进程: ${d.killed.join(', ')}`, 'success')
+    } else {
+      setStatus(`端口 ${port} 未发现占用进程`, 'info')
+    }
+  } catch (e) {
+    setStatus(e.message || '强制关闭失败', 'error')
   } finally {
     browserConnecting.value = false
   }

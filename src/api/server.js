@@ -10,7 +10,7 @@ import os from 'os';
 import { URL, fileURLToPath } from 'url';
 import publishService from './publishService.js';
 import crawlerService from './crawlerService.js';
-import { getBrowserStatus, getOrCreateBrowser, closeBrowser, launchWithDebugPort, checkAndReconnectBrowser, exportUserData } from '../services/BrowserService.js';
+import { getBrowserStatus, getOrCreateBrowser, closeBrowser, launchWithDebugPort, checkAndReconnectBrowser, exportUserData, forceCloseBrowserByPort } from '../services/BrowserService.js';
 import { PublishService } from '../services/PublishService.js';
 import { logger } from '../utils/logger.js';
 import { PLATFORM_CONFIGS } from '../config/platforms.js';
@@ -151,6 +151,8 @@ class ApiServer {
                     await this.handleBrowserConnect(req, res);
                 } else if (reqPath === '/api/browser/close' && method === 'POST') {
                     await this.handleBrowserClose(req, res);
+                } else if (reqPath === '/api/browser/force-close' && method === 'POST') {
+                    await this.handleBrowserForceClose(req, res);
                 } else if (reqPath === '/api/browser/launch-with-debug' && method === 'POST') {
                     await this.handleBrowserLaunchDebug(req, res);
                 } else if (reqPath === '/api/browser/check-port' && method === 'POST') {
@@ -209,6 +211,7 @@ class ApiServer {
                 { method: 'GET', path: '/api/browser/status', description: '浏览器连接状态' },
                 { method: 'POST', path: '/api/browser/connect', description: '连接浏览器' },
                 { method: 'POST', path: '/api/browser/close', description: '关闭浏览器' },
+                { method: 'POST', path: '/api/browser/force-close', description: '强制关闭指定端口浏览器（默认 9222）' },
                 { method: 'POST', path: '/api/browser/launch-with-debug', description: '启动带调试端口的 Chrome' },
                 { method: 'POST', path: '/api/browser/check-port', description: '检测 CDP 端口' },
                 { method: 'POST', path: '/api/browser/open-platform', description: '在已连接浏览器中打开指定平台创作页' },
@@ -403,6 +406,26 @@ class ApiServer {
                     post: {
                         tags: ['Browser'],
                         summary: '关闭浏览器连接',
+                        responses: { 200: { description: '关闭结果' } }
+                    }
+                },
+                '/api/browser/force-close': {
+                    post: {
+                        tags: ['Browser'],
+                        summary: '强制关闭指定端口浏览器',
+                        requestBody: {
+                            required: false,
+                            content: {
+                                'application/json': {
+                                    schema: {
+                                        type: 'object',
+                                        properties: {
+                                            port: { type: 'number', description: '远程调试端口，默认 9222' }
+                                        }
+                                    }
+                                }
+                            }
+                        },
                         responses: { 200: { description: '关闭结果' } }
                     }
                 },
@@ -699,8 +722,9 @@ class ApiServer {
             } else {
                 const port = Number(body.port) || 9222;
                 const userDataDir = (body.cdpUserDataDir || body.userDataDir || getDefaultCdpUserDataDir()).trim();
-                const headless = body.headless !== undefined ? body.headless : undefined;
-                logger.info('API connect 未指定 CDP，先启动带调试端口的 Chrome（独立目录）再连接');
+                // 正确处理 headless 参数：明确传递布尔值
+                const headless = body.headless === true ? true : (body.headless === false ? false : undefined);
+                logger.info('API connect 未指定 CDP，先启动带调试端口的 Chrome（独立目录）再连接, headless:', headless);
                 launchWithDebugPort({ port, userDataDir, headless });
                 await sleep(3500);
                 await getOrCreateBrowser({ mode: 'cdp', cdpEndpoint: `http://127.0.0.1:${port}`, headless });
@@ -720,6 +744,20 @@ class ApiServer {
             await closeBrowser();
             const status = await getBrowserStatus();
             this.sendResponse(res, 200, { success: true, data: status });
+        } catch (error) {
+            this.sendResponse(res, 500, { success: false, message: error.message });
+        }
+    }
+
+    /**
+     * 强制关闭浏览器（按端口）
+     */
+    async handleBrowserForceClose(req, res) {
+        try {
+            const body = await this.parseBody(req).catch(() => ({})) || {};
+            const { port = 9222 } = body;
+            const result = await forceCloseBrowserByPort({ port });
+            this.sendResponse(res, 200, { success: true, data: result });
         } catch (error) {
             this.sendResponse(res, 500, { success: false, message: error.message });
         }
