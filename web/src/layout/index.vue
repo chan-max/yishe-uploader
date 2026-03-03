@@ -44,7 +44,6 @@ import packageJson from '../../../package.json'
 const route = useRoute()
 const menuItems = [
   { path: '/browser', title: '浏览器连接', icon: 'linkify' },
-  { path: '/crawler', title: '在线爬虫', icon: 'bug' },
   { path: '/api-doc', title: 'API 文档', icon: 'book' }
 ]
 const currentTitle = computed(() => {
@@ -58,7 +57,6 @@ const currentSubtitle = computed(() => {
 const headerIcon = computed(() => {
   const pathToIcon = {
     '/browser': 'linkify',
-    '/crawler': 'bug',
     '/api-doc': 'book'
   }
   return pathToIcon[route.path] || 'home'

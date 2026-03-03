@@ -8,7 +8,6 @@ const routes = [
     redirect: '/browser',
     children: [
       { path: 'browser', name: 'Browser', component: () => import('@/views/browser/index.vue'), meta: { title: '浏览器连接', subtitle: '连接 Chrome 以便发布' } },
-      { path: 'crawler', name: 'Crawler', component: () => import('@/views/crawler/index.vue'), meta: { title: '在线爬虫', subtitle: '通过浏览器自动化爬取网页数据' } },
       { path: 'api-doc', name: 'ApiDoc', component: () => import('@/views/api-doc/index.vue'), meta: { title: 'API 文档', subtitle: '对外接口说明' } }
     ]
   }
