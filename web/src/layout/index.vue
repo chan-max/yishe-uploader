@@ -44,6 +44,7 @@ import packageJson from '../../../package.json'
 const route = useRoute()
 const menuItems = [
   { path: '/browser', title: '浏览器连接', icon: 'linkify' },
+  { path: '/crawler', title: '在线爬虫', icon: 'bug' },
   { path: '/api-doc', title: 'API 文档', icon: 'book' }
 ]
 const currentTitle = computed(() => {
@@ -55,8 +56,12 @@ const currentSubtitle = computed(() => {
   return r?.meta?.subtitle || '多平台内容发布控制台'
 })
 const headerIcon = computed(() => {
-  const item = menuItems.find(m => route.path.startsWith(m.path))
-  return item?.icon || 'home'
+  const pathToIcon = {
+    '/browser': 'linkify',
+    '/crawler': 'bug',
+    '/api-doc': 'book'
+  }
+  return pathToIcon[route.path] || 'home'
 })
 
 </script>
@@ -100,6 +105,7 @@ const headerIcon = computed(() => {
 }
 .menu-item {
   padding: 0.75rem 1rem;
+  min-height: 44px;
   cursor: pointer;
   transition: background-color 0.2s;
   display: flex;
@@ -119,7 +125,20 @@ const headerIcon = computed(() => {
   }
   .icon {
     width: 20px;
+    height: 20px;
+    flex: 0 0 20px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     text-align: center;
+    margin: 0 !important;
+    line-height: 1;
+    transform: translateY(0);
+  }
+  span {
+    display: inline-flex;
+    align-items: center;
+    line-height: 1.2;
   }
 }
 .main-content {

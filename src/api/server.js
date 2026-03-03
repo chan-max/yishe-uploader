@@ -9,6 +9,7 @@ import path from 'path';
 import os from 'os';
 import { URL, fileURLToPath } from 'url';
 import publishService from './publishService.js';
+import crawlerService from './crawlerService.js';
 import { getBrowserStatus, getOrCreateBrowser, closeBrowser, launchWithDebugPort, checkAndReconnectBrowser, exportUserData } from '../services/BrowserService.js';
 import { PublishService } from '../services/PublishService.js';
 import { logger } from '../utils/logger.js';
@@ -136,6 +137,8 @@ class ApiServer {
                     await this.handleApiIndex(req, res);
                 } else if (reqPath === '/api/docs' && method === 'GET') {
                     await this.handleApiDocs(req, res);
+                } else if (reqPath === '/api/swagger' && method === 'GET') {
+                    await this.handleSwaggerUi(req, res);
                 } else if (reqPath === '/api/publish' && method === 'POST') {
                     await this.handlePublishUnified(req, res);
                 } else if (reqPath === '/api/schedule' && method === 'POST') {
@@ -162,6 +165,14 @@ class ApiServer {
                     await this.handleLoginStatus(req, res);
                 } else if (reqPath === '/api/browser/export-user-data' && method === 'GET') {
                     await this.handleExportUserData(req, res);
+                } else if (reqPath === '/api/crawler/health' && method === 'GET') {
+                    await this.handleCrawlerHealth(req, res);
+                } else if (reqPath === '/api/crawler/sites' && method === 'GET') {
+                    await this.handleCrawlerSites(req, res);
+                } else if (reqPath === '/api/crawler/url' && method === 'POST') {
+                    await this.handleCrawlUrl(req, res);
+                } else if (reqPath === '/api/crawler/run' && method === 'POST') {
+                    await this.handleCrawlerRun(req, res);
                 } else {
                     this.sendResponse(res, 404, { success: false, error: 'Not Found' });
                 }
@@ -185,9 +196,11 @@ class ApiServer {
             name: 'Yishe Auto Browser API',
             version: '2.0',
             docs: `${base}/api/docs`,
+            swagger: `${base}/api/swagger`,
             endpoints: [
                 { method: 'GET', path: '/api', description: 'API 概览（本接口）' },
                 { method: 'GET', path: '/api/docs', description: 'API 文档（JSON）' },
+                { method: 'GET', path: '/api/swagger', description: 'Swagger UI 在线调试页' },
                 { method: 'POST', path: '/api/publish', description: '发布（传 platforms 数组，单平台如 ["douyin"]）' },
                 { method: 'POST', path: '/api/schedule', description: '创建定时发布' },
                 { method: 'GET', path: '/api/platforms', description: '支持的平台列表' },
@@ -201,7 +214,11 @@ class ApiServer {
                 { method: 'POST', path: '/api/browser/open-platform', description: '在已连接浏览器中打开指定平台创作页' },
                 { method: 'POST', path: '/api/browser/check-and-reconnect', description: '检测浏览器实例并可选重连（body: { reconnect?: boolean }）' },
                 { method: 'GET', path: '/api/browser/check', description: '仅检测浏览器实例（不重连）' },
-                { method: 'GET', path: '/api/browser/export-user-data', description: '导出 User Data 压缩包' }
+                { method: 'GET', path: '/api/browser/export-user-data', description: '导出 User Data 压缩包' },
+                { method: 'GET', path: '/api/crawler/health', description: '爬虫服务健康检查' },
+                { method: 'GET', path: '/api/crawler/sites', description: '获取可用爬虫站点列表' },
+                { method: 'POST', path: '/api/crawler/url', description: '按 URL 通用抓取（可传规则）' },
+                { method: 'POST', path: '/api/crawler/run', description: '执行指定 site 的爬虫任务' }
             ]
         });
     }
@@ -213,11 +230,45 @@ class ApiServer {
         const base = `http://${req.headers.host}`;
         this.sendResponse(res, 200, {
             openapi: '3.0.0',
-            info: { title: 'Yishe Auto Browser API', version: '2.0' },
+            info: {
+                title: 'Yishe Auto Browser API',
+                version: '2.0',
+                description: '浏览器自动化 + 发布 + 爬虫接口，支持 Swagger 在线调试'
+            },
             servers: [{ url: base }],
+            tags: [
+                { name: 'System', description: '系统发现与文档' },
+                { name: 'Publish', description: '发布相关接口' },
+                { name: 'Browser', description: '浏览器连接与状态' },
+                { name: 'Upload', description: '文件上传' },
+                { name: 'Auth', description: '平台登录状态' },
+                { name: 'Crawler', description: '爬虫接口' }
+            ],
             paths: {
+                '/api': {
+                    get: {
+                        tags: ['System'],
+                        summary: 'API 概览',
+                        responses: { 200: { description: 'API 基本信息与端点列表' } }
+                    }
+                },
+                '/api/docs': {
+                    get: {
+                        tags: ['System'],
+                        summary: 'OpenAPI 文档 JSON',
+                        responses: { 200: { description: 'OpenAPI 3.0 文档' } }
+                    }
+                },
+                '/api/swagger': {
+                    get: {
+                        tags: ['System'],
+                        summary: 'Swagger UI 在线调试页面',
+                        responses: { 200: { description: 'Swagger UI HTML 页面' } }
+                    }
+                },
                 '/api/publish': {
                     post: {
+                        tags: ['Publish'],
                         summary: '发布到平台（单平台或多平台统一接口）',
                         requestBody: {
                             required: true,
@@ -229,7 +280,9 @@ class ApiServer {
                                         properties: {
                                             platforms: { type: 'array', items: { type: 'string' }, description: '平台 ID 数组，单平台如 ["douyin"]，多平台如 ["douyin", "xiaohongshu"]' },
                                             title: { type: 'string' },
+                                            content: { type: 'string', description: '正文内容（可选）' },
                                             filePath: { type: 'string', description: '本机视频/图片绝对路径（服务端可访问），如 C:\\videos\\demo.mp4，无需上传' },
+                                            images: { type: 'array', items: { type: 'string' }, description: '图文发布用图片 URL 列表（可选）' },
                                             tags: { type: 'array', items: { type: 'string' } },
                                             scheduled: { type: 'boolean' },
                                             scheduleTime: { type: 'string', format: 'date-time' },
@@ -242,10 +295,337 @@ class ApiServer {
                         },
                         responses: { 200: { description: '发布结果' } }
                     }
+                },
+                '/api/schedule': {
+                    post: {
+                        tags: ['Publish'],
+                        summary: '创建定时发布任务',
+                        requestBody: {
+                            required: true,
+                            content: {
+                                'application/json': {
+                                    schema: {
+                                        type: 'object',
+                                        required: ['platforms', 'scheduleTime'],
+                                        properties: {
+                                            platforms: { type: 'array', items: { type: 'string' }, description: '平台 ID 数组' },
+                                            scheduleTime: { type: 'string', format: 'date-time', description: '执行时间（ISO）' },
+                                            title: { type: 'string' },
+                                            content: { type: 'string' },
+                                            filePath: { type: 'string' },
+                                            images: { type: 'array', items: { type: 'string' } },
+                                            tags: { type: 'array', items: { type: 'string' } },
+                                            platformSettings: { type: 'object' }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        responses: { 200: { description: '任务创建结果' } }
+                    }
+                },
+                '/api/platforms': {
+                    get: {
+                        tags: ['Publish'],
+                        summary: '获取支持平台列表',
+                        responses: { 200: { description: '平台列表' } }
+                    }
+                },
+                '/api/upload': {
+                    post: {
+                        tags: ['Upload'],
+                        summary: '上传文件（multipart/form-data）',
+                        requestBody: {
+                            required: true,
+                            content: {
+                                'multipart/form-data': {
+                                    schema: {
+                                        type: 'object',
+                                        properties: {
+                                            file: { type: 'string', format: 'binary', description: '上传文件字段（file）' }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        responses: { 200: { description: '上传结果（返回保存路径）' } }
+                    }
+                },
+                '/api/login-status': {
+                    get: {
+                        tags: ['Auth'],
+                        summary: '获取平台登录状态',
+                        parameters: [
+                            {
+                                name: 'refresh',
+                                in: 'query',
+                                required: false,
+                                schema: { type: 'string', enum: ['0', '1'] },
+                                description: '是否强制刷新检测，1=强制'
+                            }
+                        ],
+                        responses: { 200: { description: '登录状态结果' } }
+                    }
+                },
+                '/api/browser/status': {
+                    get: {
+                        tags: ['Browser'],
+                        summary: '获取浏览器连接状态',
+                        responses: { 200: { description: '状态结果' } }
+                    }
+                },
+                '/api/browser/connect': {
+                    post: {
+                        tags: ['Browser'],
+                        summary: '连接浏览器',
+                        requestBody: {
+                            required: false,
+                            content: {
+                                'application/json': {
+                                    schema: {
+                                        type: 'object',
+                                        properties: {
+                                            mode: { type: 'string', enum: ['cdp'], description: '可选，指定 cdp 连接模式' },
+                                            cdpEndpoint: { type: 'string', description: '如 http://127.0.0.1:9222' },
+                                            port: { type: 'number', description: '调试端口，默认 9222' },
+                                            cdpUserDataDir: { type: 'string', description: 'CDP User Data 目录' },
+                                            userDataDir: { type: 'string', description: '兼容字段，等同 cdpUserDataDir' },
+                                            headless: { type: 'boolean', description: '是否无头模式，默认false（可通过HEADLESS环境变量设置）' }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        responses: { 200: { description: '连接结果' } }
+                    }
+                },
+                '/api/browser/close': {
+                    post: {
+                        tags: ['Browser'],
+                        summary: '关闭浏览器连接',
+                        responses: { 200: { description: '关闭结果' } }
+                    }
+                },
+                '/api/browser/launch-with-debug': {
+                    post: {
+                        tags: ['Browser'],
+                        summary: '启动带调试端口的 Chrome',
+                        requestBody: {
+                            required: false,
+                            content: {
+                                'application/json': {
+                                    schema: {
+                                        type: 'object',
+                                        properties: {
+                                            port: { type: 'number', description: '远程调试端口，默认 9222' },
+                                            userDataDir: { type: 'string', description: '可选 user-data-dir' },
+                                            headless: { type: 'boolean', description: '是否无头模式，默认false（可通过HEADLESS环境变量设置）' }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        responses: { 200: { description: '启动结果' } }
+                    }
+                },
+                '/api/browser/check-port': {
+                    post: {
+                        tags: ['Browser'],
+                        summary: '检测 CDP 端口是否可用',
+                        requestBody: {
+                            required: false,
+                            content: {
+                                'application/json': {
+                                    schema: {
+                                        type: 'object',
+                                        properties: {
+                                            port: { type: 'number', description: '默认 9222' }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        responses: { 200: { description: '检测结果' } }
+                    }
+                },
+                '/api/browser/open-platform': {
+                    post: {
+                        tags: ['Browser'],
+                        summary: '在已连接浏览器打开平台创作页',
+                        requestBody: {
+                            required: true,
+                            content: {
+                                'application/json': {
+                                    schema: {
+                                        type: 'object',
+                                        required: ['platform'],
+                                        properties: {
+                                            platform: { type: 'string', description: '平台 ID，如 douyin、xiaohongshu、weibo、kuaishou' }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        responses: { 200: { description: '打开结果' } }
+                    }
+                },
+                '/api/browser/check-and-reconnect': {
+                    get: {
+                        tags: ['Browser'],
+                        summary: '检测浏览器实例（GET，不重连）',
+                        responses: { 200: { description: '检测结果' } }
+                    },
+                    post: {
+                        tags: ['Browser'],
+                        summary: '检测浏览器实例并可选重连（POST）',
+                        requestBody: {
+                            required: false,
+                            content: {
+                                'application/json': {
+                                    schema: {
+                                        type: 'object',
+                                        properties: {
+                                            reconnect: { type: 'boolean', description: 'true 时断开后尝试重连' }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        responses: { 200: { description: '检测结果' } }
+                    }
+                },
+                '/api/browser/check': {
+                    get: {
+                        tags: ['Browser'],
+                        summary: '仅检测浏览器实例（不重连）',
+                        responses: { 200: { description: '检测结果' } }
+                    }
+                },
+                '/api/browser/export-user-data': {
+                    get: {
+                        tags: ['Browser'],
+                        summary: '导出 User Data 压缩包',
+                        parameters: [
+                            {
+                                name: 'userDataDir',
+                                in: 'query',
+                                required: false,
+                                schema: { type: 'string' },
+                                description: '可选，指定导出的 user-data-dir 路径'
+                            }
+                        ],
+                        responses: { 200: { description: 'ZIP 文件流（application/zip）' } }
+                    }
+                },
+                '/api/crawler/health': {
+                    get: {
+                        tags: ['Crawler'],
+                        summary: '爬虫服务健康检查',
+                        responses: { 200: { description: '健康状态' } }
+                    }
+                },
+                '/api/crawler/sites': {
+                    get: {
+                        tags: ['Crawler'],
+                        summary: '获取可用爬虫站点列表',
+                        responses: { 200: { description: '站点列表' } }
+                    }
+                },
+                '/api/crawler/url': {
+                    post: {
+                        tags: ['Crawler'],
+                        summary: '按 URL 执行通用抓取',
+                        requestBody: {
+                            required: true,
+                            content: {
+                                'application/json': {
+                                    schema: {
+                                        type: 'object',
+                                        required: ['url'],
+                                        properties: {
+                                            url: { type: 'string', description: '要抓取的页面 URL' },
+                                            waitUntil: { type: 'string', description: '页面加载等待策略，默认 domcontentloaded' },
+                                            timeout: { type: 'number', description: '超时时间（毫秒），默认 30000' },
+                                            rules: {
+                                                type: 'object',
+                                                description: '提取规则（可选）',
+                                                properties: {
+                                                    titleSelector: { type: 'string' },
+                                                    contentSelector: { type: 'string' },
+                                                    linksSelector: { type: 'string' },
+                                                    maxLinks: { type: 'number' }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        responses: { 200: { description: '抓取结果' } }
+                    }
+                },
+                '/api/crawler/run': {
+                    post: {
+                        tags: ['Crawler'],
+                        summary: '执行指定站点爬虫',
+                        requestBody: {
+                            required: true,
+                            content: {
+                                'application/json': {
+                                    schema: {
+                                        type: 'object',
+                                        required: ['site'],
+                                        properties: {
+                                            site: { type: 'string', description: '站点爬虫标识，如 demo' },
+                                            params: { type: 'object', description: '站点爬虫参数' }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        responses: { 200: { description: '爬虫任务结果' } }
+                    }
                 }
             }
         });
     }
+
+        /**
+         * Swagger UI 页面（在线调试）
+         */
+        async handleSwaggerUi(req, res) {
+                const html = `<!doctype html>
+<html lang="zh-CN">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Yishe Auto Browser API - Swagger UI</title>
+        <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
+        <style>
+            html, body, #swagger-ui { margin: 0; padding: 0; height: 100%; }
+            .topbar { display: none; }
+        </style>
+    </head>
+    <body>
+        <div id="swagger-ui"></div>
+        <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+        <script>
+            window.ui = SwaggerUIBundle({
+                url: '/api/docs',
+                dom_id: '#swagger-ui',
+                deepLinking: true,
+                displayRequestDuration: true,
+                persistAuthorization: true,
+                tryItOutEnabled: true,
+                docExpansion: 'list'
+            });
+        </script>
+    </body>
+</html>`;
+
+                res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+                res.end(html);
+        }
 
     /**
      * 统一发布：单平台与多平台均传 platforms（数组），如 ["douyin"] 或 ["douyin", "xiaohongshu"]
@@ -319,10 +699,11 @@ class ApiServer {
             } else {
                 const port = Number(body.port) || 9222;
                 const userDataDir = (body.cdpUserDataDir || body.userDataDir || getDefaultCdpUserDataDir()).trim();
+                const headless = body.headless !== undefined ? body.headless : undefined;
                 logger.info('API connect 未指定 CDP，先启动带调试端口的 Chrome（独立目录）再连接');
-                launchWithDebugPort({ port, userDataDir });
+                launchWithDebugPort({ port, userDataDir, headless });
                 await sleep(3500);
-                await getOrCreateBrowser({ mode: 'cdp', cdpEndpoint: `http://127.0.0.1:${port}` });
+                await getOrCreateBrowser({ mode: 'cdp', cdpEndpoint: `http://127.0.0.1:${port}`, headless });
             }
             const status = await getBrowserStatus();
             this.sendResponse(res, 200, { success: true, data: status });
@@ -773,6 +1154,64 @@ class ApiServer {
         } catch (error) {
             logger.error('获取登录状态失败:', error);
             this.sendResponse(res, 500, { success: false, message: error.message || '获取登录状态失败' });
+        }
+    }
+
+    /**
+     * 爬虫服务健康检查
+     */
+    async handleCrawlerHealth(req, res) {
+        try {
+            const result = await crawlerService.checkCrawlerHealth();
+            this.sendResponse(res, 200, result);
+        } catch (error) {
+            this.sendResponse(res, 500, { success: false, message: error.message || '爬虫服务异常' });
+        }
+    }
+
+    /**
+     * 获取可用爬虫站点
+     */
+    async handleCrawlerSites(req, res) {
+        try {
+            const sites = crawlerService.getSupportedSites();
+            this.sendResponse(res, 200, { success: true, sites });
+        } catch (error) {
+            this.sendResponse(res, 500, { success: false, message: error.message || '获取站点列表失败' });
+        }
+    }
+
+    /**
+     * 通用 URL 抓取
+     */
+    async handleCrawlUrl(req, res) {
+        try {
+            const body = await this.parseBody(req);
+            const result = await crawlerService.crawlUrl(body);
+            this.sendResponse(res, 200, result);
+        } catch (error) {
+            const statusCode = error.message && error.message.includes('缺少 url 参数') ? 400 : 500;
+            this.sendResponse(res, statusCode, { success: false, message: error.message || '抓取失败' });
+        }
+    }
+
+    /**
+     * 执行站点爬虫
+     */
+    async handleCrawlerRun(req, res) {
+        try {
+            const body = await this.parseBody(req);
+            const { site, params = {} } = body;
+            const result = await crawlerService.runSiteCrawler(site, params);
+            this.sendResponse(res, 200, result);
+        } catch (error) {
+            const isBadRequest =
+                (error.message && error.message.includes('缺少 site 参数')) ||
+                (error.message && error.message.includes('不支持的 site'));
+            this.sendResponse(res, isBadRequest ? 400 : 500, {
+                success: false,
+                message: error.message || '执行爬虫任务失败'
+            });
         }
     }
 

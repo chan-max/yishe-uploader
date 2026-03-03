@@ -88,27 +88,44 @@ function getBrowserMode() {
     return (process.env.BROWSER_MODE || 'persistent').toLowerCase();
 }
 
-function buildPersistentLaunchOptions({ profileDir, executablePath }) {
+function getHeadlessMode() {
+    const headlessEnv = process.env.HEADLESS || process.env.BROWSER_HEADLESS;
+    if (headlessEnv) {
+        return headlessEnv.toLowerCase() === 'true' || headlessEnv === '1';
+    }
+    return false; // 默认非无头模式
+}
+
+function buildPersistentLaunchOptions({ profileDir, executablePath, headless = false }) {
     const args = [
-        '--start-maximized',
         '--no-first-run',
         '--no-default-browser-check',
-        ...(profileDir ? [`--profile-directory=${profileDir}`] : [])
+        ...(profileDir ? [`--profile-directory=${profileDir}`] : []),
+        ...(!headless ? ['--start-maximized'] : [])
     ];
-    return {
-        headless: false,
+    
+    const launchOptions = {
+        headless: headless,
         executablePath: executablePath,
         args,
-        viewport: null,
         ignoreHTTPSErrors: true
     };
+    
+    // 仅在有界面模式下设置 viewport，无头模式需要显式设置
+    if (headless) {
+        launchOptions.viewport = { width: 1920, height: 1080 };
+    } else {
+        launchOptions.viewport = null;
+    }
+    
+    return launchOptions;
 }
 
 /**
- * 通过 CDP 将浏览器窗口设为最大化（启动后调用）
+ * 通过 CDP 将浏览器窗口设为最大化（仅在有界面模式下调用）
  */
-async function setBrowserWindowMaximized(context) {
-    if (!context) return;
+async function setBrowserWindowMaximized(context, headless = false) {
+    if (!context || headless) return; // 无头模式下跳过
     let page = context.pages()[0];
     const createdPage = !page;
     if (!page) page = await context.newPage();
@@ -148,7 +165,13 @@ async function newPageWithReconnect(options = {}) {
         if (!contextInstance) {
             if (browserInstance && typeof browserInstance.contexts === 'function') {
                 const ctxs = browserInstance.contexts();
-                contextInstance = ctxs[0] || await browserInstance.newContext({ devtools: true, headless: false });
+                const headless = getHeadlessMode();
+                const contextOptions = { devtools: !headless };
+                // 无头模式下需要指定 viewport
+                if (headless) {
+                    contextOptions.viewport = { width: 1920, height: 1080 };
+                }
+                contextInstance = ctxs[0] || await browserInstance.newContext(contextOptions);
             } else {
                 throw new Error('No browser context available');
             }
@@ -190,8 +213,9 @@ function tryListProfiles(userDataDir) {
 /**
  * 启动带远程调试端口的 Chrome（仅 --remote-debugging-port，使用默认 profile = 你的登录态）
  * 使用前请先完全关闭 Chrome，否则会提示 profile 被占用。
+ * 支持无头模式通过 headless 参数或 HEADLESS 环境变量
  */
-export function launchWithDebugPort({ port = 9222 }) {
+export function launchWithDebugPort({ port = 9222, headless = null } = {}) {
     const exe = getDefaultExecutablePath();
     if (!exe || !existsSync(exe)) {
         throw new Error(`未找到 Chrome 可执行文件: ${exe}，请确认已安装 Google Chrome`);
@@ -201,9 +225,13 @@ export function launchWithDebugPort({ port = 9222 }) {
             ? String(arguments[0].userDataDir).trim()
             : '';
 
+    // 确定是否使用无头模式
+    const useHeadless = headless !== null ? headless : getHeadlessMode();
+    
     const args = [
         '--remote-debugging-address=127.0.0.1',
         `--remote-debugging-port=${port}`,
+        ...(useHeadless ? ['--headless=new'] : []),
         ...(userDataDir ? [`--user-data-dir=${userDataDir}`] : [])
     ];
 
@@ -218,8 +246,9 @@ export function launchWithDebugPort({ port = 9222 }) {
     const child = spawn(exe, args, { stdio: 'ignore', detached: true });
     child.unref();
     const pid = child.pid;
-    logger.info(`已启动 Chrome pid=${pid} port=${port}，使用默认 profile`);
-    return { port, browserName: 'chrome', pid };
+    const modeStr = useHeadless ? '无头' : '有界面';
+    logger.info(`已启动 Chrome pid=${pid} port=${port}，模式: ${modeStr}，使用默认 profile`);
+    return { port, browserName: 'chrome', pid, headless: useHeadless };
 }
 
 /**
@@ -314,10 +343,13 @@ export async function getOrCreateBrowser(options = {}) {
         lastConnectError = null;
 
         connectPromise = (async () => {
+            const headless = options.headless !== undefined ? options.headless : getHeadlessMode();
+            const modeStr = headless ? '无头' : '有界面';
+            
             if (mode === 'cdp') {
                 const endpoint = options.cdpEndpoint || process.env.CDP_ENDPOINT || 'http://127.0.0.1:9222';
                 currentCdpEndpoint = endpoint;
-                logger.info('使用 CDP 模式连接浏览器:', endpoint);
+                logger.info(`使用 CDP 模式连接浏览器 (${modeStr}):`, endpoint);
                 // Chrome 启动后端口可能需几秒才就绪，重试连接
                 const maxRetries = 10;
                 const retryDelayMs = 2000;
@@ -339,8 +371,12 @@ export async function getOrCreateBrowser(options = {}) {
                         }
                     }
                 }
-                contextInstance = browserInstance.contexts()[0] || await browserInstance.newContext({ devtools: true, headless: false });
-                await setBrowserWindowMaximized(contextInstance);
+                const contextOptions = { devtools: !headless };
+                if (headless) {
+                    contextOptions.viewport = { width: 1920, height: 1080 };
+                }
+                contextInstance = browserInstance.contexts()[0] || await browserInstance.newContext(contextOptions);
+                await setBrowserWindowMaximized(contextInstance, headless);
 
                 browserStatus.isInitialized = true;
                 browserStatus.isConnected = true;
@@ -364,7 +400,7 @@ export async function getOrCreateBrowser(options = {}) {
             currentExecutablePath = executablePath;
             currentCdpEndpoint = null;
 
-            logger.info('使用 persistent 模式启动 (复用本机 Chrome profile)');
+            logger.info(`使用 persistent 模式启动 (复用本机 Chrome profile, ${modeStr})`);
             logger.info('user data dir:', chromeUserDataDir);
             logger.info('profile dir:', profileDir);
             logger.info('executable:', executablePath);
@@ -373,7 +409,7 @@ export async function getOrCreateBrowser(options = {}) {
                 contextInstance = await withTimeout(
                     chromium.launchPersistentContext(
                         chromeUserDataDir,
-                        buildPersistentLaunchOptions({ profileDir, executablePath })
+                        buildPersistentLaunchOptions({ profileDir, executablePath, headless })
                     ),
                     60000,
                     'launchPersistentContext'
@@ -386,7 +422,7 @@ export async function getOrCreateBrowser(options = {}) {
                 );
             }
 
-            await setBrowserWindowMaximized(contextInstance);
+            await setBrowserWindowMaximized(contextInstance, headless);
 
             browserStatus.isInitialized = true;
             browserStatus.isConnected = true;
