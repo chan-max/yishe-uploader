@@ -27,3 +27,11 @@ export function checkPort(port) {
 export function openPlatformUrl(platform) {
   return request({ url: '/browser/open-platform', method: 'post', data: { platform } })
 }
+
+/**
+ * 在已连接浏览器中打开指定链接
+ * @param {string} url - http/https 链接
+ */
+export function openLinkUrl(url) {
+  return request({ url: '/browser/open-link', method: 'post', data: { url } })
+}

@@ -159,6 +159,8 @@ class ApiServer {
                     await this.handleBrowserCheckPort(req, res);
                 } else if (reqPath === '/api/browser/open-platform' && method === 'POST') {
                     await this.handleBrowserOpenPlatform(req, res);
+                } else if (reqPath === '/api/browser/open-link' && method === 'POST') {
+                    await this.handleBrowserOpenLink(req, res);
                 } else if ((reqPath === '/api/browser/check-and-reconnect' || reqPath === '/api/browser/check') && (method === 'POST' || method === 'GET')) {
                     await this.handleBrowserCheckAndReconnect(req, res);
                 } else if (reqPath === '/api/upload' && method === 'POST') {
@@ -215,6 +217,7 @@ class ApiServer {
                 { method: 'POST', path: '/api/browser/launch-with-debug', description: '启动带调试端口的 Chrome' },
                 { method: 'POST', path: '/api/browser/check-port', description: '检测 CDP 端口' },
                 { method: 'POST', path: '/api/browser/open-platform', description: '在已连接浏览器中打开指定平台创作页' },
+                { method: 'POST', path: '/api/browser/open-link', description: '在已连接浏览器中打开指定链接' },
                 { method: 'POST', path: '/api/browser/check-and-reconnect', description: '检测浏览器实例并可选重连（body: { reconnect?: boolean }）' },
                 { method: 'GET', path: '/api/browser/check', description: '仅检测浏览器实例（不重连）' },
                 { method: 'GET', path: '/api/browser/export-user-data', description: '导出 User Data 压缩包' },
@@ -484,6 +487,27 @@ class ApiServer {
                                         required: ['platform'],
                                         properties: {
                                             platform: { type: 'string', description: '平台 ID，如 douyin、xiaohongshu、weibo、kuaishou' }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        responses: { 200: { description: '打开结果' } }
+                    }
+                },
+                '/api/browser/open-link': {
+                    post: {
+                        tags: ['Browser'],
+                        summary: '在已连接浏览器打开指定链接',
+                        requestBody: {
+                            required: true,
+                            content: {
+                                'application/json': {
+                                    schema: {
+                                        type: 'object',
+                                        required: ['url'],
+                                        properties: {
+                                            url: { type: 'string', description: 'http/https 链接' }
                                         }
                                     }
                                 }
@@ -913,12 +937,74 @@ class ApiServer {
                 this.sendResponse(res, 400, { success: false, message: `不支持的平台: ${platform}` });
                 return;
             }
+
+            const browserStatus = await getBrowserStatus();
+            if (!browserStatus?.hasInstance || !browserStatus?.isConnected) {
+                this.sendResponse(res, 400, {
+                    success: false,
+                    message: '浏览器实例未启动或未连接，请先连接浏览器'
+                });
+                return;
+            }
+
             const browser = await getOrCreateBrowser();
             const page = await browser.newPage();
             await page.goto(config.uploadUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
             this.sendResponse(res, 200, { success: true, data: { platform, name: config.name, url: config.uploadUrl } });
         } catch (error) {
             this.sendResponse(res, 500, { success: false, message: error.message || '打开平台链接失败' });
+        }
+    }
+
+    /**
+     * 在已连接浏览器中打开指定链接
+     */
+    async handleBrowserOpenLink(req, res) {
+        try {
+            const body = await this.parseBody(req);
+            const { url } = body;
+
+            if (!url || typeof url !== 'string') {
+                this.sendResponse(res, 400, { success: false, message: '请传 url' });
+                return;
+            }
+
+            const targetUrl = String(url).trim();
+            let parsed;
+            try {
+                parsed = new URL(targetUrl);
+            } catch {
+                this.sendResponse(res, 400, { success: false, message: 'url 格式不正确' });
+                return;
+            }
+
+            if (!['http:', 'https:'].includes(parsed.protocol)) {
+                this.sendResponse(res, 400, { success: false, message: '仅支持 http/https 链接' });
+                return;
+            }
+
+            const browserStatus = await getBrowserStatus();
+            if (!browserStatus?.hasInstance || !browserStatus?.isConnected) {
+                this.sendResponse(res, 400, {
+                    success: false,
+                    message: '浏览器实例未启动或未连接，请先连接浏览器'
+                });
+                return;
+            }
+
+            const browser = await getOrCreateBrowser();
+            const page = await browser.newPage();
+            await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+
+            this.sendResponse(res, 200, {
+                success: true,
+                data: {
+                    url: targetUrl,
+                    title: await page.title().catch(() => '')
+                }
+            });
+        } catch (error) {
+            this.sendResponse(res, 500, { success: false, message: error.message || '打开链接失败' });
         }
     }
 
