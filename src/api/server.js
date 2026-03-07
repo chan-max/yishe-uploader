@@ -282,18 +282,21 @@ class ApiServer {
                                 'application/json': {
                                     schema: {
                                         type: 'object',
-                                        required: ['platforms', 'title', 'filePath'],
+                                        required: ['platforms', 'title'],
                                         properties: {
                                             platforms: { type: 'array', items: { type: 'string' }, description: '平台 ID 数组，单平台如 ["douyin"]，多平台如 ["douyin", "xiaohongshu"]' },
                                             title: { type: 'string' },
                                             content: { type: 'string', description: '正文内容（可选）' },
                                             filePath: { type: 'string', description: '本机视频/图片绝对路径（服务端可访问），如 C:\\videos\\demo.mp4，无需上传' },
                                             images: { type: 'array', items: { type: 'string' }, description: '图文发布用图片 URL 列表（可选）' },
+                                            imageUrls: { type: 'array', items: { type: 'string' }, description: '兼容字段：图片 URL 列表（会自动映射到 images）' },
+                                            videoUrl: { type: 'string', description: '兼容字段：视频 URL/路径（会自动映射到 filePath 或 videos）' },
                                             tags: { type: 'array', items: { type: 'string' } },
                                             scheduled: { type: 'boolean' },
                                             scheduleTime: { type: 'string', format: 'date-time' },
                                             concurrent: { type: 'boolean', description: '多平台时是否并发' },
-                                            platformSettings: { type: 'object' }
+                                            platformSettings: { type: 'object' },
+                                            publishOptions: { type: 'object', description: '兼容字段：平台发布参数（会自动合并到平台配置）' }
                                         }
                                     }
                                 }
@@ -776,7 +779,8 @@ class ApiServer {
             return;
         }
 
-        const result = await publishService.batchPublish(platforms, publishInfo, { concurrent });
+        const normalizedPublishInfo = this.normalizePublishInfo(publishInfo, platforms);
+        const result = await publishService.batchPublish(platforms, normalizedPublishInfo, { concurrent });
         this.sendResponse(res, 200, result);
     }
 
@@ -792,8 +796,84 @@ class ApiServer {
             return;
         }
 
-        const result = await publishService.createScheduleTask(platforms, publishInfo, scheduleTime);
+        const normalizedPublishInfo = this.normalizePublishInfo(publishInfo, platforms);
+        const result = await publishService.createScheduleTask(platforms, normalizedPublishInfo, scheduleTime);
         this.sendResponse(res, 200, result);
+    }
+
+    /**
+     * 兼容新旧发布数据结构
+     * - 新结构：imageUrls/videoUrl/publishOptions
+     * - 旧结构：images/filePath/platformSettings
+     */
+    normalizePublishInfo(publishInfo, platforms = []) {
+        const normalized = { ...(publishInfo || {}) };
+
+        // 文本字段兼容
+        if (!normalized.content && normalized.description) {
+            normalized.content = normalized.description;
+        }
+        if (!normalized.description && normalized.content) {
+            normalized.description = normalized.content;
+        }
+
+        // 标签兼容
+        if (!Array.isArray(normalized.tags)) {
+            normalized.tags = String(normalized.tags || '')
+                .split(/[,，\s]+/)
+                .map(s => s.trim())
+                .filter(Boolean);
+        }
+
+        // 图片字段兼容：imageUrls -> images
+        if (!Array.isArray(normalized.images) || normalized.images.length === 0) {
+            if (Array.isArray(normalized.imageUrls) && normalized.imageUrls.length > 0) {
+                normalized.images = [...normalized.imageUrls];
+            }
+        }
+
+        // 视频字段兼容：videoUrl -> videos/filePath
+        if (!Array.isArray(normalized.videos)) {
+            normalized.videos = [];
+        }
+        if (normalized.videoUrl && normalized.videos.length === 0) {
+            normalized.videos = [normalized.videoUrl];
+        }
+
+        // filePath 兜底（兼容旧平台逻辑）
+        if (!normalized.filePath) {
+            normalized.filePath = normalized.videoUrl || normalized.filePathSource || normalized.videos[0] || '';
+        }
+
+        // 平台参数兼容：publishOptions -> 顶层字段 + platformSettings[platform]
+        const options = normalized.publishOptions && typeof normalized.publishOptions === 'object'
+            ? normalized.publishOptions
+            : {};
+
+        if (!normalized.platformSettings || typeof normalized.platformSettings !== 'object') {
+            normalized.platformSettings = {};
+        }
+
+        // 把 publishOptions 透传到每个平台配置中，兼容旧平台脚本读取 platformSettings[platform]
+        for (const platform of platforms) {
+            if (!platform) continue;
+            const current = normalized.platformSettings[platform] && typeof normalized.platformSettings[platform] === 'object'
+                ? normalized.platformSettings[platform]
+                : {};
+            normalized.platformSettings[platform] = {
+                ...options,
+                ...current,
+            };
+        }
+
+        // 同时把 options 提升到顶层，兼容读取 publishInfo.price / publishInfo.condition 等旧脚本
+        Object.keys(options).forEach((key) => {
+            if (normalized[key] === undefined) {
+                normalized[key] = options[key];
+            }
+        });
+
+        return normalized;
     }
 
     /**

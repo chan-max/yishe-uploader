@@ -84,6 +84,27 @@ function getDefaultUserDataDir() {
     return pathJoin(os.homedir(), '.config', 'google-chrome');
 }
 
+/**
+ * 获取默认的 CDP User Data 目录（独立目录，避免与系统 Chrome 冲突）
+ */
+function getCdpDefaultUserDataDir() {
+    const envDir = process.env.YISHE_AUTO_BROWSER_CDP_USER_DATA_DIR || process.env.UPLOADER_CDP_USER_DATA_DIR;
+    if (envDir) {
+        return envDir;
+    }
+
+    if (process.platform === 'win32') {
+        return 'C:\\temp\\yishe-auto-browser-cdp-1s';
+    }
+
+    const homeDir = os.homedir();
+    const safeBase = homeDir && typeof homeDir === 'string'
+        ? homeDir
+        : process.cwd();
+
+    return path.resolve(safeBase, '.yishe-auto-browser', 'cdp-1s');
+}
+
 function getBrowserMode() {
     return (process.env.BROWSER_MODE || 'persistent').toLowerCase();
 }
@@ -274,45 +295,50 @@ function tryListProfiles(userDataDir) {
 }
 
 /**
- * 启动带远程调试端口的 Chrome（仅 --remote-debugging-port，使用默认 profile = 你的登录态）
+ * 启动带远程调试端口的 Chrome（仅 --remote-debugging-port，使用指定 user-data-dir 保持登录态）
  * 支持无头模式通过 headless 参数或 HEADLESS 环境变量
  */
-export function launchWithDebugPort({ port = 9222, headless = null } = {}) {
+export function launchWithDebugPort({ port = 9222, headless = null, userDataDir = null } = {}) {
     const exe = getDefaultExecutablePath();
     if (!exe || !existsSync(exe)) {
         throw new Error(`未找到 Chrome 可执行文件: ${exe}，请确认已安装 Google Chrome`);
     }
-    const userDataDir =
-        (typeof arguments[0] === 'object' && arguments[0] && arguments[0].userDataDir)
-            ? String(arguments[0].userDataDir).trim()
-            : '';
+
+    // 使用独立的 user-data-dir 避免与系统 Chrome 冲突，确保登录信息持久化
+    const finalUserDataDir = userDataDir || getCdpDefaultUserDataDir();
 
     // 确定是否使用无头模式
     const useHeadless = headless !== undefined ? headless : getHeadlessMode();
     logger.info(`launchWithDebugPort - 输入 headless: ${headless}, 最终使用 useHeadless: ${useHeadless}`);
+    logger.info(`launchWithDebugPort - userDataDir: ${finalUserDataDir}`);
     
+    // 确保目录存在
+    try {
+        mkdirSync(finalUserDataDir, { recursive: true });
+    } catch (e) {
+        throw new Error(`无法创建/访问 user-data-dir: ${finalUserDataDir}，请确认路径可写。原错误: ${e.message}`);
+    }
+
     const args = [
         '--remote-debugging-address=127.0.0.1',
         `--remote-debugging-port=${port}`,
-        ...(useHeadless ? ['--headless=new'] : []),
-        ...(userDataDir ? [`--user-data-dir=${userDataDir}`] : [])
+        `--user-data-dir=${finalUserDataDir}`,
+        '--no-first-run',
+        '--no-default-browser-check',
+        '--disable-background-timer-throttling',
+        '--disable-backgrounding-occluded-windows',
+        '--disable-renderer-backgrounding',
+        ...(useHeadless ? ['--headless=new'] : [])
     ];
-
-    if (userDataDir) {
-        try {
-            mkdirSync(userDataDir, { recursive: true });
-        } catch (e) {
-            throw new Error(`无法创建/访问 user-data-dir: ${userDataDir}，请确认路径可写。原错误: ${e.message}`);
-        }
-    }
 
     const child = spawn(exe, args, { stdio: 'ignore', detached: true });
     child.unref();
     const pid = child.pid;
     const modeStr = useHeadless ? '无头' : '有界面';
-    logger.info(`已启动 Chrome pid=${pid} port=${port}，模式: ${modeStr}，使用默认 profile`);
-    return { port, browserName: 'chrome', pid, headless: useHeadless };
+    logger.info(`已启动 Chrome pid=${pid} port=${port}，模式: ${modeStr}，user-data-dir: ${finalUserDataDir}`);
+    return { port, browserName: 'chrome', pid, headless: useHeadless, userDataDir: finalUserDataDir };
 }
+
 /**
  * 检查浏览器是否可用
  */

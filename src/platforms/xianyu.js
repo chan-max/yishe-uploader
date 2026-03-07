@@ -5,11 +5,7 @@
  * 支持：
  * - 商品信息（标题、描述）
  * - 多张图片上传（最多9张）
- * - 分类设置
  * - 价格设置
- * - 物品状态（全新/99新/二手等）
- * - 交易方式（线上/线下）
- * - 地理位置设置
  */
 
 import { getOrCreateBrowser } from '../services/BrowserService.js'
@@ -27,18 +23,7 @@ class XianyuPublisher {
     // 咸鱼特定的配置
     this.config = {
       maxImages: 9,
-      supportedImageFormats: ['jpg', 'jpeg', 'png', 'webp'],
-      conditionOptions: {
-        new: '全新',
-        'like-new': '99新',
-        used: '二手',
-        damaged: '有瑕疵'
-      },
-      tradeMethodOptions: {
-        online: '线上交易',
-        offline: '线下交易',
-        both: '线上线下都可'
-      }
+      supportedImageFormats: ['jpg', 'jpeg', 'png', 'webp']
     }
   }
 
@@ -53,10 +38,6 @@ class XianyuPublisher {
       // 合并平台特定配置 (个性配置)
       const settings = publishInfo.platformSettings?.xianyu || {}
       const price = settings.price || publishInfo.price
-      const category = settings.category || publishInfo.category
-      const condition = settings.condition || publishInfo.condition
-      const tradeMethod = settings.tradeMethod || publishInfo.tradeMethod
-      const location = settings.location || publishInfo.location
 
       // 1. 获取浏览器和页面
       const browser = await getOrCreateBrowser()
@@ -122,13 +103,7 @@ class XianyuPublisher {
         logger.warn('未提供图片或文件路径，跳过上传')
       }
 
-      // 7. 设置商品分类
-      if (category) {
-        await this._setCategory(page, category)
-        logger.info('分类设置完成')
-      }
-
-      // 8. 设置价格
+      // 7. 设置价格
       if (!price) {
         logger.error('未找到价格信息，publishInfo:', JSON.stringify(publishInfo))
         throw new Error('咸鱼发布必须提供价格信息(price)，请在个性配置中设置')
@@ -136,25 +111,7 @@ class XianyuPublisher {
       await this._setPrice(page, price)
       logger.info('价格设置完成')
 
-      // 9. 设置物品状态
-      if (condition) {
-        await this._setCondition(page, condition)
-        logger.info('物品状态设置完成')
-      }
-
-      // 10. 设置交易方式
-      if (tradeMethod) {
-        await this._setTradeMethod(page, tradeMethod)
-        logger.info('交易方式设置完成')
-      }
-
-      // 11. 设置地理位置
-      if (location) {
-        await this._setLocation(page, location)
-        logger.info('地理位置设置完成')
-      }
-
-      // 12. 最终检查并发布
+      // 8. 最终检查并发布
       await this._submitPublish(page)
       logger.info(`${this.platformName}发布成功`)
 
@@ -361,36 +318,6 @@ class XianyuPublisher {
   }
 
   /**
-   * 设置商品分类
-   */
-  async _setCategory(page, category) {
-    try {
-      const categorySelectors = [
-        'select[name*="category"]',
-        'select.category-select',
-        '[role="combobox"]'
-      ]
-
-      for (const selector of categorySelectors) {
-        try {
-          const count = await page.locator(selector).count()
-          if (count > 0) {
-            await page.selectOption(selector, { label: category })
-            logger.info(`分类设置为: ${category}`)
-            return
-          }
-        } catch (e) {
-          // 继续尝试
-        }
-      }
-
-      logger.warn('未找到分类选择框')
-    } catch (error) {
-      logger.warn('设置分类失败:', error.message)
-    }
-  }
-
-  /**
    * 设置价格
    */
   async _setPrice(page, price) {
@@ -416,113 +343,6 @@ class XianyuPublisher {
       logger.warn('未找到价格输入框')
     } catch (error) {
       logger.warn('设置价格失败:', error.message)
-    }
-  }
-
-  /**
-   * 设置物品状态（全新/99新/二手等）
-   */
-  async _setCondition(page, condition) {
-    try {
-      const conditionLabel = this.config.conditionOptions[condition] || condition
-
-      const conditionSelectors = [
-        'select[name*="condition"]',
-        'select.condition-select',
-        '[data-testid*="condition"]'
-      ]
-
-      for (const selector of conditionSelectors) {
-        try {
-          const count = await page.locator(selector).count()
-          if (count > 0) {
-            await page.selectOption(selector, { label: conditionLabel })
-            logger.info(`物品状态设置为: ${conditionLabel}`)
-            return
-          }
-        } catch (e) {
-          // 继续尝试
-        }
-      }
-
-      logger.warn('未找到物品状态选择框')
-    } catch (error) {
-      logger.warn('设置物品状态失败:', error.message)
-    }
-  }
-
-  /**
-   * 设置交易方式
-   */
-  async _setTradeMethod(page, tradeMethod) {
-    try {
-      const methodLabel = this.config.tradeMethodOptions[tradeMethod] || tradeMethod
-
-      // 尝试点击对应的单选框
-      const radioButtons = await page.$$('input[type="radio"], .radio-button, [role="radio"]')
-
-      for (const button of radioButtons) {
-        try {
-          const label = await page.evaluate(
-            el => el.textContent || el.getAttribute('aria-label') || el.title,
-            button
-          )
-
-          if (label && label.includes(methodLabel)) {
-            await button.click()
-            logger.info(`交易方式设置为: ${methodLabel}`)
-            return
-          }
-        } catch (e) {
-          // 继续尝试
-        }
-      }
-
-      logger.warn('未找到交易方式选择框')
-    } catch (error) {
-      logger.warn('设置交易方式失败:', error.message)
-    }
-  }
-
-  /**
-   * 设置地理位置
-   */
-  async _setLocation(page, location) {
-    try {
-      const locationSelectors = [
-        'input[placeholder*="位置"]',
-        'input[placeholder*="地区"]',
-        'input[name*="location"]',
-        'input.location-input'
-      ]
-
-      for (const selector of locationSelectors) {
-        try {
-          const count = await page.locator(selector).count()
-          if (count > 0) {
-            await page.fill(selector, location)
-            logger.info(`位置设置为: ${location}`)
-
-            // 等待位置建议加载
-            await page.waitForTimeout(1000)
-
-            // 尝试选择第一个建议
-            const suggestions = await page.$$('.location-suggestion, .suggestion-item, .suggestion')
-            if (suggestions.length > 0) {
-              await suggestions[0].click()
-              logger.info('已选择位置建议')
-            }
-
-            return
-          }
-        } catch (e) {
-          // 继续尝试
-        }
-      }
-
-      logger.warn('未找到位置输入框')
-    } catch (error) {
-      logger.warn('设置位置失败:', error.message)
     }
   }
 
