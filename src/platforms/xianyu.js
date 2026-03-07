@@ -12,6 +12,7 @@ import { getOrCreateBrowser } from '../services/BrowserService.js'
 import { PageOperator } from '../services/PageOperator.js'
 import { ImageManager } from '../services/ImageManager.js'
 import { logger } from '../utils/logger.js'
+import fs from 'fs'
 
 class XianyuPublisher {
   constructor() {
@@ -263,8 +264,15 @@ class XianyuPublisher {
       let tempPath = null
       try {
         logger.info(`正在处理第 ${i + 1} 张图片: ${url}`)
-        tempPath = await this.imageManager.downloadImage(url, `xianyu_${Date.now()}_${i}`)
-        await this._uploadSingleFilePath(page, tempPath)
+        const isRemote = typeof url === 'string' && /^https?:\/\//i.test(url)
+        const isLocalFile = typeof url === 'string' && !isRemote && fs.existsSync(url)
+
+        if (isLocalFile) {
+          await this._uploadSingleFilePath(page, url)
+        } else {
+          tempPath = await this.imageManager.downloadImage(url, `xianyu_${Date.now()}_${i}`)
+          await this._uploadSingleFilePath(page, tempPath)
+        }
 
         // 咸鱼上传完一张后通常需要一点缓冲
         await page.waitForTimeout(2000)
@@ -292,6 +300,43 @@ class XianyuPublisher {
 
       // 获取当前已上传图片数量，以便后续比对
       const initialImageCount = await page.locator('[class^="image-item"]').count()
+
+      // 优先尝试直接设置 input[type=file]，避免 filechooser 不触发
+      const fileInputs = await page.$$('input[type="file"]')
+      if (fileInputs.length > 0) {
+        let setOk = false
+        for (const input of fileInputs) {
+          try {
+            await input.setInputFiles(filePath)
+            setOk = true
+            break
+          } catch (e) {
+            // 继续尝试下一个 input
+          }
+        }
+
+        if (setOk) {
+          logger.info('已通过 input[type=file] 设置文件')
+        } else {
+          logger.warn('input[type=file] 设置文件失败，回退到 filechooser 方式')
+        }
+
+        if (setOk) {
+          logger.info('等待图片上传处理完成...')
+          try {
+            await page.waitForFunction(
+              (oldCount) => document.querySelectorAll('[class^="image-item"]').length > oldCount,
+              initialImageCount,
+              { timeout: 20000 }
+            )
+            logger.info('图片上传处理成功')
+          } catch (error) {
+            logger.warn('等待图片预览超时，可能上传较慢或选择器变化，继续流程')
+            await page.waitForTimeout(5000)
+          }
+          return
+        }
+      }
 
       const fileChooserPromise = page.waitForEvent('filechooser', { timeout: 10000 })
       await page.click(uploadTrigger)
