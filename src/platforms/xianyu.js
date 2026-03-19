@@ -37,7 +37,7 @@ class XianyuPublisher {
       logger.info(`开始执行${this.platformName}发布操作`)
 
       // 合并平台特定配置 (个性配置)
-      const settings = publishInfo.platformSettings?.xianyu || {}
+      const settings = publishInfo.platformOptions || publishInfo.publishOptions || publishInfo.platformSettings?.xianyu || {}
       const price = settings.price || publishInfo.price
 
       // 1. 获取浏览器和页面

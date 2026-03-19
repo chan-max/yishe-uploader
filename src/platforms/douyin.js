@@ -25,6 +25,9 @@ class DouyinPublisher {
         try {
             logger.info(`开始执行${this.platformName}发布操作`);
 
+            // 统一提取平台配置
+            const settings = publishInfo.platformOptions || publishInfo.publishOptions || publishInfo.platformSettings?.douyin || {};
+
             // 1. 获取浏览器和页面
             const browser = await getOrCreateBrowser();
             page = await browser.newPage();
@@ -98,22 +101,24 @@ class DouyinPublisher {
             await this.waitForVideoUploadComplete(page);
 
             // 10. 设置商品链接（如果有）
-            if (publishInfo.platformSettings?.douyin?.productLink) {
-                await this.setProductLink(page, publishInfo.platformSettings.douyin);
+            if (settings.productLink) {
+                await this.setProductLink(page, settings);
             }
 
             // 11. 设置封面（如果有）
-            if (publishInfo.platformSettings?.douyin?.thumbnail) {
-                await this.setThumbnail(page, publishInfo.platformSettings.douyin.thumbnail);
+            if (settings.thumbnail) {
+                await this.setThumbnail(page, settings.thumbnail);
             }
 
             // 12. 设置地理位置（如果有）
-            if (publishInfo.platformSettings?.douyin?.location) {
-                await this.setLocation(page, publishInfo.platformSettings.douyin.location);
+            if (settings.location) {
+                await this.setLocation(page, settings.location);
             }
 
             // 13. 设置第三方平台同步
-            await this.setThirdPartySync(page);
+            if (settings.syncToutiao) {
+                await this.setThirdPartySync(page, settings);
+            }
 
             // 14. 设置定时发布（如果有）
             if (publishInfo.scheduled && publishInfo.scheduleTime) {
@@ -613,7 +618,8 @@ class DouyinPublisher {
     /**
      * 设置第三方平台同步（头条/西瓜）
      */
-    async setThirdPartySync(page) {
+    async setThirdPartySync(page, settings) {
+        if (!settings?.syncToutiao) return;
         try {
             const thirdPartElement = '[class^="info"] > [class^="first-part"] div div.semi-switch';
             const count = await page.locator(thirdPartElement).count();

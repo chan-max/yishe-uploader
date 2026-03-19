@@ -802,14 +802,177 @@ class ApiServer {
     }
 
     /**
-     * 兼容新旧发布数据结构
-     * - 新结构：imageUrls/videoUrl/publishOptions
-     * - 旧结构：images/filePath/platformSettings
+     * 兼容新旧发布数据结构，并把服务端 canonical payload 归一化为发布端统一消费格式
+     * - canonical: contractType/text/media/platformOptions
+     * - transitional: imageUrls/videoUrl/publishOptions
+     * - legacy: images/filePath/platformSettings
      */
     normalizePublishInfo(publishInfo, platforms = []) {
         const normalized = { ...(publishInfo || {}) };
+        const primaryPlatform = platforms.find(Boolean) || normalized.platform || '';
 
-        // 文本字段兼容
+        const normalizeTags = (input) => {
+            if (Array.isArray(input)) {
+                return input.map((item) => String(item).trim()).filter(Boolean);
+            }
+            return String(input || '')
+                .split(/[,，\s]+/)
+                .map((item) => item.trim())
+                .filter(Boolean);
+        };
+
+        const normalizeMediaList = (list, fallbackKind) => {
+            if (!Array.isArray(list)) return [];
+            return list
+                .map((item) => {
+                    if (typeof item === 'string' && item.trim()) {
+                        return { source: item.trim(), kind: fallbackKind };
+                    }
+                    if (item && typeof item.source === 'string' && item.source.trim()) {
+                        return {
+                            source: item.source.trim(),
+                            kind: item.kind || fallbackKind,
+                        };
+                    }
+                    return null;
+                })
+                .filter(Boolean);
+        };
+
+        if (!normalized.post && !normalized.assets && !normalized.options) {
+            const flatImageSources = Array.isArray(normalized.imageSources)
+                ? normalized.imageSources.map((item) => String(item).trim()).filter(Boolean)
+                : [];
+            const flatVideoSource = typeof normalized.videoSource === 'string' && normalized.videoSource.trim()
+                ? normalized.videoSource.trim()
+                : '';
+
+            if ((!normalized.images || normalized.images.length === 0) && flatImageSources.length > 0) {
+                normalized.images = [...flatImageSources];
+            }
+            if ((!normalized.imageUrls || normalized.imageUrls.length === 0) && flatImageSources.length > 0) {
+                normalized.imageUrls = [...flatImageSources];
+            }
+            if (!normalized.videoUrl && flatVideoSource) {
+                normalized.videoUrl = flatVideoSource;
+            }
+            if ((!normalized.videos || normalized.videos.length === 0) && flatVideoSource) {
+                normalized.videos = [flatVideoSource];
+            }
+            if (!normalized.filePathSource) {
+                normalized.filePathSource = flatVideoSource || flatImageSources[0] || '';
+            }
+            if (!normalized.filePath) {
+                normalized.filePath = normalized.filePathSource || flatVideoSource || flatImageSources[0] || '';
+            }
+            if (!normalized.mediaType) {
+                normalized.mediaType = flatVideoSource ? 'video' : (flatImageSources.length > 0 ? 'image' : undefined);
+            }
+            if (normalized.isVideo === undefined && normalized.mediaType) {
+                normalized.isVideo = normalized.mediaType === 'video';
+            }
+        }
+
+        if (normalized.contractType === 'yishe.publish.payload' || normalized.text || normalized.media) {
+            const text = normalized.text && typeof normalized.text === 'object' ? normalized.text : {};
+            const media = normalized.media && typeof normalized.media === 'object' ? normalized.media : {};
+            const primary = media.primary && typeof media.primary === 'object' ? media.primary : null;
+            const images = normalizeMediaList(media.images, 'image');
+            const videos = normalizeMediaList(media.videos, 'video');
+
+            if (!normalized.title && text.title) {
+                normalized.title = String(text.title).trim();
+            }
+            if (!normalized.description && text.description) {
+                normalized.description = String(text.description).trim();
+            }
+            if (!normalized.content && text.content) {
+                normalized.content = String(text.content).trim();
+            }
+            normalized.tags = normalizeTags(normalized.tags || text.tags);
+
+            if (!normalized.imageUrls || normalized.imageUrls.length === 0) {
+                normalized.imageUrls = images.map((item) => item.source);
+            }
+            if (!normalized.images || normalized.images.length === 0) {
+                normalized.images = [...normalized.imageUrls];
+            }
+
+            if (!normalized.videoUrl && videos.length > 0) {
+                normalized.videoUrl = videos[0].source;
+            }
+            if (!Array.isArray(normalized.videos) || normalized.videos.length === 0) {
+                normalized.videos = videos.map((item) => item.source);
+            }
+
+            if (!normalized.filePathSource && primary?.source) {
+                normalized.filePathSource = primary.source;
+            }
+            if (!normalized.mediaType && primary?.kind) {
+                normalized.mediaType = primary.kind;
+            }
+            if (normalized.isVideo === undefined && normalized.mediaType) {
+                normalized.isVideo = normalized.mediaType === 'video';
+            }
+
+            if (!normalized.platformOptions || typeof normalized.platformOptions !== 'object') {
+                normalized.platformOptions = {};
+            }
+            if ((!normalized.platformOptions || Object.keys(normalized.platformOptions).length === 0) && normalized.publishOptions && typeof normalized.publishOptions === 'object') {
+                normalized.platformOptions = { ...normalized.publishOptions };
+            }
+        }
+
+        if (normalized.post || normalized.assets || normalized.options) {
+            const post = normalized.post && typeof normalized.post === 'object' ? normalized.post : {};
+            const assets = normalized.assets && typeof normalized.assets === 'object' ? normalized.assets : {};
+            const primary = assets.primary && typeof assets.primary === 'object' ? assets.primary : null;
+            const assetImages = Array.isArray(assets.images) ? assets.images.map((item) => String(item).trim()).filter(Boolean) : [];
+            const assetVideos = Array.isArray(assets.videos) ? assets.videos.map((item) => String(item).trim()).filter(Boolean) : [];
+            const optionBag = normalized.options && typeof normalized.options === 'object' ? normalized.options : {};
+
+            if (!normalized.title && post.title) {
+                normalized.title = String(post.title).trim();
+            }
+            if (!normalized.description && post.description) {
+                normalized.description = String(post.description).trim();
+            }
+            if (!normalized.content && post.content) {
+                normalized.content = String(post.content).trim();
+            }
+            if ((!normalized.tags || normalized.tags.length === 0) && post.tags) {
+                normalized.tags = normalizeTags(post.tags);
+            }
+
+            if ((!normalized.imageUrls || normalized.imageUrls.length === 0) && assetImages.length > 0) {
+                normalized.imageUrls = assetImages;
+            }
+            if ((!normalized.images || normalized.images.length === 0) && assetImages.length > 0) {
+                normalized.images = [...assetImages];
+            }
+            if (!normalized.videoUrl && assetVideos.length > 0) {
+                normalized.videoUrl = assetVideos[0];
+            }
+            if ((!normalized.videos || normalized.videos.length === 0) && assetVideos.length > 0) {
+                normalized.videos = [...assetVideos];
+            }
+            if (!normalized.filePathSource && primary?.source) {
+                normalized.filePathSource = String(primary.source).trim();
+            }
+            if (!normalized.mediaType && primary?.kind) {
+                normalized.mediaType = primary.kind;
+            }
+            if (normalized.isVideo === undefined && normalized.mediaType) {
+                normalized.isVideo = normalized.mediaType === 'video';
+            }
+            if (!normalized.platformOptions || typeof normalized.platformOptions !== 'object' || Object.keys(normalized.platformOptions).length === 0) {
+                normalized.platformOptions = { ...optionBag };
+            }
+            if (!normalized.publishOptions || typeof normalized.publishOptions !== 'object' || Object.keys(normalized.publishOptions).length === 0) {
+                normalized.publishOptions = { ...optionBag };
+            }
+        }
+
         if (!normalized.content && normalized.description) {
             normalized.content = normalized.description;
         }
@@ -817,22 +980,18 @@ class ApiServer {
             normalized.description = normalized.content;
         }
 
-        // 标签兼容
-        if (!Array.isArray(normalized.tags)) {
-            normalized.tags = String(normalized.tags || '')
-                .split(/[,，\s]+/)
-                .map(s => s.trim())
-                .filter(Boolean);
+        if ((!normalized.description || !String(normalized.description).trim()) && typeof normalized.title === 'string') {
+            normalized.description = normalized.description || normalized.title;
         }
 
-        // 图片字段兼容：imageUrls -> images
+        normalized.tags = normalizeTags(normalized.tags);
+
         if (!Array.isArray(normalized.images) || normalized.images.length === 0) {
             if (Array.isArray(normalized.imageUrls) && normalized.imageUrls.length > 0) {
                 normalized.images = [...normalized.imageUrls];
             }
         }
 
-        // 视频字段兼容：videoUrl -> videos/filePath
         if (!Array.isArray(normalized.videos)) {
             normalized.videos = [];
         }
@@ -840,42 +999,71 @@ class ApiServer {
             normalized.videos = [normalized.videoUrl];
         }
 
-        // filePath 兜底（兼容旧平台逻辑）
         if (!normalized.filePath) {
-            normalized.filePath = normalized.videoUrl || normalized.filePathSource || normalized.videos[0] || '';
+            normalized.filePath = normalized.filePathSource || normalized.videoUrl || normalized.videos[0] || normalized.images?.[0] || '';
         }
 
-        // 平台参数兼容：publishOptions -> 顶层字段 + platformSettings[platform]
-        const options = normalized.publishOptions && typeof normalized.publishOptions === 'object'
+        const optionsFromPlatformSettings = primaryPlatform && normalized.platformSettings?.[primaryPlatform] && typeof normalized.platformSettings[primaryPlatform] === 'object'
+            ? normalized.platformSettings[primaryPlatform]
+            : {};
+        const platformOptions = normalized.platformOptions && typeof normalized.platformOptions === 'object'
+            ? normalized.platformOptions
+            : {};
+        const publishOptions = normalized.publishOptions && typeof normalized.publishOptions === 'object'
             ? normalized.publishOptions
             : {};
+        const reservedKeys = new Set([
+            'platforms', 'platform',
+            'title', 'description', 'content', 'tags', 'keywords',
+            'images', 'imageUrls', 'imageSources',
+            'videos', 'videoUrl', 'videoSource',
+            'filePath', 'filePathSource',
+            'mediaType', 'isVideo',
+            'publishOptions', 'platformOptions', 'platformSettings',
+            'post', 'assets', 'options', 'processing',
+            'contractType', 'contractVersion', 'taskKind',
+            'text', 'media', 'executionHints',
+        ]);
+        const flatOptions = Object.keys(normalized).reduce((acc, key) => {
+            if (reservedKeys.has(key)) {
+                return acc;
+            }
+            acc[key] = normalized[key];
+            return acc;
+        }, {});
+        const mergedOptions = {
+            ...optionsFromPlatformSettings,
+            ...publishOptions,
+            ...platformOptions,
+            ...flatOptions,
+        };
+
+        normalized.platformOptions = mergedOptions;
+        normalized.publishOptions = mergedOptions;
 
         if (!normalized.platformSettings || typeof normalized.platformSettings !== 'object') {
             normalized.platformSettings = {};
         }
 
-        // 把 publishOptions 透传到每个平台配置中，兼容旧平台脚本读取 platformSettings[platform]
         for (const platform of platforms) {
             if (!platform) continue;
             const current = normalized.platformSettings[platform] && typeof normalized.platformSettings[platform] === 'object'
                 ? normalized.platformSettings[platform]
                 : {};
             normalized.platformSettings[platform] = {
-                ...options,
                 ...current,
+                ...mergedOptions,
             };
         }
 
-        // 同时把 options 提升到顶层，兼容读取 publishInfo.price / publishInfo.condition 等旧脚本
-        Object.keys(options).forEach((key) => {
+        Object.keys(mergedOptions).forEach((key) => {
             if (normalized[key] === undefined) {
-                normalized[key] = options[key];
+                normalized[key] = mergedOptions[key];
             }
         });
 
         return normalized;
     }
-
     /**
      * 获取支持的平台列表
      */
@@ -1612,3 +1800,4 @@ export default apiServer;
 
 // 作为入口运行时启动服务器（npm start 即 node src/api/server.js）
 apiServer.start();
+
