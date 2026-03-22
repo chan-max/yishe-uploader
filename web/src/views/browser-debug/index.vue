@@ -5,53 +5,54 @@
     </div>
 
     <div class="debug-layout">
-      <aside class="tab-panel ui segment">
-        <div class="panel-header">
-          <div>
-            <h3 class="ui header">标签页</h3>
-            <div class="panel-meta">实时显示当前浏览器中的 tab 数量和页面信息</div>
-          </div>
-          <div class="ui tiny label">{{ browserPages.length }} Tabs</div>
-        </div>
-
-        <div class="ui small buttons" style="margin-bottom: 0.75rem;">
-          <button type="button" class="ui primary button" :class="{ loading: actionLoading }" :disabled="actionLoading" @click="createPage">
-            新建页
-          </button>
-          <button type="button" class="ui button" :class="{ loading: tabsLoading }" :disabled="tabsLoading" @click="refreshTabs">
-            刷新
-          </button>
-        </div>
-
-        <div class="tab-list">
-          <button
-            v-for="page in browserPages"
-            :key="page.index"
-            type="button"
-            class="tab-item"
-            :class="{ active: selectedPageIndex === page.index }"
-            @click="selectPage(page.index)"
-          >
-            <div class="tab-item-top">
-              <span class="tab-index">#{{ page.index }}</span>
-              <span class="tab-title">{{ page.title || 'Untitled' }}</span>
-            </div>
-            <div class="tab-url">{{ page.url || 'about:blank' }}</div>
-          </button>
-          <div v-if="!browserPages.length" class="ui basic segment empty-state">
-            当前没有 tab。请先去“浏览器连接”模块连接浏览器，然后回到这里调试。
-          </div>
-        </div>
-      </aside>
-
       <section class="workspace">
         <div class="ui segment current-page-card">
           <div class="panel-header">
             <div>
               <h3 class="ui header">当前页面</h3>
-              <div class="panel-meta">可切换标签页、聚焦到浏览器窗口、关闭当前页</div>
+              <div class="panel-meta">在这里查看并切换标签页、聚焦到浏览器窗口、关闭当前页</div>
             </div>
-            <div class="ui tiny teal label" v-if="selectedPage">#{{ selectedPage.index }}</div>
+            <div class="ui tiny labels">
+              <span class="ui tiny label">{{ browserPages.length }} Tabs</span>
+              <span class="ui tiny teal label" v-if="selectedPage">#{{ selectedPage.index }}</span>
+            </div>
+          </div>
+
+          <div class="ui small buttons compact-toolbar">
+            <button type="button" class="ui primary button" :class="{ loading: actionLoading }" :disabled="actionLoading" @click="createPage">
+              新建页
+            </button>
+            <button type="button" class="ui button" :class="{ loading: tabsLoading }" :disabled="tabsLoading" @click="refreshTabs">
+              刷新标签页
+            </button>
+            <button type="button" class="ui button" :class="{ loading: actionLoading }" :disabled="!hasSelectedPage || actionLoading" @click="focusSelectedPage">
+              进入页面
+            </button>
+            <button type="button" class="ui button" :class="{ loading: actionLoading }" :disabled="!hasSelectedPage || actionLoading" @click="reloadSelectedPage">
+              刷新当前页
+            </button>
+            <button type="button" class="ui red button" :class="{ loading: actionLoading }" :disabled="!hasSelectedPage || actionLoading" @click="closeSelectedPage">
+              关闭当前页
+            </button>
+          </div>
+
+          <div class="tab-strip-wrap">
+            <div v-if="browserPages.length" class="tab-strip">
+              <button
+                v-for="page in browserPages"
+                :key="page.index"
+                type="button"
+                class="tab-chip"
+                :class="{ active: selectedPageIndex === page.index }"
+                @click="selectPage(page.index)"
+              >
+                <span class="tab-chip-index">#{{ page.index }}</span>
+                <span class="tab-chip-title">{{ page.title || 'Untitled' }}</span>
+              </button>
+            </div>
+            <div v-else class="ui tiny message empty-inline-state">
+              当前没有 tab。请先去“浏览器连接”模块连接浏览器，然后回到这里调试。
+            </div>
           </div>
 
           <div class="current-page-grid">
@@ -63,18 +64,6 @@
               <div class="meta-label">URL</div>
               <div class="meta-value url">{{ selectedPage?.url || '-' }}</div>
             </div>
-          </div>
-
-          <div class="ui small buttons" style="margin-top: 0.9rem;">
-            <button type="button" class="ui button" :class="{ loading: actionLoading }" :disabled="!hasSelectedPage || actionLoading" @click="focusSelectedPage">
-              进入页面
-            </button>
-            <button type="button" class="ui button" :class="{ loading: actionLoading }" :disabled="!hasSelectedPage || actionLoading" @click="reloadSelectedPage">
-              刷新当前页
-            </button>
-            <button type="button" class="ui red button" :class="{ loading: actionLoading }" :disabled="!hasSelectedPage || actionLoading" @click="closeSelectedPage">
-              关闭当前页
-            </button>
           </div>
         </div>
 
@@ -132,32 +121,73 @@
             <div class="ui segment console-card">
               <div class="panel-header">
                 <div>
-                  <h3 class="ui header">JavaScript 控制台</h3>
-                  <div class="panel-meta">在当前页面上下文里直接执行 JS，适合临时探查 DOM、变量和状态</div>
+                  <h3 class="ui header">页面内 JS</h3>
+                  <div class="panel-meta">运行在浏览器页面上下文里，适合读取 DOM、文本、变量和页面状态。</div>
                 </div>
               </div>
 
               <div class="ui small form">
                 <div class="field">
                   <label>JavaScript</label>
-                  <textarea v-model="consoleForm.expression" rows="10" placeholder="document.title&#10;document.querySelector('button')?.innerText"></textarea>
+                  <textarea
+                    v-model="browserJsForm.expression"
+                    rows="8"
+                    placeholder="document.title&#10;document.querySelector('button')?.innerText"
+                  ></textarea>
                 </div>
                 <div class="two fields">
                   <div class="field">
                     <label>等待毫秒</label>
                     <div class="ui action input">
-                      <input v-model.number="consoleForm.waitMs" type="number" min="1" placeholder="1000" />
-                      <button type="button" class="ui button" :class="{ loading: actionLoading }" :disabled="!hasSelectedPage || actionLoading" @click="runAction('wait', { ms: consoleForm.waitMs })">
+                      <input v-model.number="browserJsForm.waitMs" type="number" min="1" placeholder="1000" />
+                      <button type="button" class="ui button" :class="{ loading: actionLoading }" :disabled="!hasSelectedPage || actionLoading" @click="runAction('wait', { ms: browserJsForm.waitMs })">
                         Wait
                       </button>
                     </div>
                   </div>
                   <div class="field">
                     <label>执行</label>
-                    <button type="button" class="ui fluid primary button" :class="{ loading: actionLoading }" :disabled="!hasSelectedPage || actionLoading" @click="runAction('eval', { expression: consoleForm.expression })">
-                      执行 JS
+                    <button type="button" class="ui fluid primary button" :class="{ loading: actionLoading }" :disabled="!hasSelectedPage || actionLoading" @click="runAction('eval', { expression: browserJsForm.expression })">
+                      执行页面内 JS
                     </button>
                   </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="ui segment console-card" style="margin-top: 1rem;">
+              <div class="panel-header">
+                <div>
+                  <h3 class="ui header">Playwright 脚本</h3>
+                  <div class="panel-meta">运行在服务端 Playwright 上，可直接使用 `page`、`context`、`locator(selector)`，支持 `await page.setInputFiles(...)`。</div>
+                </div>
+              </div>
+
+              <div class="ui small form">
+                <div class="field">
+                  <label>Playwright 脚本</label>
+                  <textarea
+                    v-model="playwrightForm.expression"
+                    rows="8"
+                    placeholder="await page.setInputFiles('input[type=file]', '/tmp/a.png')&#10;return await page.title()"
+                  ></textarea>
+                  <small class="console-help">
+                    可直接使用 `page`、`context`、`locator(selector)`、`console.log(...)`。支持 `await` 和 `return`。
+                  </small>
+                </div>
+                <div class="field">
+                  <label>执行</label>
+                  <button type="button" class="ui fluid primary button" :class="{ loading: actionLoading }" :disabled="!hasSelectedPage || actionLoading" @click="runAction('playwright', { expression: playwrightForm.expression })">
+                    执行 Playwright 脚本
+                  </button>
+                </div>
+                <div class="ui tiny info message">
+                  示例：
+                  <code>await page.setInputFiles('input[type=file]', '/tmp/a.png')</code>
+                  <br />
+                  <code>return await page.locator('input[type=file]').count()</code>
+                  <br />
+                  <code>console.log(await page.title())</code>
                 </div>
               </div>
             </div>
@@ -197,9 +227,13 @@ const quickForm = reactive({
   key: 'Enter'
 })
 
-const consoleForm = reactive({
+const browserJsForm = reactive({
   expression: 'document.title',
   waitMs: 1000
+})
+
+const playwrightForm = reactive({
+  expression: "await page.setInputFiles('input[type=file]', '/tmp/a.png')\nreturn await page.title()"
 })
 
 const selectedPage = computed(() => browserPages.value.find(item => item.index === selectedPageIndex.value) || null)
@@ -313,20 +347,6 @@ onUnmounted(() => {
   min-height: calc(100vh - 120px);
 }
 
-.debug-layout {
-  display: grid;
-  grid-template-columns: 300px minmax(0, 1fr);
-  gap: 1rem;
-  align-items: start;
-}
-
-.tab-panel {
-  position: sticky;
-  top: 0;
-  max-height: calc(100vh - 140px);
-  overflow: auto;
-}
-
 .workspace {
   min-width: 0;
 }
@@ -345,57 +365,11 @@ onUnmounted(() => {
   line-height: 1.5;
 }
 
-.tab-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
-}
-
-.tab-item {
-  width: 100%;
-  text-align: left;
-  border: 1px solid #d9e1ec;
-  background: #f8fafc;
-  border-radius: 12px;
-  padding: 0.8rem;
-  transition: 0.2s ease;
-  cursor: pointer;
-}
-
-.tab-item:hover,
-.tab-item.active {
-  border-color: #2185d0;
-  background: #edf6ff;
-  box-shadow: 0 8px 20px rgba(33, 133, 208, 0.08);
-}
-
-.tab-item-top {
-  display: flex;
-  gap: 0.55rem;
-  align-items: center;
-}
-
-.tab-index {
-  font-size: 12px;
-  color: #2185d0;
-  font-weight: 700;
-}
-
-.tab-title {
-  font-weight: 600;
-  color: #111827;
-}
-
-.tab-url,
 .url {
   margin-top: 0.45rem;
   word-break: break-all;
   color: #4b5563;
   font-size: 12px;
-}
-
-.empty-state {
-  color: #6b7280;
 }
 
 .current-page-card,
@@ -422,6 +396,58 @@ onUnmounted(() => {
   color: #111827;
 }
 
+.compact-toolbar {
+  margin-bottom: 0.85rem;
+  flex-wrap: wrap;
+}
+
+.tab-strip-wrap {
+  margin-bottom: 0.9rem;
+}
+
+.tab-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.tab-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  max-width: 280px;
+  border: 1px solid #d9e1ec;
+  background: #f8fafc;
+  border-radius: 999px;
+  padding: 0.45rem 0.75rem;
+  cursor: pointer;
+  transition: 0.2s ease;
+}
+
+.tab-chip:hover,
+.tab-chip.active {
+  border-color: #2185d0;
+  background: #edf6ff;
+}
+
+.tab-chip-index {
+  color: #2185d0;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.tab-chip-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #111827;
+  font-size: 12px;
+}
+
+.empty-inline-state {
+  margin: 0 !important;
+}
+
 .action-grid {
   margin-top: 0.9rem;
   display: grid;
@@ -442,14 +468,16 @@ onUnmounted(() => {
   margin: 0;
 }
 
-@media (max-width: 1100px) {
-  .debug-layout {
-    grid-template-columns: 1fr;
-  }
+.console-help {
+  display: block;
+  margin-top: 0.45rem;
+  color: #6b7280;
+  line-height: 1.5;
+}
 
-  .tab-panel {
-    position: static;
-    max-height: none;
+@media (max-width: 1100px) {
+  .tab-chip {
+    max-width: 100%;
   }
 }
 </style>

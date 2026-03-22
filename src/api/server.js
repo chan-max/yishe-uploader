@@ -7,6 +7,7 @@ import http from 'http';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import util from 'util';
 import { URL, fileURLToPath } from 'url';
 import publishService from './publishService.js';
 import crawlerService from './crawlerService.js';
@@ -20,6 +21,71 @@ const WEB_DIR = process.env.FRONTEND_DIST
     ? path.resolve(process.env.FRONTEND_DIST)
     : path.resolve(__dirname, '../../web/dist');
 const UPLOAD_DIR = path.resolve(__dirname, '../../temp');
+const AsyncFunction = Object.getPrototypeOf(async function () { }).constructor;
+
+function normalizeDebugValue(value, depth = 0) {
+    if (depth > 4) return '[MaxDepth]';
+    if (value === undefined) return '[undefined]';
+    if (value === null) return null;
+    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return value;
+    if (typeof value === 'bigint') return String(value);
+    if (typeof value === 'function') return `[Function ${value.name || 'anonymous'}]`;
+    if (value instanceof Error) {
+        return {
+            name: value.name,
+            message: value.message,
+            stack: value.stack
+        };
+    }
+    if (Array.isArray(value)) {
+        return value.map(item => normalizeDebugValue(item, depth + 1));
+    }
+    if (typeof value === 'object') {
+        try {
+            return JSON.parse(JSON.stringify(value));
+        } catch {
+            // ignore
+        }
+
+        const plain = {};
+        for (const [key, val] of Object.entries(value)) {
+            plain[key] = normalizeDebugValue(val, depth + 1);
+        }
+        if (Object.keys(plain).length) return plain;
+        return util.inspect(value, { depth: 2, breakLength: 120 });
+    }
+    return String(value);
+}
+
+async function executePlaywrightScript(page, script) {
+    const logs = [];
+    const scriptConsole = {
+        log: (...args) => logs.push({ level: 'log', args: args.map(item => normalizeDebugValue(item)) }),
+        info: (...args) => logs.push({ level: 'info', args: args.map(item => normalizeDebugValue(item)) }),
+        warn: (...args) => logs.push({ level: 'warn', args: args.map(item => normalizeDebugValue(item)) }),
+        error: (...args) => logs.push({ level: 'error', args: args.map(item => normalizeDebugValue(item)) })
+    };
+
+    const wrapped = `
+        "use strict";
+        return await (async () => {
+            ${script}
+        })();
+    `;
+
+    const runner = new AsyncFunction('page', 'context', 'locator', 'console', wrapped);
+    const value = await runner(
+        page,
+        page.context(),
+        (selector) => page.locator(selector),
+        scriptConsole
+    );
+
+    return {
+        value: normalizeDebugValue(value),
+        logs
+    };
+}
 
 /** 与前端一致的默认 CDP 独立配置目录（避免占用系统 Chrome profile） */
 function getDefaultCdpUserDataDir() {
@@ -1431,6 +1497,12 @@ class ApiServer {
                     if (!expression) throw new Error('缺少 expression');
                     const value = await page.evaluate((expr) => globalThis.eval(expr), expression);
                     result = { value };
+                    break;
+                }
+                case 'playwright': {
+                    const script = String(body?.expression || '').trim();
+                    if (!script) throw new Error('缺少 expression');
+                    result = await executePlaywrightScript(page, script);
                     break;
                 }
                 case 'wait': {

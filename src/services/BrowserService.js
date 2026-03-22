@@ -649,18 +649,19 @@ async function getVisiblePagesDetailed() {
 
         const normalizedUrl = String(url || '').trim().toLowerCase();
         const normalizedTitle = String(title || '').trim().toLowerCase();
+        const isInternalNewTabLike =
+            normalizedUrl === 'about:blank' ||
+            normalizedUrl === 'chrome://newtab/' ||
+            normalizedUrl === 'chrome://new-tab-page/' ||
+            normalizedUrl === 'chrome-search://local-ntp/local-ntp.html' ||
+            normalizedUrl === 'edge://newtab/';
         const isPlaceholderPage =
-            !normalizedTitle && (
-                normalizedUrl === 'about:blank' ||
-                normalizedUrl === 'chrome://newtab/' ||
-                normalizedUrl === 'chrome://new-tab-page/' ||
-                normalizedUrl === 'chrome-search://local-ntp/local-ntp.html' ||
-                normalizedUrl === 'edge://newtab/'
-            );
+            isInternalNewTabLike ||
+            (!normalizedTitle && !normalizedUrl);
 
-        // 对浏览器启动时的重复占位页做去重，只保留一份
+        // 对同一个新标签内部链路产生的重复占位页做去重，只保留一个实例
         if (isPlaceholderPage) {
-            const key = normalizedUrl || 'blank';
+            const key = isInternalNewTabLike ? '__internal_new_tab__' : '__blank_placeholder__';
             if (seenPlaceholderKeys.has(key)) {
                 continue;
             }
