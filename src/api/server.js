@@ -489,7 +489,7 @@ class ApiServer {
                                         type: 'object',
                                         required: ['platform'],
                                         properties: {
-                                            platform: { type: 'string', description: '平台 ID，如 douyin、xiaohongshu、weibo、kuaishou' }
+                                            platform: { type: 'string', description: '平台 ID，如 douyin、xiaohongshu、weibo、kuaishou、doudian、kuaishou_shop' }
                                         }
                                     }
                                 }
@@ -1197,7 +1197,7 @@ class ApiServer {
             const body = await this.parseBody(req);
             const { platform } = body;
             if (!platform || typeof platform !== 'string') {
-                this.sendResponse(res, 400, { success: false, message: '请传 platform（如 douyin、xiaohongshu、weibo、kuaishou）' });
+                this.sendResponse(res, 400, { success: false, message: '请传 platform（如 douyin、xiaohongshu、weibo、kuaishou、doudian、kuaishou_shop）' });
                 return;
             }
             const config = PLATFORM_CONFIGS[platform];

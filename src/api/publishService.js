@@ -10,6 +10,8 @@ import { publishToWeibo } from '../platforms/weibo.js';
 import { publishToYouTube } from '../platforms/youtube.js';
 import { publishToXianyu } from '../platforms/xianyu.js';
 import { publishToTiktok } from '../platforms/tiktok.js';
+import { publishToDoudian } from '../platforms/doudian.js';
+import { publishToKuaishouShop } from '../platforms/kuaishouShop.js';
 import { logger } from '../utils/logger.js';
 
 /**
@@ -23,6 +25,8 @@ const platformPublishers = {
     youtube: publishToYouTube,
     xianyu: publishToXianyu,
     tiktok: publishToTiktok,
+    doudian: publishToDoudian,
+    kuaishou_shop: publishToKuaishouShop,
     // 其他平台可以继续添加
     // tencent: publishToTencent,
     // bilibili: publishToBilibili,
