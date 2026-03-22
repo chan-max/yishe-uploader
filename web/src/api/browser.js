@@ -35,3 +35,11 @@ export function openPlatformUrl(platform) {
 export function openLinkUrl(url) {
   return request({ url: '/browser/open-link', method: 'post', data: { url } })
 }
+
+export function getBrowserPages() {
+  return request({ url: '/browser/pages', method: 'get' })
+}
+
+export function executeBrowserDebug(data) {
+  return request({ url: '/browser/debug', method: 'post', data })
+}

@@ -95,6 +95,7 @@
         提示：该操作会自动关闭已运行的浏览器窗口以确保数据完整，且大型目录可能需要几分钟压缩时间。
       </div>
     </div>
+
   </div>
 </template>
 
@@ -276,7 +277,12 @@ async function handleImportFile(event) {
 }
 
 let pollTimer
-onMounted(() => { refreshBrowserStatus(); pollTimer = setInterval(refreshBrowserStatus, 5000) })
+onMounted(() => {
+  refreshBrowserStatus()
+  pollTimer = setInterval(() => {
+    refreshBrowserStatus()
+  }, 5000)
+})
 onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 </script>
 

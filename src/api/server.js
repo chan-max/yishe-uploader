@@ -10,7 +10,7 @@ import os from 'os';
 import { URL, fileURLToPath } from 'url';
 import publishService from './publishService.js';
 import crawlerService from './crawlerService.js';
-import { getBrowserStatus, getOrCreateBrowser, closeBrowser, launchWithDebugPort, checkAndReconnectBrowser, exportUserData, forceCloseBrowserByPort } from '../services/BrowserService.js';
+import { getBrowserStatus, getOrCreateBrowser, closeBrowser, launchWithDebugPort, checkAndReconnectBrowser, exportUserData, forceCloseBrowserByPort, listBrowserPages, getBrowserPage, createBrowserPage } from '../services/BrowserService.js';
 import { PublishService } from '../services/PublishService.js';
 import { logger } from '../utils/logger.js';
 import { PLATFORM_CONFIGS } from '../config/platforms.js';
@@ -48,6 +48,10 @@ function sleep(ms) {
  * API服务器类
  */
 const BROWSER_CHECK_INTERVAL_MS = Number(process.env.BROWSER_CHECK_INTERVAL_MS) || 10000;
+const QUIET_REQUEST_PATHS = new Set([
+    '/api/browser/status',
+    '/api/browser/pages'
+]);
 
 class ApiServer {
     constructor(port = 7010) {
@@ -129,7 +133,11 @@ class ApiServer {
             const reqPath = url.pathname;
             const method = req.method;
 
-            logger.info(`${method} ${reqPath}`);
+            if (QUIET_REQUEST_PATHS.has(reqPath)) {
+                logger.debug(`${method} ${reqPath}`);
+            } else {
+                logger.info(`${method} ${reqPath}`);
+            }
 
             // API 路由
             if (reqPath.startsWith('/api')) {
@@ -161,6 +169,10 @@ class ApiServer {
                     await this.handleBrowserOpenPlatform(req, res);
                 } else if (reqPath === '/api/browser/open-link' && method === 'POST') {
                     await this.handleBrowserOpenLink(req, res);
+                } else if (reqPath === '/api/browser/pages' && method === 'GET') {
+                    await this.handleBrowserPages(req, res);
+                } else if (reqPath === '/api/browser/debug' && method === 'POST') {
+                    await this.handleBrowserDebug(req, res);
                 } else if ((reqPath === '/api/browser/check-and-reconnect' || reqPath === '/api/browser/check') && (method === 'POST' || method === 'GET')) {
                     await this.handleBrowserCheckAndReconnect(req, res);
                 } else if (reqPath === '/api/upload' && method === 'POST') {
@@ -218,6 +230,8 @@ class ApiServer {
                 { method: 'POST', path: '/api/browser/check-port', description: '检测 CDP 端口' },
                 { method: 'POST', path: '/api/browser/open-platform', description: '在已连接浏览器中打开指定平台创作页' },
                 { method: 'POST', path: '/api/browser/open-link', description: '在已连接浏览器中打开指定链接' },
+                { method: 'GET', path: '/api/browser/pages', description: '获取当前浏览器标签页列表' },
+                { method: 'POST', path: '/api/browser/debug', description: '对当前浏览器页面执行调试动作（goto/click/fill/text/eval 等）' },
                 { method: 'POST', path: '/api/browser/check-and-reconnect', description: '检测浏览器实例并可选重连（body: { reconnect?: boolean }）' },
                 { method: 'GET', path: '/api/browser/check', description: '仅检测浏览器实例（不重连）' },
                 { method: 'GET', path: '/api/browser/export-user-data', description: '导出 User Data 压缩包' },
@@ -1276,6 +1290,190 @@ class ApiServer {
         }
     }
 
+    async handleBrowserPages(req, res) {
+        try {
+            const browserStatus = await getBrowserStatus();
+            if (!browserStatus?.hasInstance || !browserStatus?.isConnected) {
+                this.sendResponse(res, 400, {
+                    success: false,
+                    message: '浏览器实例未启动或未连接，请先连接浏览器'
+                });
+                return;
+            }
+
+            const pages = await listBrowserPages();
+            this.sendResponse(res, 200, { success: true, data: pages });
+        } catch (error) {
+            this.sendResponse(res, 500, { success: false, message: error.message || '获取页面列表失败' });
+        }
+    }
+
+    async handleBrowserDebug(req, res) {
+        try {
+            const browserStatus = await getBrowserStatus();
+            if (!browserStatus?.hasInstance || !browserStatus?.isConnected) {
+                this.sendResponse(res, 400, {
+                    success: false,
+                    message: '浏览器实例未启动或未连接，请先连接浏览器'
+                });
+                return;
+            }
+
+            const body = await this.parseBody(req);
+            const action = String(body?.action || '').trim();
+            const pageIndexValue = body?.pageIndex;
+            const pageIndex = pageIndexValue === '' || pageIndexValue === undefined || pageIndexValue === null
+                ? undefined
+                : Number(pageIndexValue);
+
+            if (!action) {
+                this.sendResponse(res, 400, { success: false, message: '缺少 action' });
+                return;
+            }
+
+            const resolvePage = async () => {
+                if (action === 'newPage') {
+                    return await createBrowserPage();
+                }
+                if (pageIndex !== undefined && !Number.isNaN(pageIndex)) {
+                    return await getBrowserPage(pageIndex);
+                }
+                return await getBrowserPage(0);
+            };
+
+            const page = await resolvePage();
+            const timeout = Number(body?.timeout) > 0 ? Number(body.timeout) : 30000;
+            let result = null;
+
+            switch (action) {
+                case 'newPage':
+                    result = { url: page.url(), title: await page.title().catch(() => '') };
+                    break;
+                case 'goto': {
+                    const targetUrl = String(body?.url || '').trim();
+                    if (!targetUrl) throw new Error('缺少 url');
+                    await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout });
+                    result = { url: page.url(), title: await page.title().catch(() => '') };
+                    break;
+                }
+                case 'reload':
+                    await page.reload({ waitUntil: 'domcontentloaded', timeout });
+                    result = { url: page.url(), title: await page.title().catch(() => '') };
+                    break;
+                case 'bringToFront':
+                    await page.bringToFront();
+                    result = { focused: true };
+                    break;
+                case 'closePage': {
+                    await page.close({ runBeforeUnload: true });
+                    const pagesAfterClose = await listBrowserPages();
+                    this.sendResponse(res, 200, {
+                        success: true,
+                        data: {
+                            action,
+                            page: null,
+                            result: { closed: true },
+                            pages: pagesAfterClose
+                        }
+                    });
+                    return;
+                }
+                case 'click': {
+                    const selector = String(body?.selector || '').trim();
+                    if (!selector) throw new Error('缺少 selector');
+                    await page.locator(selector).first().click({ timeout });
+                    result = { clicked: true };
+                    break;
+                }
+                case 'fill': {
+                    const selector = String(body?.selector || '').trim();
+                    if (!selector) throw new Error('缺少 selector');
+                    await page.locator(selector).first().fill(String(body?.text || ''), { timeout });
+                    result = { filled: true };
+                    break;
+                }
+                case 'type': {
+                    const selector = String(body?.selector || '').trim();
+                    if (!selector) throw new Error('缺少 selector');
+                    await page.locator(selector).first().pressSequentially(String(body?.text || ''), { timeout });
+                    result = { typed: true };
+                    break;
+                }
+                case 'press': {
+                    const selector = String(body?.selector || '').trim();
+                    const key = String(body?.key || '').trim();
+                    if (!selector) throw new Error('缺少 selector');
+                    if (!key) throw new Error('缺少 key');
+                    await page.locator(selector).first().press(key, { timeout });
+                    result = { pressed: key };
+                    break;
+                }
+                case 'text': {
+                    const selector = String(body?.selector || '').trim();
+                    if (!selector) throw new Error('缺少 selector');
+                    result = { text: await page.locator(selector).first().textContent({ timeout }) };
+                    break;
+                }
+                case 'html': {
+                    const selector = String(body?.selector || '').trim();
+                    if (!selector) throw new Error('缺少 selector');
+                    result = { html: await page.locator(selector).first().innerHTML({ timeout }) };
+                    break;
+                }
+                case 'count': {
+                    const selector = String(body?.selector || '').trim();
+                    if (!selector) throw new Error('缺少 selector');
+                    result = { count: await page.locator(selector).count() };
+                    break;
+                }
+                case 'eval': {
+                    const expression = String(body?.expression || '').trim();
+                    if (!expression) throw new Error('缺少 expression');
+                    const value = await page.evaluate((expr) => globalThis.eval(expr), expression);
+                    result = { value };
+                    break;
+                }
+                case 'wait': {
+                    const ms = Number(body?.ms) || 1000;
+                    await page.waitForTimeout(ms);
+                    result = { waited: ms };
+                    break;
+                }
+                case 'screenshot': {
+                    const filename = `browser-debug-${Date.now()}.png`;
+                    const savePath = path.resolve(UPLOAD_DIR, filename);
+                    if (!fs.existsSync(UPLOAD_DIR)) {
+                        await fs.promises.mkdir(UPLOAD_DIR, { recursive: true });
+                    }
+                    await page.screenshot({ path: savePath, fullPage: true });
+                    result = { path: savePath, filename };
+                    break;
+                }
+                default:
+                    throw new Error(`不支持的 action: ${action}`);
+            }
+
+            const currentUrl = page.url();
+            const currentTitle = await page.title().catch(() => '');
+            const pages = await listBrowserPages();
+            this.sendResponse(res, 200, {
+                success: true,
+                data: {
+                    action,
+                    page: {
+                        url: currentUrl,
+                        title: currentTitle,
+                        index: pages.findIndex(item => item.url === currentUrl && item.title === currentTitle)
+                    },
+                    result,
+                    pages
+                }
+            });
+        } catch (error) {
+            this.sendResponse(res, 500, { success: false, message: error.message || '页面调试执行失败' });
+        }
+    }
+
     /**
      * 检测浏览器实例并可选重连（接口调用）
      * POST/GET /api/browser/check-and-reconnect 或 GET /api/browser/check
@@ -1800,4 +1998,3 @@ export default apiServer;
 
 // 作为入口运行时启动服务器（npm start 即 node src/api/server.js）
 apiServer.start();
-

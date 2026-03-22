@@ -8,6 +8,7 @@ const routes = [
     redirect: '/browser',
     children: [
       { path: 'browser', name: 'Browser', component: () => import('@/views/browser/index.vue'), meta: { title: '浏览器连接', subtitle: '连接 Chrome 以便发布' } },
+      { path: 'browser-debug', name: 'BrowserDebug', component: () => import('@/views/browser-debug/index.vue'), meta: { title: '浏览器调试', subtitle: '管理标签页并实时执行页面操作与 JavaScript' } },
       { path: 'api-doc', name: 'ApiDoc', component: () => import('@/views/api-doc/index.vue'), meta: { title: 'API 文档', subtitle: '对外接口说明' } }
     ]
   }

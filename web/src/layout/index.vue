@@ -22,7 +22,7 @@
       </div>
     </aside>
     <main class="main-content">
-      <div class="main-content-inner">
+      <div :class="['main-content-inner', { 'publish-full-width': isWidePage }]">
         <h1 class="ui header page-header">
           <i :class="headerIcon + ' icon'"></i>
           <div class="content">
@@ -44,6 +44,7 @@ import packageJson from '../../../package.json'
 const route = useRoute()
 const menuItems = [
   { path: '/browser', title: '浏览器连接', icon: 'linkify' },
+  { path: '/browser-debug', title: '浏览器调试', icon: 'window maximize outline' },
   { path: '/api-doc', title: 'API 文档', icon: 'book' }
 ]
 const currentTitle = computed(() => {
@@ -57,10 +58,12 @@ const currentSubtitle = computed(() => {
 const headerIcon = computed(() => {
   const pathToIcon = {
     '/browser': 'linkify',
+    '/browser-debug': 'window maximize outline',
     '/api-doc': 'book'
   }
   return pathToIcon[route.path] || 'home'
 })
+const isWidePage = computed(() => ['/browser-debug'].includes(route.path))
 
 </script>
 

@@ -5,15 +5,7 @@
     "main": "src/index.js",
     "type": "module",
     "scripts": {
-        "dev": "vite build --config web/vite.config.js && node src/api/server.js",
-        "web:dev": "vite --config web/vite.config.js",
-        "web:build": "vite build --config web/vite.config.js",
-        "build:exe": "node scripts/build-exe.js",
-        "check-login": "node scripts/check-login.js",
-        "publish:single": "node scripts/publish-single-product.js",
-        "query:single": "node scripts/query-single-product.js",
-        "browser:start": "node scripts/start-browser.js",
-        "browser:debug": "node scripts/playwright-debug-shell.js"
+        "dev": "vite build --config web/vite.config.js && node src/api/server.js"
     },
     "keywords": [
         "social-media",

@@ -351,7 +351,7 @@ export async function isBrowserAvailable() {
         if (browserInstance && !browserInstance.isConnected()) {
             return false;
         }
-        const pages = contextInstance ? contextInstance.pages() : await browserInstance.pages();
+        const pages = await getVisiblePagesDetailed();
         browserStatus.isConnected = true;
         browserStatus.pageCount = pages.length;
         browserStatus.lastActivity = Date.now();
@@ -470,7 +470,7 @@ export async function getOrCreateBrowser(options = {}) {
                 browserStatus.isInitialized = true;
                 browserStatus.isConnected = true;
                 browserStatus.lastActivity = Date.now();
-                browserStatus.pageCount = contextInstance.pages().length;
+                browserStatus.pageCount = (await getVisiblePagesDetailed()).length;
 
                 currentUserDataDir = null;
                 currentProfileDir = null;
@@ -516,7 +516,7 @@ export async function getOrCreateBrowser(options = {}) {
             browserStatus.isInitialized = true;
             browserStatus.isConnected = true;
             browserStatus.lastActivity = Date.now();
-            browserStatus.pageCount = contextInstance.pages().length;
+            browserStatus.pageCount = (await getVisiblePagesDetailed()).length;
         })();
 
         try {
@@ -580,24 +580,13 @@ export async function checkAndReconnectBrowser(options = {}) {
 export async function getBrowserStatus() {
     let pagesInfo = [];
     try {
-        const pages = contextInstance ? contextInstance.pages() : (browserInstance ? browserInstance.pages() : []);
-        pagesInfo = await Promise.all(pages.map(async (p) => {
-            try {
-                // Use Promise.race with timeout to avoid hanging on destroyed contexts
-                const titlePromise = p.title().catch(() => 'Unknown');
-                const urlPromise = p.url();
-                const [title, url] = await Promise.all([
-                    Promise.race([titlePromise, new Promise(resolve => setTimeout(() => resolve('Loading...'), 1000))]),
-                    Promise.resolve(urlPromise)
-                ]);
-                return { title, url };
-            } catch {
-                return { title: 'Unknown', url: 'Unknown' };
-            }
-        }));
+        const visiblePages = await getVisiblePagesDetailed();
+        pagesInfo = visiblePages.map(item => ({ title: item.title || 'Unknown', url: item.url || 'Unknown' }));
+        browserStatus.pageCount = visiblePages.length;
     } catch (e) {
         logger.debug('获取页面信息失败（可能正在导航）:', e?.message);
         pagesInfo = [];
+        browserStatus.pageCount = 0;
     }
 
     return {
@@ -619,13 +608,111 @@ export async function getBrowserStatus() {
     };
 }
 
+function getPagesInternal() {
+    return contextInstance ? contextInstance.pages() : (browserInstance ? browserInstance.pages() : []);
+}
+
+function isUserVisiblePage(page, { title = '', url = '' } = {}) {
+    if (!page) return false;
+    if (typeof page.isClosed === 'function' && page.isClosed()) return false;
+
+    const safeUrl = String(url || '').trim();
+    const safeTitle = String(title || '').trim();
+    const lowerUrl = safeUrl.toLowerCase();
+
+    if (lowerUrl.startsWith('devtools://')) return false;
+    if (lowerUrl.startsWith('chrome-extension://')) return false;
+    if (lowerUrl.startsWith('extension://')) return false;
+    if (!safeUrl && !safeTitle) return false;
+
+    return true;
+}
+
+async function getVisiblePagesDetailed() {
+    const pages = getPagesInternal();
+    const visiblePages = [];
+    const seenPlaceholderKeys = new Set();
+
+    for (const page of pages) {
+        let title = '';
+        let url = '';
+        try {
+            title = await page.title().catch(() => '');
+            url = page.url();
+        } catch {
+            // ignore
+        }
+
+        if (!isUserVisiblePage(page, { title, url })) {
+            continue;
+        }
+
+        const normalizedUrl = String(url || '').trim().toLowerCase();
+        const normalizedTitle = String(title || '').trim().toLowerCase();
+        const isPlaceholderPage =
+            !normalizedTitle && (
+                normalizedUrl === 'about:blank' ||
+                normalizedUrl === 'chrome://newtab/' ||
+                normalizedUrl === 'chrome://new-tab-page/' ||
+                normalizedUrl === 'chrome-search://local-ntp/local-ntp.html' ||
+                normalizedUrl === 'edge://newtab/'
+            );
+
+        // 对浏览器启动时的重复占位页做去重，只保留一份
+        if (isPlaceholderPage) {
+            const key = normalizedUrl || 'blank';
+            if (seenPlaceholderKeys.has(key)) {
+                continue;
+            }
+            seenPlaceholderKeys.add(key);
+        }
+
+        visiblePages.push({ page, title, url });
+    }
+
+    return visiblePages.map((item, index) => ({
+        index,
+        page: item.page,
+        title: item.title,
+        url: item.url
+    }));
+}
+
+export async function listBrowserPages() {
+    const pages = await getVisiblePagesDetailed();
+    return pages.map(({ index, title, url }) => ({ index, title, url }));
+}
+
+export async function getBrowserPage(pageIndex) {
+    const pages = await getVisiblePagesDetailed();
+    if (!pages.length) {
+        return await newPageWithReconnect(currentBrowserOptions);
+    }
+
+    const index = Number.isInteger(pageIndex) ? pageIndex : 0;
+    if (index < 0 || index >= pages.length) {
+        throw new Error(`页面索引无效: ${pageIndex}`);
+    }
+    return pages[index].page;
+}
+
+export async function createBrowserPage() {
+    return await newPageWithReconnect(currentBrowserOptions);
+}
+
 /**
  * 更新浏览器活动状态
  */
 export function updateBrowserActivity() {
     browserStatus.lastActivity = Date.now();
     try {
-        const pages = contextInstance ? contextInstance.pages() : (browserInstance ? browserInstance.pages() : []);
+        const pages = getPagesInternal().filter(page => {
+            try {
+                return page && !(typeof page.isClosed === 'function' && page.isClosed());
+            } catch {
+                return false;
+            }
+        });
         browserStatus.pageCount = pages.length;
     } catch {
         browserStatus.pageCount = 0;
@@ -918,5 +1005,17 @@ export class BrowserService {
 
     static async forceCloseByPort(options = {}) {
         return forceCloseBrowserByPort(options);
+    }
+
+    static async listPages() {
+        return listBrowserPages();
+    }
+
+    static async getPage(pageIndex) {
+        return getBrowserPage(pageIndex);
+    }
+
+    static async createPage() {
+        return createBrowserPage();
     }
 }
