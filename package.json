@@ -12,7 +12,8 @@
         "check-login": "node scripts/check-login.js",
         "publish:single": "node scripts/publish-single-product.js",
         "query:single": "node scripts/query-single-product.js",
-        "browser:start": "node scripts/start-browser.js"
+        "browser:start": "node scripts/start-browser.js",
+        "browser:debug": "node scripts/playwright-debug-shell.js"
     },
     "keywords": [
         "social-media",
