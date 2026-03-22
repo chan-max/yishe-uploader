@@ -54,12 +54,16 @@ export const SUPPORTED_PLATFORMS = [
   'weibo',
   'douyin', 
   'xiaohongshu',
-  'kuaishou'
+  'kuaishou',
+  'doudian',
+  'kuaishou_shop'
 ];
 
 export const PLATFORM_NAMES = {
   weibo: '微博',
   douyin: '抖音',
   xiaohongshu: '小红书',
-  kuaishou: '快手'
+  kuaishou: '快手',
+  doudian: '抖店',
+  kuaishou_shop: '快手小店'
 };

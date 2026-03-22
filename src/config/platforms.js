@@ -187,6 +187,94 @@ export const PLATFORM_CONFIGS = {
         preProcess: null,
         postProcess: null
     },
+    doudian: {
+        name: '抖店',
+        uploadUrl: 'https://fxg.jinritemai.com/ffa/g/create',
+        waitUntil: 'domcontentloaded',
+        timeout: 45000,
+        antiDetection: true,
+        checkLogin: true,
+        selectors: {
+            titleInput: [
+                'input[placeholder*="商品标题"]',
+                'input[placeholder*="标题"]',
+                'input[placeholder*="商品名称"]',
+                'input[name*="title"]'
+            ],
+            contentInput: [
+                'textarea[placeholder*="商品描述"]',
+                'textarea[placeholder*="描述"]',
+                'textarea',
+                '[contenteditable="true"]'
+            ],
+            fileInput: 'input[type="file"]',
+            priceInput: [
+                'input[placeholder*="价格"]',
+                'input[placeholder*="售价"]',
+                'input[name*="price"]'
+            ],
+            draftButton: [
+                'button:has-text("保存草稿")',
+                'button:has-text("暂存")',
+                'button:has-text("保存")'
+            ],
+            submitButton: [
+                'button:has-text("发布商品")',
+                'button:has-text("提交审核")',
+                'button:has-text("发布")'
+            ]
+        },
+        loginSelectors: {
+            userElements: ['.header-user-info', '.account-info', '.user-info', '.avatar', '[class*="merchant"]'],
+            loginElements: ['.login-btn', '.login-button', '.auth-btn', 'text=登录', 'text=扫码登录']
+        },
+        preProcess: null,
+        postProcess: null
+    },
+    kuaishou_shop: {
+        name: '快手小店',
+        uploadUrl: 'https://fxg.kwaixiaodian.com/merchant/goods/create',
+        waitUntil: 'domcontentloaded',
+        timeout: 45000,
+        antiDetection: true,
+        checkLogin: true,
+        selectors: {
+            titleInput: [
+                'input[placeholder*="商品标题"]',
+                'input[placeholder*="标题"]',
+                'input[placeholder*="商品名称"]',
+                'input[name*="title"]'
+            ],
+            contentInput: [
+                'textarea[placeholder*="商品描述"]',
+                'textarea[placeholder*="描述"]',
+                'textarea',
+                '[contenteditable="true"]'
+            ],
+            fileInput: 'input[type="file"]',
+            priceInput: [
+                'input[placeholder*="价格"]',
+                'input[placeholder*="售价"]',
+                'input[name*="price"]'
+            ],
+            draftButton: [
+                'button:has-text("保存草稿")',
+                'button:has-text("暂存")',
+                'button:has-text("保存")'
+            ],
+            submitButton: [
+                'button:has-text("发布商品")',
+                'button:has-text("提交审核")',
+                'button:has-text("发布")'
+            ]
+        },
+        loginSelectors: {
+            userElements: ['.user-info', '.account-info', '.avatar', '.header-user', '[class*="merchant"]'],
+            loginElements: ['.login-btn', '.login-button', '.auth-btn', 'text=登录', 'text=扫码登录']
+        },
+        preProcess: null,
+        postProcess: null
+    },
     xianyu: {
         name: '咸鱼',
         uploadUrl: 'https://www.goofish.com/publish',

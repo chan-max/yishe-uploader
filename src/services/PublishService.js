@@ -24,6 +24,12 @@ import {
     publishToTiktok
 } from '../platforms/tiktok.js';
 import {
+    publishToDoudian
+} from '../platforms/doudian.js';
+import {
+    publishToKuaishouShop
+} from '../platforms/kuaishouShop.js';
+import {
     getOrCreateBrowser,
     isBrowserAvailable,
     updateBrowserActivity
@@ -162,6 +168,12 @@ export class PublishService {
                 case 'kuaishou':
                     result = await publishToKuaishou(publishInfo);
                     break;
+                case 'doudian':
+                    result = await publishToDoudian(publishInfo);
+                    break;
+                case 'kuaishou_shop':
+                    result = await publishToKuaishouShop(publishInfo);
+                    break;
                 case 'weibo':
                     result = await publishToWeibo(publishInfo);
                     break;
@@ -233,6 +245,16 @@ export class PublishService {
                     name: 'kuaishou',
                     checker: new GenericLoginChecker('快手', { selectors: PLATFORM_CONFIGS.kuaishou.loginSelectors }),
                     config: PLATFORM_CONFIGS.kuaishou
+                },
+                {
+                    name: 'doudian',
+                    checker: new GenericLoginChecker('抖店', { selectors: PLATFORM_CONFIGS.doudian.loginSelectors }),
+                    config: PLATFORM_CONFIGS.doudian
+                },
+                {
+                    name: 'kuaishou_shop',
+                    checker: new GenericLoginChecker('快手小店', { selectors: PLATFORM_CONFIGS.kuaishou_shop.loginSelectors }),
+                    config: PLATFORM_CONFIGS.kuaishou_shop
                 },
                 {
                     name: 'weibo',
@@ -411,7 +433,7 @@ export class PublishService {
             logger.error('登录状态检查整体过程出错:', overallError);
             // 如果整体过程出错，返回所有平台的错误状态
             const errorLoginStatus = {};
-            const platformNames = ['xiaohongshu', 'douyin', 'kuaishou', 'weibo'];
+            const platformNames = ['xiaohongshu', 'douyin', 'kuaishou', 'doudian', 'kuaishou_shop', 'weibo'];
             for (const platformName of platformNames) {
                 errorLoginStatus[platformName] = {
                     isLoggedIn: false,
