@@ -3,76 +3,54 @@
  * 提供统一的接口供前端和外部调用
  */
 
-import { publishToDouyin } from '../platforms/douyin.js';
-import { publishToKuaishou } from '../platforms/kuaishou.js';
-import { publishToXiaohongshu } from '../platforms/xiaohongshu.js';
-import { publishToWeibo } from '../platforms/weibo.js';
-import { publishToYouTube } from '../platforms/youtube.js';
-import { publishToXianyu } from '../platforms/xianyu.js';
-import { publishToTiktok } from '../platforms/tiktok.js';
-import { publishToDoudian } from '../platforms/doudian.js';
-import { publishToKuaishouShop } from '../platforms/kuaishouShop.js';
+import {
+    getPlatformCatalog as getRegistryPlatformCatalog,
+    getSupportedPlatforms as getRegistrySupportedPlatforms,
+    isPlatformSupported as isRegistryPlatformSupported,
+    resolvePlatformCapability
+} from '../config/platformRegistry.js';
 import { logger } from '../utils/logger.js';
-
-/**
- * 平台发布器映射
- */
-const platformPublishers = {
-    douyin: publishToDouyin,
-    kuaishou: publishToKuaishou,
-    xiaohongshu: publishToXiaohongshu,
-    weibo: publishToWeibo,
-    youtube: publishToYouTube,
-    xianyu: publishToXianyu,
-    tiktok: publishToTiktok,
-    doudian: publishToDoudian,
-    kuaishou_shop: publishToKuaishouShop,
-    // 其他平台可以继续添加
-    // tencent: publishToTencent,
-    // bilibili: publishToBilibili,
-    // tiktok: publishToTikTok,
-    // baijiahao: publishToBaijiahao
-};
 
 /**
  * 发布服务类
  */
 class PublishService {
     /**
-     * 发布到单个平台
+     * 执行单个平台能力
      * @param {string} platform - 平台ID
-     * @param {Object} publishInfo - 发布信息
-     * @returns {Promise<Object>} 发布结果
+     * @param {Object} payload - 能力执行参数
+     * @param {string} payload.action - 能力动作，默认 publish
+     * @returns {Promise<Object>} 执行结果
      */
-    async publishToPlatform(platform, publishInfo) {
+    async executePlatformAction(platform, payload = {}) {
         try {
-            logger.info(`开始发布到平台: ${platform}`);
+            const action = payload.action || 'publish';
+            logger.info(`开始执行平台能力: ${platform}.${action}`);
 
-            // 获取对应平台的发布器
-            const publisher = platformPublishers[platform];
-
-            if (!publisher) {
-                throw new Error(`不支持的平台: ${platform}`);
+            const resolved = resolvePlatformCapability(platform, action);
+            if (!resolved?.capability?.handler) {
+                throw new Error(`平台 ${platform} 不支持动作: ${action}`);
             }
 
-            // 执行发布
-            const result = await publisher(publishInfo);
+            const result = await resolved.capability.handler(payload);
 
-            logger.info(`平台 ${platform} 发布结果:`, result);
+            logger.info(`平台 ${platform}.${action} 执行结果:`, result);
 
             return {
                 platform,
+                action,
                 ...result,
                 timestamp: new Date().toISOString()
             };
 
         } catch (error) {
-            logger.error(`平台 ${platform} 发布失败:`, error);
+            logger.error(`平台 ${platform} 执行动作失败:`, error);
 
             return {
                 platform,
+                action: payload.action || 'publish',
                 success: false,
-                message: error.message || '发布失败',
+                message: error.message || '执行失败',
                 error: error,
                 timestamp: new Date().toISOString()
             };
@@ -80,24 +58,35 @@ class PublishService {
     }
 
     /**
+     * 发布到单个平台
+     * 为兼容旧接口保留，内部委托给 executePlatformAction
+     */
+    async publishToPlatform(platform, publishInfo) {
+        return this.executePlatformAction(platform, {
+            action: publishInfo?.action || 'publish',
+            ...publishInfo
+        });
+    }
+
+    /**
      * 批量发布到多个平台
      * @param {Array<string>} platforms - 平台ID列表
-     * @param {Object} publishInfo - 发布信息
+     * @param {Object} payload - 动作执行参数
      * @param {Object} options - 选项
      * @returns {Promise<Object>} 批量发布结果
      */
-    async batchPublish(platforms, publishInfo, options = {}) {
+    async batchPublish(platforms, payload, options = {}) {
         try {
-            logger.info(`开始批量发布到 ${platforms.length} 个平台`);
+            const action = payload?.action || 'publish';
+            logger.info(`开始批量执行动作 ${action}，目标平台数: ${platforms.length}`);
 
             const results = [];
             const { concurrent = false } = options;
 
             if (concurrent) {
-                // 并发发布
-                logger.info('使用并发模式发布');
+                logger.info('使用并发模式执行');
                 const promises = platforms.map(platform =>
-                    this.publishToPlatform(platform, publishInfo)
+                    this.executePlatformAction(platform, payload)
                 );
                 const platformResults = await Promise.allSettled(promises);
 
@@ -107,18 +96,18 @@ class PublishService {
                     } else {
                         results.push({
                             platform: platforms[index],
+                            action,
                             success: false,
-                            message: result.reason?.message || '发布失败',
+                            message: result.reason?.message || '执行失败',
                             error: result.reason,
                             timestamp: new Date().toISOString()
                         });
                     }
                 });
             } else {
-                // 顺序发布
-                logger.info('使用顺序模式发布');
+                logger.info('使用顺序模式执行');
                 for (const platform of platforms) {
-                    const result = await this.publishToPlatform(platform, publishInfo);
+                    const result = await this.executePlatformAction(platform, payload);
                     results.push(result);
 
                     // 平台间间隔，避免频繁操作
@@ -133,10 +122,11 @@ class PublishService {
             const failedCount = results.filter(r => !r.success).length;
             const allSuccess = successCount === platforms.length && platforms.length > 0;
 
-            logger.info(`批量发布完成: 成功 ${successCount}/${platforms.length}, 失败 ${failedCount}/${platforms.length}`);
+            logger.info(`批量动作执行完成 ${action}: 成功 ${successCount}/${platforms.length}, 失败 ${failedCount}/${platforms.length}`);
 
             return {
                 success: allSuccess,
+                action,
                 total: platforms.length,
                 successCount,
                 failedCount,
@@ -145,11 +135,12 @@ class PublishService {
             };
 
         } catch (error) {
-            logger.error('批量发布失败:', error);
+            logger.error('批量动作执行失败:', error);
 
             return {
                 success: false,
-                message: error.message || '批量发布失败',
+                action: payload?.action || 'publish',
+                message: error.message || '批量执行失败',
                 error: error,
                 timestamp: new Date().toISOString()
             };
@@ -159,13 +150,14 @@ class PublishService {
     /**
      * 创建定时发布任务
      * @param {Array<string>} platforms - 平台ID列表
-     * @param {Object} publishInfo - 发布信息
+     * @param {Object} payload - 动作执行参数
      * @param {Date} scheduleTime - 定时时间
      * @returns {Promise<Object>} 任务创建结果
      */
-    async createScheduleTask(platforms, publishInfo, scheduleTime) {
+    async createScheduleTask(platforms, payload, scheduleTime) {
         try {
-            logger.info(`创建定时发布任务，计划时间: ${scheduleTime}`);
+            const action = payload?.action || 'publish';
+            logger.info(`创建定时任务 ${action}，计划时间: ${scheduleTime}`);
 
             const taskId = `task_${Date.now()}`;
             const delay = new Date(scheduleTime).getTime() - Date.now();
@@ -177,12 +169,13 @@ class PublishService {
             // 设置定时器
             setTimeout(async () => {
                 logger.info(`执行定时任务: ${taskId}`);
-                await this.batchPublish(platforms, publishInfo);
+                await this.batchPublish(platforms, payload);
             }, delay);
 
             return {
                 success: true,
                 taskId,
+                action,
                 scheduleTime,
                 platforms,
                 message: '定时任务创建成功'
@@ -204,7 +197,11 @@ class PublishService {
      * @returns {Array<string>} 平台ID列表
      */
     getSupportedPlatforms() {
-        return Object.keys(platformPublishers);
+        return getRegistrySupportedPlatforms();
+    }
+
+    getPlatformCatalog() {
+        return getRegistryPlatformCatalog();
     }
 
     /**
@@ -213,7 +210,7 @@ class PublishService {
      * @returns {boolean} 是否支持
      */
     isPlatformSupported(platform) {
-        return platform in platformPublishers;
+        return isRegistryPlatformSupported(platform);
     }
 
     /**
@@ -244,6 +241,9 @@ export const createScheduleTask = (platforms, publishInfo, scheduleTime) =>
 
 export const getSupportedPlatforms = () =>
     publishService.getSupportedPlatforms();
+
+export const getPlatformCatalog = () =>
+    publishService.getPlatformCatalog();
 
 export const isPlatformSupported = (platform) =>
     publishService.isPlatformSupported(platform);

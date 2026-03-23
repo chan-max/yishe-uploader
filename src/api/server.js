@@ -852,7 +852,7 @@ class ApiServer {
      */
     async handlePublishUnified(req, res) {
         const body = await this.parseBody(req);
-        const { platforms, concurrent = false, ...publishInfo } = body;
+        const { platforms, concurrent = false, action = 'publish', ...publishInfo } = body;
 
         if (!platforms || !Array.isArray(platforms) || platforms.length === 0) {
             this.sendResponse(res, 400, { success: false, error: '请传 platforms（数组），单平台如 ["douyin"]，多平台如 ["douyin", "xiaohongshu"]' });
@@ -860,7 +860,7 @@ class ApiServer {
         }
 
         const normalizedPublishInfo = this.normalizePublishInfo(publishInfo, platforms);
-        const result = await publishService.batchPublish(platforms, normalizedPublishInfo, { concurrent });
+        const result = await publishService.batchPublish(platforms, { ...normalizedPublishInfo, action }, { concurrent });
         this.sendResponse(res, 200, result);
     }
 
@@ -869,7 +869,7 @@ class ApiServer {
      */
     async handleCreateSchedule(req, res) {
         const body = await this.parseBody(req);
-        const { platforms, scheduleTime, ...publishInfo } = body;
+        const { platforms, scheduleTime, action = 'publish', ...publishInfo } = body;
 
         if (!platforms || !scheduleTime) {
             this.sendResponse(res, 400, { error: '缺少必要参数' });
@@ -877,7 +877,7 @@ class ApiServer {
         }
 
         const normalizedPublishInfo = this.normalizePublishInfo(publishInfo, platforms);
-        const result = await publishService.createScheduleTask(platforms, normalizedPublishInfo, scheduleTime);
+        const result = await publishService.createScheduleTask(platforms, { ...normalizedPublishInfo, action }, scheduleTime);
         this.sendResponse(res, 200, result);
     }
 
@@ -1149,7 +1149,10 @@ class ApiServer {
      */
     async handleGetPlatforms(req, res) {
         const platforms = publishService.getSupportedPlatforms();
-        this.sendResponse(res, 200, { platforms });
+        const catalog = typeof publishService.getPlatformCatalog === 'function'
+            ? publishService.getPlatformCatalog()
+            : [];
+        this.sendResponse(res, 200, { platforms, items: catalog });
     }
 
     /**

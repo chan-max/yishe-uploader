@@ -16,7 +16,7 @@
                   <label :for="'platform-' + p.id">{{ p.icon }} {{ p.name }}</label>
                 </div>
               </div>
-              <small style="color: #999;">可多选，单平台或多平台均使用同一发布接口</small>
+              <small style="color: #999;">可多选。当前页面默认执行各平台的“发布”动作，后续同平台可扩展更多动作能力。</small>
             </div>
 
             <div class="field">
@@ -92,7 +92,15 @@
 
         <div class="ui segment api-doc-card">
           <h3 class="ui dividing header">接口说明</h3>
-          <p class="api-doc-desc">对外统一使用 <strong>POST /api/publish</strong>，传 <code>platforms</code>（数组）：单平台如 <code>["douyin"]</code>，多平台如 <code>["douyin", "xiaohongshu"]</code>。</p>
+          <p class="api-doc-desc">对外统一使用 <strong>POST /api/publish</strong>，核心参数是 <code>platforms</code> 和可选 <code>action</code>。当前页面默认 <code>action=publish</code>，后续同平台可以扩展更多动作而不必新增一套平台体系。</p>
+          <div v-if="platformCatalog.length" class="capability-list">
+            <div v-for="item in platformCatalog" :key="item.id" class="capability-item">
+              <div class="capability-title">{{ item.name }} <span class="capability-category">{{ item.category }}</span></div>
+              <div class="capability-actions">
+                <span v-for="cap in item.capabilities" :key="cap.key" class="ui tiny basic label">{{ cap.name }}</span>
+              </div>
+            </div>
+          </div>
           <router-link to="/api-doc" class="ui small primary button fluid">
             <i class="book icon"></i> 查看 API 文档
           </router-link>
@@ -116,6 +124,7 @@ const status = reactive({ message: '', type: 'info' })
 const publishing = ref(false)
 const loginLoading = ref(false)
 const supportedPlatforms = ref([])
+const platformCatalog = ref([])
 const loginStatus = ref({})
 const form = reactive({
   platforms: [],
@@ -143,6 +152,7 @@ async function fetchPlatforms() {
     const res = await fetch(`${API_BASE}/api/platforms`)
     const data = await res.json()
     if (res.ok && data.platforms) supportedPlatforms.value = data.platforms
+    if (res.ok && Array.isArray(data.items)) platformCatalog.value = data.items
   } catch (e) { console.error('[platforms]', e) }
 }
 
@@ -171,6 +181,7 @@ async function handlePublish() {
     const tags = tagsInput.value.split(/[\s,，]+/).map(t => t.trim()).filter(Boolean)
     const body = {
       platforms: form.platforms,
+      action: 'publish',
       title: form.title.trim(),
       tags,
       filePath,
@@ -242,5 +253,10 @@ onMounted(() => { fetchPlatforms() })
   .ui.list .item { display: flex; align-items: center; justify-content: space-between; }
   .api-doc-card .api-doc-desc { font-size: 0.85em; color: #555; margin-bottom: 0.75rem; line-height: 1.5; }
   .api-doc-card code { background: #f5f5f5; padding: 2px 6px; border-radius: 3px; font-size: 0.9em; }
+  .capability-list { display: flex; flex-direction: column; gap: 0.75rem; margin-bottom: 0.75rem; }
+  .capability-item { padding: 0.65rem 0.75rem; border-radius: 10px; background: #f8fafc; border: 1px solid #e5e7eb; }
+  .capability-title { font-size: 0.92em; font-weight: 600; color: #1f2937; margin-bottom: 0.35rem; }
+  .capability-category { margin-left: 0.5rem; font-size: 0.82em; color: #6b7280; text-transform: capitalize; }
+  .capability-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; }
 }
 </style>
