@@ -91,6 +91,8 @@ class DoudianPublisher extends BasicShopPublisher {
 
             const preparedImages = await this._prepareImages(targetImages);
             tempFiles.push(...preparedImages.tempFiles);
+            logger.info(`抖店准备上传的图片数量: ${preparedImages.filePaths.length}`);
+            logger.info('抖店准备上传的图片路径:', preparedImages.filePaths);
 
             if (preparedImages.filePaths.length === 0) {
                 return {
@@ -138,6 +140,7 @@ class DoudianPublisher extends BasicShopPublisher {
 
     async _uploadImagesToSeparateInputs(page, filePaths, preferredStartIndex = 2) {
         const requested = filePaths.length;
+        logger.info(`抖店上传参数: requested=${requested}, preferredStartIndex=${preferredStartIndex}`);
         await page.waitForLoadState('domcontentloaded').catch(() => undefined);
         await page.waitForTimeout(2000);
 
@@ -162,25 +165,58 @@ class DoudianPublisher extends BasicShopPublisher {
         const usableInputCount = Math.max(0, initialInputCount - startIndex);
         const maxUploadCount = Math.min(requested, usableInputCount, 5);
         const uploadedPaths = [];
+        logger.info(`抖店上传索引策略: startIndex=${startIndex}, usableInputCount=${usableInputCount}, maxUploadCount=${maxUploadCount}`);
 
         for (let index = 0; index < maxUploadCount; index += 1) {
             const targetFile = filePaths[index];
             const currentInputCount = await inputLocator.count();
-            if (currentInputCount <= startIndex) {
-                logger.warn(`抖店当前剩余 input[type="file"] 数量不足，停止上传。current=${currentInputCount}, startIndex=${startIndex}`);
+            const targetInputIndex = startIndex + index;
+            const targetFileName = String(targetFile).split('/').pop() || targetFile;
+
+            logger.info(`抖店上传循环开始: imageIndex=${index + 1}, targetInputIndex=${targetInputIndex}, currentInputCount=${currentInputCount}, file=${targetFileName}`);
+            if (currentInputCount <= targetInputIndex) {
+                logger.warn(`抖店当前 input[type="file"] 数量不足，停止上传。current=${currentInputCount}, targetIndex=${targetInputIndex}`);
                 break;
             }
 
-            const locator = inputLocator.nth(startIndex);
+            const locator = inputLocator.nth(targetInputIndex);
 
-            logger.info(`抖店准备上传第 ${index + 1} 张图片，当前 input 总数: ${currentInputCount}，目标固定索引: ${startIndex}`);
+            try {
+                const inputSnapshot = await locator.evaluate((el, fileIndex) => ({
+                    fileIndex,
+                    className: el.className || '',
+                    id: el.id || '',
+                    name: el.getAttribute('name') || '',
+                    accept: el.getAttribute('accept') || '',
+                    multiple: !!el.multiple,
+                    disabled: !!el.disabled,
+                    existingFiles: Array.from(el.files || []).map((file) => file.name)
+                }), index + 1);
+                logger.info(`抖店目标 input 快照:`, inputSnapshot);
+            } catch (error) {
+                logger.warn(`抖店读取目标 input 快照失败: ${error?.message || error}`);
+            }
+
+            logger.info(`抖店准备上传第 ${index + 1} 张图片，当前 input 总数: ${currentInputCount}，目标索引: ${targetInputIndex}`);
             await locator.setInputFiles([targetFile]);
+            await this._waitForInputReceiveFile(locator, targetFile, index + 1, targetInputIndex);
             uploadedPaths.push(targetFile);
-            logger.info(`抖店第 ${index + 1} 张图片已写入当前 input[${startIndex}]`);
-            await page.waitForTimeout(1500);
+            logger.info(`抖店第 ${index + 1} 张图片已写入 input[${targetInputIndex}]，等待页面处理完成`);
+            await page.waitForTimeout(2500);
+
+            try {
+                const afterSnapshot = await locator.evaluate((el, fileIndex) => ({
+                    fileIndex,
+                    existingFiles: Array.from(el.files || []).map((file) => file.name)
+                }), index + 1);
+                logger.info(`抖店写入后 input 快照:`, afterSnapshot);
+            } catch (error) {
+                logger.warn(`抖店读取写入后 input 快照失败: ${error?.message || error}`);
+            }
         }
 
         await page.waitForTimeout(3000);
+        logger.info(`抖店上传流程结束: uploaded=${uploadedPaths.length}/${requested}`);
 
         return {
             requested,
@@ -188,6 +224,37 @@ class DoudianPublisher extends BasicShopPublisher {
             startIndex,
             uploadedPaths
         };
+    }
+
+    async _waitForInputReceiveFile(locator, targetFile, imageIndex, inputIndex) {
+        const fileName = String(targetFile).split('/').pop() || '';
+        logger.info(`抖店等待 input[${inputIndex}] 接收文件: imageIndex=${imageIndex}, fileName=${fileName}`);
+
+        try {
+            await locator.waitFor({ state: 'attached', timeout: 5000 });
+            await locator.evaluate((el, expectedFileName) => {
+                return new Promise((resolve, reject) => {
+                    const startedAt = Date.now();
+                    const check = () => {
+                        const files = el.files;
+                        const matched = files && files.length > 0 && (!expectedFileName || files[0]?.name === expectedFileName);
+                        if (matched) {
+                            resolve(true);
+                            return;
+                        }
+                        if (Date.now() - startedAt > 8000) {
+                            reject(new Error('文件未进入 input'));
+                            return;
+                        }
+                        setTimeout(check, 150);
+                    };
+                    check();
+                });
+            }, fileName);
+            logger.info(`抖店检测到 input[${inputIndex}] 已接收文件: imageIndex=${imageIndex}, fileName=${fileName}`);
+        } catch (error) {
+            logger.warn(`抖店第 ${imageIndex} 张图片写入 input[${inputIndex}] 后未检测到文件状态: ${error?.message || error}`);
+        }
     }
 }
 
