@@ -15,6 +15,14 @@ function getPathFileName(filePath) {
     return path.posix.basename(normalizedPath);
 }
 
+function resolveDoudianCreateUrl(defaultUrl, copyId) {
+    const normalizedCopyId = String(copyId || '').trim();
+    if (!normalizedCopyId) {
+        return defaultUrl;
+    }
+    return `https://fxg.jinritemai.com/ffa/g/create?copyid=${encodeURIComponent(normalizedCopyId)}`;
+}
+
 class DoudianPublisher extends BasicShopPublisher {
     constructor() {
         super({
@@ -62,11 +70,17 @@ class DoudianPublisher extends BasicShopPublisher {
 
         try {
             const settings = publishInfo.platformOptions || publishInfo.publishOptions || publishInfo.platformSettings?.[this.platformKey] || {};
-            const images = Array.isArray(publishInfo.images) ? publishInfo.images.filter(Boolean) : [];
+            const images = Array.isArray(publishInfo.images) && publishInfo.images.length > 0
+                ? publishInfo.images.filter(Boolean)
+                : (Array.isArray(publishInfo.imageSources) ? publishInfo.imageSources.filter(Boolean) : []);
             const targetImages = images.slice(0, 5);
+            const copyId = String(settings.copyId || publishInfo.copyId || '').trim();
+            const targetCreateUrl = resolveDoudianCreateUrl(this.uploadUrl, copyId);
 
             logger.info('开始执行抖店商品图片上传流程');
             logger.info('抖店发布入参摘要:', {
+                copyId,
+                targetCreateUrl,
                 imageCount: targetImages.length,
                 title: publishInfo.title || '',
                 fileInputStartIndex: Number(settings.fileInputStartIndex ?? publishInfo.fileInputStartIndex ?? 2)
@@ -90,8 +104,8 @@ class DoudianPublisher extends BasicShopPublisher {
             await this.pageOperator.setupAntiDetection(page);
             logger.info('抖店页面反检测设置完成');
 
-            logger.info(`抖店准备打开商品发布页: ${this.uploadUrl}`);
-            await page.goto(this.uploadUrl, {
+            logger.info(`抖店准备打开商品发布页: ${targetCreateUrl}`);
+            await page.goto(targetCreateUrl, {
                 waitUntil: 'domcontentloaded',
                 timeout: 60000
             });
