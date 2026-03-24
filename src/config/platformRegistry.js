@@ -1,12 +1,4 @@
-import { publishToDouyin } from '../platforms/douyin.js';
-import { publishToKuaishou } from '../platforms/kuaishou.js';
-import { publishToXiaohongshu } from '../platforms/xiaohongshu.js';
-import { publishToWeibo } from '../platforms/weibo.js';
-import { publishToYouTube } from '../platforms/youtube.js';
-import { publishToXianyu } from '../platforms/xianyu.js';
-import { publishToTiktok } from '../platforms/tiktok.js';
-import { publishToDoudian } from '../platforms/doudian.js';
-import { publishToKuaishouShop } from '../platforms/kuaishouShop.js';
+import { resolveTaskHandler } from '../tasks/registry.js';
 
 const createCapability = (key, name, description, handler) => ({
     key,
@@ -15,6 +7,15 @@ const createCapability = (key, name, description, handler) => ({
     handler
 });
 
+function resolveCapabilityHandler({ platform, action }) {
+    const taskKey = `${action}:${platform}`;
+    const taskHandler = resolveTaskHandler(taskKey);
+    if (!taskHandler) {
+        throw new Error(`未注册任务处理器: ${taskKey}`);
+    }
+    return taskHandler;
+}
+
 export const PLATFORM_REGISTRY = {
     douyin: {
         id: 'douyin',
@@ -22,7 +23,7 @@ export const PLATFORM_REGISTRY = {
         category: 'content',
         defaultAction: 'publish',
         capabilities: [
-            createCapability('publish', '发布内容', '发布视频或图文内容', publishToDouyin)
+            createCapability('publish', '发布内容', '发布视频或图文内容', resolveCapabilityHandler({ platform: 'douyin', action: 'publish' }))
         ]
     },
     kuaishou: {
@@ -31,7 +32,7 @@ export const PLATFORM_REGISTRY = {
         category: 'content',
         defaultAction: 'publish',
         capabilities: [
-            createCapability('publish', '发布内容', '发布视频内容', publishToKuaishou)
+            createCapability('publish', '发布内容', '发布视频内容', resolveCapabilityHandler({ platform: 'kuaishou', action: 'publish' }))
         ]
     },
     xiaohongshu: {
@@ -40,7 +41,7 @@ export const PLATFORM_REGISTRY = {
         category: 'content',
         defaultAction: 'publish',
         capabilities: [
-            createCapability('publish', '发布内容', '发布图文或笔记内容', publishToXiaohongshu)
+            createCapability('publish', '发布内容', '发布图文或笔记内容', resolveCapabilityHandler({ platform: 'xiaohongshu', action: 'publish' }))
         ]
     },
     weibo: {
@@ -49,7 +50,7 @@ export const PLATFORM_REGISTRY = {
         category: 'content',
         defaultAction: 'publish',
         capabilities: [
-            createCapability('publish', '发布内容', '发布微博内容', publishToWeibo)
+            createCapability('publish', '发布内容', '发布微博内容', resolveCapabilityHandler({ platform: 'weibo', action: 'publish' }))
         ]
     },
     youtube: {
@@ -58,7 +59,7 @@ export const PLATFORM_REGISTRY = {
         category: 'content',
         defaultAction: 'publish',
         capabilities: [
-            createCapability('publish', '发布内容', '发布视频内容', publishToYouTube)
+            createCapability('publish', '发布内容', '发布视频内容', resolveCapabilityHandler({ platform: 'youtube', action: 'publish' }))
         ]
     },
     xianyu: {
@@ -67,7 +68,7 @@ export const PLATFORM_REGISTRY = {
         category: 'commerce',
         defaultAction: 'publish',
         capabilities: [
-            createCapability('publish', '发布商品', '发布闲置商品', publishToXianyu)
+            createCapability('publish', '发布商品', '发布闲置商品', resolveCapabilityHandler({ platform: 'xianyu', action: 'publish' }))
         ]
     },
     tiktok: {
@@ -76,7 +77,7 @@ export const PLATFORM_REGISTRY = {
         category: 'content',
         defaultAction: 'publish',
         capabilities: [
-            createCapability('publish', '发布内容', '发布视频内容', publishToTiktok)
+            createCapability('publish', '发布内容', '发布视频内容', resolveCapabilityHandler({ platform: 'tiktok', action: 'publish' }))
         ]
     },
     doudian: {
@@ -85,7 +86,7 @@ export const PLATFORM_REGISTRY = {
         category: 'commerce',
         defaultAction: 'publish',
         capabilities: [
-            createCapability('publish', '发布商品', '发布电商商品', publishToDoudian)
+            createCapability('publish', '发布商品', '发布电商商品', resolveCapabilityHandler({ platform: 'doudian', action: 'publish' }))
         ]
     },
     kuaishou_shop: {
@@ -94,7 +95,7 @@ export const PLATFORM_REGISTRY = {
         category: 'commerce',
         defaultAction: 'publish',
         capabilities: [
-            createCapability('publish', '发布商品', '发布电商商品', publishToKuaishouShop)
+            createCapability('publish', '发布商品', '发布电商商品', resolveCapabilityHandler({ platform: 'kuaishou_shop', action: 'publish' }))
         ]
     }
 };

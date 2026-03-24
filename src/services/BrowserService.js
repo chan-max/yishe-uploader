@@ -26,6 +26,8 @@ import {
 import os from 'os';
 import AdmZip from 'adm-zip';
 import fs from 'fs-extra';
+import http from 'http';
+import https from 'https';
 
 // 全局：Playwright Browser / BrowserContext
 let browserInstance = null;    // playwright Browser（cdp模式使用）
@@ -181,6 +183,46 @@ function execCommand(command, timeoutMs = 8000) {
             resolve(String(stdout || '').trim());
         });
     });
+}
+
+async function checkCdpEndpointAvailable(endpoint = 'http://127.0.0.1:9222') {
+    try {
+        const targetUrl = new URL('/json/version', endpoint);
+        const client = targetUrl.protocol === 'https:' ? https : http;
+        return await new Promise((resolve) => {
+            const req = client.get(targetUrl, { timeout: 3000 }, (resp) => {
+                let data = '';
+                resp.on('data', (chunk) => { data += chunk; });
+                resp.on('end', () => {
+                    try {
+                        const json = JSON.parse(data);
+                        resolve({
+                            ok: true,
+                            endpoint,
+                            browser: json.Browser || json.browser || ''
+                        });
+                    } catch {
+                        resolve({
+                            ok: true,
+                            endpoint,
+                            browser: ''
+                        });
+                    }
+                });
+            });
+            req.on('error', (error) => resolve({ ok: false, endpoint, error: error?.message || '连接失败' }));
+            req.on('timeout', () => {
+                req.destroy();
+                resolve({ ok: false, endpoint, error: '连接超时' });
+            });
+        });
+    } catch (error) {
+        return {
+            ok: false,
+            endpoint,
+            error: error?.message || '检测 CDP 端点失败'
+        };
+    }
 }
 
 async function getListeningPids(port) {
@@ -421,6 +463,22 @@ export async function getOrCreateBrowser(options = {}) {
         return existingBrowser;
     }
 
+    // 冷启动场景：服务刚重启但 9222 浏览器仍在，此时先尝试接管现有 CDP 浏览器
+    const requestedMode = String(options.mode || '').trim().toLowerCase();
+    const shouldProbeCdp = !requestedMode || requestedMode === 'cdp';
+    if (shouldProbeCdp) {
+        const endpoint = options.cdpEndpoint || process.env.CDP_ENDPOINT || 'http://127.0.0.1:9222';
+        const cdpStatus = await checkCdpEndpointAvailable(endpoint);
+        if (cdpStatus.ok) {
+            logger.info(`检测到可复用的现有 CDP 浏览器，优先接管: ${endpoint}`);
+            options = {
+                ...options,
+                mode: 'cdp',
+                cdpEndpoint: endpoint
+            };
+        }
+    }
+
     // 创建新的浏览器实例
     logger.info('启动新的浏览器实例...');
 
@@ -542,10 +600,60 @@ export async function getOrCreateBrowser(options = {}) {
  * @returns { Promise<{ available: boolean, reconnected?: boolean, message?: string, status?: object }> }
  */
 export async function checkAndReconnectBrowser(options = {}) {
-    const { reconnect = false } = options;
+    const {
+        reconnect = false,
+        cdpEndpoint = currentCdpEndpoint || process.env.CDP_ENDPOINT || 'http://127.0.0.1:9222',
+        headless = undefined
+    } = options;
+
     if (!contextInstance && !browserInstance) {
-        return { available: false, message: '无浏览器实例' };
+        if (!reconnect) {
+            return { available: false, message: '无浏览器实例' };
+        }
+
+        const cdpStatus = await checkCdpEndpointAvailable(cdpEndpoint);
+        if (!cdpStatus.ok) {
+            return {
+                available: false,
+                reconnected: false,
+                message: `未检测到可接管的 CDP 浏览器: ${cdpStatus.error || cdpEndpoint}`
+            };
+        }
+
+        try {
+            logger.info(`检测到可复用的 CDP 浏览器，开始自动接管: ${cdpEndpoint}`);
+            await getOrCreateBrowser({
+                ...currentBrowserOptions,
+                mode: 'cdp',
+                cdpEndpoint,
+                ...(headless !== undefined ? { headless } : {})
+            });
+            const ok = await isBrowserAvailable();
+            if (ok) {
+                logger.info('已成功自动接管现有 CDP 浏览器');
+                return {
+                    available: true,
+                    reconnected: true,
+                    adopted: true,
+                    status: await getBrowserStatus()
+                };
+            }
+        } catch (e) {
+            logger.warn('自动接管现有 CDP 浏览器失败:', e?.message || e);
+            return {
+                available: false,
+                reconnected: false,
+                message: e?.message || '自动接管失败'
+            };
+        }
+
+        return {
+            available: false,
+            reconnected: false,
+            message: '检测到 CDP 浏览器，但接管后不可用'
+        };
     }
+
     const available = await isBrowserAvailable();
     if (available) {
         return { available: true, status: await getBrowserStatus() };
@@ -560,7 +668,17 @@ export async function checkAndReconnectBrowser(options = {}) {
 
     if (reconnect) {
         try {
-            await getOrCreateBrowser(currentBrowserOptions);
+            const cdpStatus = await checkCdpEndpointAvailable(cdpEndpoint);
+            if (cdpStatus.ok) {
+                await getOrCreateBrowser({
+                    ...currentBrowserOptions,
+                    mode: 'cdp',
+                    cdpEndpoint,
+                    ...(headless !== undefined ? { headless } : {})
+                });
+            } else {
+                await getOrCreateBrowser(currentBrowserOptions);
+            }
             const ok = await isBrowserAvailable();
             if (ok) {
                 logger.info('浏览器已重新连接');

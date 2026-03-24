@@ -44,6 +44,7 @@ import packageJson from '../../../package.json'
 const route = useRoute()
 const menuItems = [
   { path: '/browser', title: '浏览器连接', icon: 'linkify' },
+  { path: '/tasks', title: '任务中心', icon: 'tasks' },
   { path: '/browser-debug', title: '浏览器调试', icon: 'window maximize outline' },
   { path: '/api-doc', title: 'API 文档', icon: 'book' }
 ]
@@ -58,12 +59,13 @@ const currentSubtitle = computed(() => {
 const headerIcon = computed(() => {
   const pathToIcon = {
     '/browser': 'linkify',
+    '/tasks': 'tasks',
     '/browser-debug': 'window maximize outline',
     '/api-doc': 'book'
   }
   return pathToIcon[route.path] || 'home'
 })
-const isWidePage = computed(() => ['/browser-debug'].includes(route.path))
+const isWidePage = computed(() => ['/browser-debug', '/tasks'].includes(route.path))
 
 </script>
 

@@ -13,6 +13,7 @@ import publishService from './publishService.js';
 import crawlerService from './crawlerService.js';
 import { getBrowserStatus, getOrCreateBrowser, closeBrowser, launchWithDebugPort, checkAndReconnectBrowser, exportUserData, forceCloseBrowserByPort, listBrowserPages, getBrowserPage, createBrowserPage } from '../services/BrowserService.js';
 import { PublishService } from '../services/PublishService.js';
+import taskManager from '../services/TaskManager.js';
 import { logger } from '../utils/logger.js';
 import { PLATFORM_CONFIGS } from '../config/platforms.js';
 
@@ -110,6 +111,89 @@ function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function normalizeSourceId(value) {
+    const normalized = String(value || '').trim();
+    return normalized || undefined;
+}
+
+function buildTaskSource(input = {}) {
+    const sourceId = normalizeSourceId(input.sourceId || input.id);
+    const source = input.source && typeof input.source === 'object'
+        ? { ...input.source }
+        : {};
+
+    return {
+        system: String(source.system || 'yishe-client').trim() || 'yishe-client',
+        module: String(source.module || 'queue-executor').trim() || 'queue-executor',
+        kind: String(source.kind || input.kind || 'generic').trim() || 'generic',
+        id: normalizeSourceId(source.id || sourceId),
+        traceId: normalizeSourceId(source.traceId),
+        createdAt: source.createdAt,
+    };
+}
+
+function buildSourcesFromQueryBody(body = {}) {
+    const sourceIds = Array.isArray(body?.sourceIds)
+        ? body.sourceIds.map((item) => normalizeSourceId(item)).filter(Boolean)
+        : [];
+
+    if (sourceIds.length > 0) {
+        return sourceIds.map((sourceId) => buildTaskSource({ sourceId }));
+    }
+
+    const sources = Array.isArray(body?.sources) ? body.sources : [];
+    if (sources.length > 0) {
+        return sources.map((source) => buildTaskSource(source));
+    }
+
+    const singleSourceId = normalizeSourceId(body?.sourceId);
+    if (singleSourceId) {
+        return [buildTaskSource({ sourceId: singleSourceId })];
+    }
+
+    return [];
+}
+
+async function checkCdpEndpointAvailable(endpoint) {
+    try {
+        const targetUrl = new URL('/json/version', endpoint).toString();
+        const httpModule = targetUrl.startsWith('https:') ? await import('https') : await import('http');
+        return await new Promise((resolve) => {
+            const req = httpModule.default.get(targetUrl, { timeout: 3000 }, (resp) => {
+                let data = '';
+                resp.on('data', (chunk) => { data += chunk; });
+                resp.on('end', () => {
+                    try {
+                        const json = JSON.parse(data);
+                        resolve({
+                            ok: true,
+                            endpoint,
+                            browser: json.Browser || json.browser || ''
+                        });
+                    } catch {
+                        resolve({
+                            ok: true,
+                            endpoint,
+                            browser: ''
+                        });
+                    }
+                });
+            });
+            req.on('error', (error) => resolve({ ok: false, endpoint, error: error?.message || '连接失败' }));
+            req.on('timeout', () => {
+                req.destroy();
+                resolve({ ok: false, endpoint, error: '连接超时' });
+            });
+        });
+    } catch (error) {
+        return {
+            ok: false,
+            endpoint,
+            error: error?.message || '检测 CDP 端点失败'
+        };
+    }
+}
+
 /**
  * API服务器类
  */
@@ -131,6 +215,7 @@ class ApiServer {
      * 启动服务器
      */
     start() {
+        taskManager.start();
         this.server = http.createServer(async (req, res) => {
             await this.handleRequest(req, res);
         });
@@ -149,9 +234,11 @@ class ApiServer {
         if (this.browserCheckTimer) return;
         this.browserCheckTimer = setInterval(async () => {
             try {
-                const result = await checkAndReconnectBrowser({ reconnect: false });
-                if (!result.available && result.message && !result.message.includes('无浏览器实例')) {
-                    logger.debug('定时检测: 浏览器已断开，引用已清除');
+                const result = await checkAndReconnectBrowser({ reconnect: true });
+                if (result.available && (result.reconnected || result.adopted)) {
+                    logger.info('定时检测: 已自动接管可用浏览器实例');
+                } else if (!result.available && result.message && !result.message.includes('无浏览器实例')) {
+                    logger.debug('定时检测: 未接管到可用浏览器实例:', result.message);
                 }
             } catch (e) {
                 logger.debug('定时检测浏览器异常:', e?.message);
@@ -177,6 +264,7 @@ class ApiServer {
         }
         this.isStopping = true;
         this.stopBrowserCheckTimer();
+        taskManager.stop();
         try {
             await closeBrowser();
         } catch (error) {
@@ -190,6 +278,66 @@ class ApiServer {
             this.server = null;
             logger.info('API服务器已停止');
         }
+    }
+
+    createRuntimeTask(payload = {}) {
+        const {
+            kind = 'publish',
+            action = 'publish',
+            source = {},
+            sourceId,
+            metadata = {},
+            concurrent = false,
+            platforms = [],
+            publishInfo = {},
+        } = payload;
+        const taskSource = buildTaskSource({ source, sourceId, kind });
+
+        return taskManager.createTask({
+            kind,
+            action,
+            platform: platforms[0],
+            platforms,
+            source: taskSource,
+            metadata,
+            request: {
+                action,
+                concurrent: !!concurrent,
+                platforms,
+                payload: publishInfo,
+            },
+        }, async (taskContext) => {
+            taskContext.setStep('dispatch', {
+                current: 0,
+                total: platforms.length,
+                message: `准备执行 ${platforms.length} 个平台任务`,
+            });
+                taskContext.log('info', '开始执行任务', {
+                    action,
+                    platforms,
+                    source: taskSource,
+                });
+
+            const result = await publishService.batchPublish(
+                platforms,
+                { ...publishInfo, action },
+                {
+                    concurrent: !!concurrent,
+                    taskLogHandler: (entry) => {
+                        if (!entry?.message) return;
+                        taskContext.log(entry.level || 'info', entry.message, entry.data);
+                    }
+                }
+            );
+
+            taskContext.setStep('completed', {
+                current: platforms.length,
+                total: platforms.length,
+                message: result?.success ? '任务执行完成' : '任务执行结束（含失败）',
+            });
+            taskContext.log(result?.success ? 'info' : 'warn', '任务执行返回结果', result);
+            return result;
+        });
     }
 
     /**
@@ -229,6 +377,18 @@ class ApiServer {
                     await this.handleSwaggerUi(req, res);
                 } else if (reqPath === '/api/publish' && method === 'POST') {
                     await this.handlePublishUnified(req, res);
+                } else if (reqPath === '/api/tasks/execute' && method === 'POST') {
+                    await this.handleCreateExecutionTask(req, res);
+                } else if (reqPath === '/api/tasks' && method === 'GET') {
+                    await this.handleListTasks(req, res, url);
+                } else if (reqPath === '/api/tasks/query-by-source' && method === 'POST') {
+                    await this.handleQueryTasksBySource(req, res);
+                } else if (reqPath === '/api/tasks/logs/query-by-source' && method === 'POST') {
+                    await this.handleQueryTaskLogsBySource(req, res);
+                } else if (reqPath.startsWith('/api/tasks/') && reqPath.endsWith('/logs') && method === 'GET') {
+                    await this.handleGetTaskLogs(req, res, reqPath);
+                } else if (reqPath.startsWith('/api/tasks/') && method === 'GET') {
+                    await this.handleGetTask(req, res, reqPath);
                 } else if (reqPath === '/api/schedule' && method === 'POST') {
                     await this.handleCreateSchedule(req, res);
                 } else if (reqPath === '/api/platforms' && method === 'GET') {
@@ -298,6 +458,12 @@ class ApiServer {
                 { method: 'GET', path: '/api/docs', description: 'API 文档（JSON）' },
                 { method: 'GET', path: '/api/swagger', description: 'Swagger UI 在线调试页' },
                 { method: 'POST', path: '/api/publish', description: '发布（传 platforms 数组，单平台如 ["douyin"]）' },
+                { method: 'POST', path: '/api/tasks/execute', description: '创建通用执行任务（基于 source 进行弱绑定）' },
+                { method: 'GET', path: '/api/tasks', description: '获取任务列表' },
+                { method: 'GET', path: '/api/tasks/:taskId', description: '获取任务详情' },
+                { method: 'GET', path: '/api/tasks/:taskId/logs', description: '获取任务日志' },
+                { method: 'POST', path: '/api/tasks/query-by-source', description: '按 source 批量查询任务状态' },
+                { method: 'POST', path: '/api/tasks/logs/query-by-source', description: '按 source 批量查询任务日志' },
                 { method: 'POST', path: '/api/schedule', description: '创建定时发布' },
                 { method: 'GET', path: '/api/platforms', description: '支持的平台列表' },
                 { method: 'POST', path: '/api/upload', description: '上传视频/图片文件' },
@@ -866,7 +1032,17 @@ class ApiServer {
      */
     async handlePublishUnified(req, res) {
         const body = await this.parseBody(req);
-        const { platforms, concurrent = false, action = 'publish', ...publishInfo } = body;
+        const {
+            platforms,
+            concurrent = false,
+            action = 'publish',
+            asyncTask = false,
+            taskMode,
+            source,
+            sourceId,
+            metadata,
+            ...publishInfo
+        } = body;
 
         if (!platforms || !Array.isArray(platforms) || platforms.length === 0) {
             this.sendResponse(res, 400, { success: false, error: '请传 platforms（数组），单平台如 ["douyin"]，多平台如 ["douyin", "xiaohongshu"]' });
@@ -874,8 +1050,172 @@ class ApiServer {
         }
 
         const normalizedPublishInfo = this.normalizePublishInfo(publishInfo, platforms);
+        if (asyncTask === true || taskMode === 'task') {
+            const task = this.createRuntimeTask({
+                kind: 'publish',
+                action,
+                source,
+                sourceId,
+                metadata,
+                concurrent,
+                platforms,
+                publishInfo: normalizedPublishInfo,
+            });
+
+            this.sendResponse(res, 200, {
+                success: true,
+                data: {
+                    taskId: task.id,
+                    status: task.status,
+                    source: task.source,
+                    createdAt: task.createdAt,
+                },
+                message: '发布任务已创建',
+            });
+            return;
+        }
+
         const result = await publishService.batchPublish(platforms, { ...normalizedPublishInfo, action }, { concurrent });
         this.sendResponse(res, 200, result);
+    }
+
+    async handleCreateExecutionTask(req, res) {
+        try {
+            const body = await this.parseBody(req);
+            const {
+                kind = 'publish',
+                action = 'publish',
+                source = {},
+                sourceId,
+                metadata = {},
+                concurrent = false,
+                platforms,
+                platform,
+                ...publishInfo
+            } = body || {};
+
+            const resolvedPlatforms = Array.isArray(platforms) && platforms.length > 0
+                ? platforms.map((item) => String(item || '').trim()).filter(Boolean)
+                : (platform ? [String(platform).trim()] : []);
+
+            if (resolvedPlatforms.length === 0) {
+                this.sendResponse(res, 400, { success: false, message: '缺少平台信息，请传 platform 或 platforms' });
+                return;
+            }
+
+            const normalizedPublishInfo = this.normalizePublishInfo(publishInfo, resolvedPlatforms);
+            const task = this.createRuntimeTask({
+                kind,
+                action,
+                source,
+                sourceId,
+                metadata,
+                concurrent,
+                platforms: resolvedPlatforms,
+                publishInfo: normalizedPublishInfo,
+            });
+
+            this.sendResponse(res, 200, {
+                success: true,
+                data: {
+                    taskId: task.id,
+                    status: task.status,
+                    source: task.source,
+                    createdAt: task.createdAt,
+                },
+                message: '任务已创建',
+            });
+        } catch (error) {
+            this.sendResponse(res, 500, { success: false, message: error.message || '创建任务失败' });
+        }
+    }
+
+    async handleListTasks(req, res, url) {
+        try {
+            const tasks = taskManager.listTasks({
+                status: url.searchParams.get('status') || undefined,
+                kind: url.searchParams.get('kind') || undefined,
+                platform: url.searchParams.get('platform') || undefined,
+                sourceId: url.searchParams.get('sourceId') || undefined,
+            });
+            this.sendResponse(res, 200, {
+                success: true,
+                data: tasks,
+                total: tasks.length,
+            });
+        } catch (error) {
+            this.sendResponse(res, 500, { success: false, message: error.message || '获取任务列表失败' });
+        }
+    }
+
+    async handleGetTask(req, res, reqPath) {
+        try {
+            const taskId = decodeURIComponent(reqPath.replace('/api/tasks/', '').trim());
+            const task = taskManager.getTask(taskId);
+            if (!task) {
+                this.sendResponse(res, 404, { success: false, message: '任务不存在' });
+                return;
+            }
+            this.sendResponse(res, 200, { success: true, data: task });
+        } catch (error) {
+            this.sendResponse(res, 500, { success: false, message: error.message || '获取任务详情失败' });
+        }
+    }
+
+    async handleGetTaskLogs(req, res, reqPath) {
+        try {
+            const taskId = decodeURIComponent(reqPath.replace('/api/tasks/', '').replace('/logs', '').trim());
+            const logs = taskManager.getTaskLogs(taskId);
+            if (!logs) {
+                this.sendResponse(res, 404, { success: false, message: '任务不存在' });
+                return;
+            }
+            this.sendResponse(res, 200, {
+                success: true,
+                data: logs,
+                total: logs.length,
+            });
+        } catch (error) {
+            this.sendResponse(res, 500, { success: false, message: error.message || '获取任务日志失败' });
+        }
+    }
+
+    async handleQueryTasksBySource(req, res) {
+        try {
+            const body = await this.parseBody(req);
+            const sources = buildSourcesFromQueryBody(body);
+            const detail = body?.detail === true;
+            const data = taskManager.queryTasksBySourceList(sources, { detail });
+            this.sendResponse(res, 200, {
+                success: true,
+                data,
+                total: data.length,
+            });
+        } catch (error) {
+            this.sendResponse(res, 500, { success: false, message: error.message || '按 source 查询任务失败' });
+        }
+    }
+
+    async handleQueryTaskLogsBySource(req, res) {
+        try {
+            const body = await this.parseBody(req);
+            const sources = buildSourcesFromQueryBody(body);
+            const data = sources.map((source) => {
+                const logs = taskManager.findTaskLogsBySource(source);
+                return {
+                    source,
+                    exists: !!logs,
+                    logs: logs || [],
+                };
+            });
+            this.sendResponse(res, 200, {
+                success: true,
+                data,
+                total: data.length,
+            });
+        } catch (error) {
+            this.sendResponse(res, 500, { success: false, message: error.message || '按 source 查询任务日志失败' });
+        }
     }
 
     /**
@@ -1203,10 +1543,18 @@ class ApiServer {
                 const userDataDir = (body.cdpUserDataDir || body.userDataDir || getDefaultCdpUserDataDir()).trim();
                 // 正确处理 headless 参数：明确传递布尔值
                 const headless = body.headless === true ? true : (body.headless === false ? false : undefined);
-                logger.info('API connect 未指定 CDP，先启动带调试端口的 Chrome（独立目录）再连接, headless:', headless);
-                launchWithDebugPort({ port, userDataDir, headless });
-                await sleep(3500);
-                await getOrCreateBrowser({ mode: 'cdp', cdpEndpoint: `http://127.0.0.1:${port}`, headless });
+                const cdpEndpoint = `http://127.0.0.1:${port}`;
+                const existingCdp = await checkCdpEndpointAvailable(cdpEndpoint);
+
+                if (existingCdp.ok) {
+                    logger.info(`API connect 检测到现有 CDP 浏览器，直接复用: ${cdpEndpoint}`);
+                    await getOrCreateBrowser({ mode: 'cdp', cdpEndpoint, headless });
+                } else {
+                    logger.info('API connect 未检测到可复用 CDP 浏览器，启动新浏览器再连接, headless:', headless);
+                    launchWithDebugPort({ port, userDataDir, headless });
+                    await sleep(3500);
+                    await getOrCreateBrowser({ mode: 'cdp', cdpEndpoint, headless });
+                }
             }
             const status = await getBrowserStatus();
             this.sendResponse(res, 200, { success: true, data: status });

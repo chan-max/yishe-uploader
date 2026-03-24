@@ -66,6 +66,11 @@ class DoudianPublisher extends BasicShopPublisher {
             const targetImages = images.slice(0, 5);
 
             logger.info('开始执行抖店商品图片上传流程');
+            logger.info('抖店发布入参摘要:', {
+                imageCount: targetImages.length,
+                title: publishInfo.title || '',
+                fileInputStartIndex: Number(settings.fileInputStartIndex ?? publishInfo.fileInputStartIndex ?? 2)
+            });
 
             if (targetImages.length === 0) {
                 return {
@@ -79,9 +84,13 @@ class DoudianPublisher extends BasicShopPublisher {
             }
 
             const browser = await getOrCreateBrowser();
+            logger.info('抖店已获取浏览器实例，准备创建新页面');
             page = await browser.newPage();
+            logger.info('抖店新页面创建成功');
             await this.pageOperator.setupAntiDetection(page);
+            logger.info('抖店页面反检测设置完成');
 
+            logger.info(`抖店准备打开商品发布页: ${this.uploadUrl}`);
             await page.goto(this.uploadUrl, {
                 waitUntil: 'domcontentloaded',
                 timeout: 60000
@@ -102,10 +111,15 @@ class DoudianPublisher extends BasicShopPublisher {
                 };
             }
 
+            logger.info('抖店登录状态校验通过');
             const preparedImages = await this._prepareImages(targetImages);
             tempFiles.push(...preparedImages.tempFiles);
             logger.info(`抖店准备上传的图片数量: ${preparedImages.filePaths.length}`);
             logger.info('抖店准备上传的图片路径:', preparedImages.filePaths.map((item) => toUserFriendlyPath(item)));
+            logger.info('抖店图片预处理结果:', {
+                tempFileCount: preparedImages.tempFiles.length,
+                fileNames: preparedImages.filePaths.map((item) => getPathFileName(item))
+            });
 
             if (preparedImages.filePaths.length === 0) {
                 return {
@@ -156,12 +170,14 @@ class DoudianPublisher extends BasicShopPublisher {
         logger.info(`抖店上传参数: requested=${requested}, preferredStartIndex=${preferredStartIndex}`);
         await page.waitForLoadState('domcontentloaded').catch(() => undefined);
         await page.waitForTimeout(2000);
+        logger.info('抖店页面已完成基础加载，准备扫描文件输入框');
 
         try {
             await page.waitForSelector(this.selectors.fileInput, {
                 timeout: 15000,
                 state: 'attached'
             });
+            logger.info(`抖店已检测到文件输入框选择器: ${this.selectors.fileInput}`);
         } catch {
             logger.warn('抖店页面在等待 input[type="file"] 时超时');
         }
@@ -177,74 +193,70 @@ class DoudianPublisher extends BasicShopPublisher {
             : 0;
         const usableInputCount = Math.max(0, initialInputCount - startIndex);
         const maxUploadCount = Math.min(requested, usableInputCount, 5);
-        const uploadedPaths = [];
         logger.info(`抖店上传索引策略: startIndex=${startIndex}, usableInputCount=${usableInputCount}, maxUploadCount=${maxUploadCount}`);
 
-        for (let index = 0; index < maxUploadCount; index += 1) {
-            const targetFile = filePaths[index];
-            const currentInputCount = await inputLocator.count();
-            const targetInputIndex = startIndex + index;
-            const targetFileName = getPathFileName(targetFile) || toUserFriendlyPath(targetFile);
-
-            logger.info(`抖店上传循环开始: imageIndex=${index + 1}, targetInputIndex=${targetInputIndex}, currentInputCount=${currentInputCount}, file=${targetFileName}`);
-            if (currentInputCount <= targetInputIndex) {
-                logger.warn(`抖店当前 input[type="file"] 数量不足，停止上传。current=${currentInputCount}, targetIndex=${targetInputIndex}`);
-                break;
-            }
-
-            const locator = inputLocator.nth(targetInputIndex);
-
-            try {
-                const inputSnapshot = await locator.evaluate((el, fileIndex) => ({
-                    fileIndex,
-                    className: el.className || '',
-                    id: el.id || '',
-                    name: el.getAttribute('name') || '',
-                    accept: el.getAttribute('accept') || '',
-                    multiple: !!el.multiple,
-                    disabled: !!el.disabled,
-                    existingFiles: Array.from(el.files || []).map((file) => file.name)
-                }), index + 1);
-                logger.info(`抖店目标 input 快照:`, inputSnapshot);
-            } catch (error) {
-                logger.warn(`抖店读取目标 input 快照失败: ${error?.message || error}`);
-            }
-
-            logger.info(`抖店准备上传第 ${index + 1} 张图片，当前 input 总数: ${currentInputCount}，目标索引: ${targetInputIndex}`);
-            const beforeUploadedCount = await this._countUploadedImageCandidates(page);
-            await locator.setInputFiles([targetFile]);
-            const inputAccepted = await this._waitForInputReceiveFile(locator, targetFile, index + 1, targetInputIndex);
-            const uploadConfirmed = await this._waitForUploadConfirmation(page, beforeUploadedCount, index + 1, targetInputIndex, targetFileName);
-            const uploadSucceeded = inputAccepted || uploadConfirmed;
-
-            if (uploadSucceeded) {
-                uploadedPaths.push(targetFile);
-                logger.info(`抖店第 ${index + 1} 张图片上传已确认: input[${targetInputIndex}], file=${targetFileName}`);
-            } else {
-                logger.warn(`抖店第 ${index + 1} 张图片未确认上传成功: input[${targetInputIndex}], file=${targetFileName}`);
-            }
-
-            await page.waitForTimeout(2500);
-
-            try {
-                const afterSnapshot = await locator.evaluate((el, fileIndex) => ({
-                    fileIndex,
-                    existingFiles: Array.from(el.files || []).map((file) => file.name)
-                }), index + 1);
-                logger.info(`抖店写入后 input 快照:`, afterSnapshot);
-            } catch (error) {
-                logger.warn(`抖店读取写入后 input 快照失败: ${error?.message || error}`);
-            }
-        }
-
-        await page.waitForTimeout(3000);
-        logger.info(`抖店上传流程结束: uploaded=${uploadedPaths.length}/${requested}`);
-
+        const batchUploadResult = await this._uploadImagesByFirstInput(page, inputLocator, filePaths.slice(0, Math.min(requested, 5)));
+        logger.info(`抖店上传流程结束: uploaded=${batchUploadResult.uploadedPaths.length}/${requested}`);
         return {
             requested,
             availableInputs: initialInputCount,
-            startIndex,
-            uploadedPaths
+            startIndex: batchUploadResult.inputIndex,
+            uploadedPaths: batchUploadResult.uploadedPaths
+        };
+    }
+
+    async _uploadImagesByFirstInput(page, inputLocator, filePaths) {
+        const candidateCount = await inputLocator.count();
+        logger.info(`抖店开始尝试首个文件输入框批量上传: candidateCount=${candidateCount}, fileCount=${filePaths.length}`);
+
+        if (candidateCount <= 0) {
+            logger.warn('抖店未找到任何文件输入框');
+            return {
+                inputIndex: 0,
+                uploadedPaths: []
+            };
+        }
+
+        const locator = inputLocator.first();
+        const inputIndex = 0;
+        let snapshot = null;
+
+        try {
+            snapshot = await locator.evaluate((el) => ({
+                className: el.className || '',
+                id: el.id || '',
+                name: el.getAttribute('name') || '',
+                accept: el.getAttribute('accept') || '',
+                multiple: !!el.multiple,
+                disabled: !!el.disabled,
+                existingFiles: Array.from(el.files || []).map((file) => file.name)
+            }));
+            logger.info(`抖店首个文件输入框快照: input[${inputIndex}]`, snapshot);
+        } catch (error) {
+            logger.warn(`抖店读取首个文件输入框快照失败: input[${inputIndex}], error=${error?.message || error}`);
+            throw error;
+        }
+
+        if (snapshot?.disabled) {
+            throw new Error('抖店首个文件输入框不可用（disabled）');
+        }
+
+        const beforeUploadedCount = await this._countUploadedImageCandidates(page);
+        logger.info(`抖店准备使用首个文件输入框批量上传: input[${inputIndex}], beforePreviewCount=${beforeUploadedCount}, files=${filePaths.map((item) => toUserFriendlyPath(item))}`);
+        await locator.setInputFiles(filePaths);
+        logger.info(`抖店首个文件输入框批量 setInputFiles 完成: input[${inputIndex}], count=${filePaths.length}`);
+
+        const inputAccepted = await this._waitForInputReceiveFiles(locator, filePaths, inputIndex);
+        const uploadConfirmed = await this._waitForBatchUploadConfirmation(page, beforeUploadedCount, filePaths, inputIndex);
+
+        if (!inputAccepted && !uploadConfirmed) {
+            throw new Error(`抖店首个文件输入框批量上传未确认成功: input[${inputIndex}]`);
+        }
+
+        await page.waitForTimeout(3000);
+        return {
+            inputIndex,
+            uploadedPaths: [...filePaths]
         };
     }
 
@@ -277,6 +289,41 @@ class DoudianPublisher extends BasicShopPublisher {
             return true;
         } catch (error) {
             logger.warn(`抖店第 ${imageIndex} 张图片写入 input[${inputIndex}] 后未检测到文件状态: ${error?.message || error}`);
+            return false;
+        }
+    }
+
+    async _waitForInputReceiveFiles(locator, targetFiles, inputIndex) {
+        const expectedNames = targetFiles.map((item) => getPathFileName(item)).filter(Boolean);
+        logger.info(`抖店等待单输入框接收多文件: input[${inputIndex}], expectedCount=${expectedNames.length}, files=${expectedNames}`);
+
+        try {
+            await locator.waitFor({ state: 'attached', timeout: 5000 });
+            await locator.evaluate((el, expected) => {
+                return new Promise((resolve, reject) => {
+                    const startedAt = Date.now();
+                    const check = () => {
+                        const names = Array.from(el.files || []).map((file) => file.name);
+                        const matched = expected.length > 0
+                            && names.length === expected.length
+                            && expected.every((name, index) => names[index] === name);
+                        if (matched) {
+                            resolve(true);
+                            return;
+                        }
+                        if (Date.now() - startedAt > 8000) {
+                            reject(new Error(`文件未完整进入 input, current=${names.join(', ')}`));
+                            return;
+                        }
+                        setTimeout(check, 150);
+                    };
+                    check();
+                });
+            }, expectedNames);
+            logger.info(`抖店单输入框已接收多文件: input[${inputIndex}], files=${expectedNames}`);
+            return true;
+        } catch (error) {
+            logger.warn(`抖店单输入框接收多文件未确认: input[${inputIndex}], error=${error?.message || error}`);
             return false;
         }
     }
@@ -326,6 +373,7 @@ class DoudianPublisher extends BasicShopPublisher {
 
     async _waitForUploadConfirmation(page, beforeCount, imageIndex, inputIndex, fileName) {
         try {
+            logger.info(`抖店等待页面上传确认: imageIndex=${imageIndex}, input[${inputIndex}], file=${fileName}, beforePreviewCount=${beforeCount}`);
             await page.waitForFunction((previousCount) => {
                 const selectors = [
                     '[class*="upload"] img',
@@ -365,7 +413,62 @@ class DoudianPublisher extends BasicShopPublisher {
             const afterCount = await this._countUploadedImageCandidates(page);
             logger.info(`抖店检测到页面上传预览数量增长: imageIndex=${imageIndex}, input[${inputIndex}], file=${fileName}, before=${beforeCount}, after=${afterCount}`);
             return true;
-        } catch {
+        } catch (error) {
+            logger.warn(`抖店等待页面上传确认超时: imageIndex=${imageIndex}, input[${inputIndex}], file=${fileName}, beforePreviewCount=${beforeCount}, error=${error?.message || error}`);
+            return false;
+        }
+    }
+
+    async _waitForBatchUploadConfirmation(page, beforeCount, targetFiles, inputIndex) {
+        const expectedIncrease = targetFiles.length;
+        const fileNames = targetFiles.map((item) => getPathFileName(item));
+        logger.info(`抖店等待单输入框批量上传确认: input[${inputIndex}], beforePreviewCount=${beforeCount}, expectedIncrease=${expectedIncrease}, files=${fileNames}`);
+
+        try {
+            await page.waitForFunction((payload) => {
+                const selectors = [
+                    '[class*="upload"] img',
+                    '[class*="Upload"] img',
+                    '[class*="image"] img',
+                    '[class*="Image"] img',
+                    '[class*="picture"] img',
+                    '[class*="Picture"] img',
+                    '.arco-upload-list img',
+                    '.semi-upload-list img',
+                    '.ant-upload-list img',
+                    'img[src^="blob:"]',
+                    'img[src^="data:image/"]'
+                ];
+
+                const nodes = selectors.flatMap((selector) => Array.from(document.querySelectorAll(selector)));
+                const uniqueKeys = new Set();
+
+                nodes.forEach((node) => {
+                    if (!(node instanceof HTMLImageElement)) {
+                        return;
+                    }
+                    const src = node.currentSrc || node.src || '';
+                    const width = node.naturalWidth || node.width || 0;
+                    const height = node.naturalHeight || node.height || 0;
+                    if (!src) {
+                        return;
+                    }
+                    if (width > 32 || height > 32 || /^blob:|^data:image\//.test(src)) {
+                        uniqueKeys.add(`${src}|${width}|${height}`);
+                    }
+                });
+
+                return uniqueKeys.size >= payload.beforeCount + payload.expectedIncrease;
+            }, {
+                beforeCount,
+                expectedIncrease
+            }, { timeout: 15000 });
+
+            const afterCount = await this._countUploadedImageCandidates(page);
+            logger.info(`抖店单输入框批量上传预览确认成功: input[${inputIndex}], before=${beforeCount}, after=${afterCount}, files=${fileNames}`);
+            return true;
+        } catch (error) {
+            logger.warn(`抖店单输入框批量上传预览确认超时: input[${inputIndex}], before=${beforeCount}, expectedIncrease=${expectedIncrease}, error=${error?.message || error}`);
             return false;
         }
     }

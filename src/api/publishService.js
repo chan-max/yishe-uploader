@@ -22,26 +22,36 @@ class PublishService {
      * @param {string} payload.action - 能力动作，默认 publish
      * @returns {Promise<Object>} 执行结果
      */
-    async executePlatformAction(platform, payload = {}) {
+    async executePlatformAction(platform, payload = {}, runtimeOptions = {}) {
         try {
             const action = payload.action || 'publish';
-            logger.info(`开始执行平台能力: ${platform}.${action}`);
+            const run = async () => {
+                logger.info(`开始执行平台能力: ${platform}.${action}`);
 
-            const resolved = resolvePlatformCapability(platform, action);
-            if (!resolved?.capability?.handler) {
-                throw new Error(`平台 ${platform} 不支持动作: ${action}`);
+                const resolved = resolvePlatformCapability(platform, action);
+                if (!resolved?.capability?.handler) {
+                    throw new Error(`平台 ${platform} 不支持动作: ${action}`);
+                }
+
+                const result = await resolved.capability.handler(payload);
+
+                logger.info(`平台 ${platform}.${action} 执行结果:`, result);
+
+                return {
+                    platform,
+                    action,
+                    ...result,
+                    timestamp: new Date().toISOString()
+                };
+            };
+
+            if (runtimeOptions?.taskLogHandler) {
+                return await logger.runWithContext({
+                    handler: runtimeOptions.taskLogHandler
+                }, run);
             }
 
-            const result = await resolved.capability.handler(payload);
-
-            logger.info(`平台 ${platform}.${action} 执行结果:`, result);
-
-            return {
-                platform,
-                action,
-                ...result,
-                timestamp: new Date().toISOString()
-            };
+            return await run();
 
         } catch (error) {
             logger.error(`平台 ${platform} 执行动作失败:`, error);
@@ -61,11 +71,11 @@ class PublishService {
      * 发布到单个平台
      * 为兼容旧接口保留，内部委托给 executePlatformAction
      */
-    async publishToPlatform(platform, publishInfo) {
+    async publishToPlatform(platform, publishInfo, runtimeOptions = {}) {
         return this.executePlatformAction(platform, {
             action: publishInfo?.action || 'publish',
             ...publishInfo
-        });
+        }, runtimeOptions);
     }
 
     /**
@@ -81,12 +91,12 @@ class PublishService {
             logger.info(`开始批量执行动作 ${action}，目标平台数: ${platforms.length}`);
 
             const results = [];
-            const { concurrent = false } = options;
+            const { concurrent = false, taskLogHandler } = options;
 
             if (concurrent) {
                 logger.info('使用并发模式执行');
                 const promises = platforms.map(platform =>
-                    this.executePlatformAction(platform, payload)
+                    this.executePlatformAction(platform, payload, { taskLogHandler })
                 );
                 const platformResults = await Promise.allSettled(promises);
 
@@ -107,7 +117,7 @@ class PublishService {
             } else {
                 logger.info('使用顺序模式执行');
                 for (const platform of platforms) {
-                    const result = await this.executePlatformAction(platform, payload);
+                    const result = await this.executePlatformAction(platform, payload, { taskLogHandler });
                     results.push(result);
 
                     // 平台间间隔，避免频繁操作
