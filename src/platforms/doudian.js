@@ -1,6 +1,19 @@
 import { BasicShopPublisher } from './basicShopPublisher.js';
 import { getOrCreateBrowser } from '../services/BrowserService.js';
 import { logger } from '../utils/logger.js';
+import path from 'path';
+
+function toUserFriendlyPath(filePath) {
+    return String(filePath || '').replace(/\\/g, '/');
+}
+
+function getPathFileName(filePath) {
+    const normalizedPath = String(filePath || '').replace(/\\/g, '/');
+    if (!normalizedPath) {
+        return '';
+    }
+    return path.posix.basename(normalizedPath);
+}
 
 class DoudianPublisher extends BasicShopPublisher {
     constructor() {
@@ -92,7 +105,7 @@ class DoudianPublisher extends BasicShopPublisher {
             const preparedImages = await this._prepareImages(targetImages);
             tempFiles.push(...preparedImages.tempFiles);
             logger.info(`抖店准备上传的图片数量: ${preparedImages.filePaths.length}`);
-            logger.info('抖店准备上传的图片路径:', preparedImages.filePaths);
+            logger.info('抖店准备上传的图片路径:', preparedImages.filePaths.map((item) => toUserFriendlyPath(item)));
 
             if (preparedImages.filePaths.length === 0) {
                 return {
@@ -122,8 +135,8 @@ class DoudianPublisher extends BasicShopPublisher {
                     requested: uploadResult.requested,
                     availableInputs: uploadResult.availableInputs,
                     startIndex: uploadResult.startIndex,
-                    uploadedPaths: uploadResult.uploadedPaths,
-                    uploadedNames: uploadResult.uploadedPaths.map((item) => item.split('/').pop()),
+                    uploadedPaths: uploadResult.uploadedPaths.map((item) => toUserFriendlyPath(item)),
+                    uploadedNames: uploadResult.uploadedPaths.map((item) => getPathFileName(item)),
                     pageKeptOpen: true
                 }
             };
@@ -171,7 +184,7 @@ class DoudianPublisher extends BasicShopPublisher {
             const targetFile = filePaths[index];
             const currentInputCount = await inputLocator.count();
             const targetInputIndex = startIndex + index;
-            const targetFileName = String(targetFile).split('/').pop() || targetFile;
+            const targetFileName = getPathFileName(targetFile) || toUserFriendlyPath(targetFile);
 
             logger.info(`抖店上传循环开始: imageIndex=${index + 1}, targetInputIndex=${targetInputIndex}, currentInputCount=${currentInputCount}, file=${targetFileName}`);
             if (currentInputCount <= targetInputIndex) {
@@ -198,10 +211,19 @@ class DoudianPublisher extends BasicShopPublisher {
             }
 
             logger.info(`抖店准备上传第 ${index + 1} 张图片，当前 input 总数: ${currentInputCount}，目标索引: ${targetInputIndex}`);
+            const beforeUploadedCount = await this._countUploadedImageCandidates(page);
             await locator.setInputFiles([targetFile]);
-            await this._waitForInputReceiveFile(locator, targetFile, index + 1, targetInputIndex);
-            uploadedPaths.push(targetFile);
-            logger.info(`抖店第 ${index + 1} 张图片已写入 input[${targetInputIndex}]，等待页面处理完成`);
+            const inputAccepted = await this._waitForInputReceiveFile(locator, targetFile, index + 1, targetInputIndex);
+            const uploadConfirmed = await this._waitForUploadConfirmation(page, beforeUploadedCount, index + 1, targetInputIndex, targetFileName);
+            const uploadSucceeded = inputAccepted || uploadConfirmed;
+
+            if (uploadSucceeded) {
+                uploadedPaths.push(targetFile);
+                logger.info(`抖店第 ${index + 1} 张图片上传已确认: input[${targetInputIndex}], file=${targetFileName}`);
+            } else {
+                logger.warn(`抖店第 ${index + 1} 张图片未确认上传成功: input[${targetInputIndex}], file=${targetFileName}`);
+            }
+
             await page.waitForTimeout(2500);
 
             try {
@@ -227,7 +249,7 @@ class DoudianPublisher extends BasicShopPublisher {
     }
 
     async _waitForInputReceiveFile(locator, targetFile, imageIndex, inputIndex) {
-        const fileName = String(targetFile).split('/').pop() || '';
+        const fileName = getPathFileName(targetFile);
         logger.info(`抖店等待 input[${inputIndex}] 接收文件: imageIndex=${imageIndex}, fileName=${fileName}`);
 
         try {
@@ -252,8 +274,99 @@ class DoudianPublisher extends BasicShopPublisher {
                 });
             }, fileName);
             logger.info(`抖店检测到 input[${inputIndex}] 已接收文件: imageIndex=${imageIndex}, fileName=${fileName}`);
+            return true;
         } catch (error) {
             logger.warn(`抖店第 ${imageIndex} 张图片写入 input[${inputIndex}] 后未检测到文件状态: ${error?.message || error}`);
+            return false;
+        }
+    }
+
+    async _countUploadedImageCandidates(page) {
+        try {
+            return await page.evaluate(() => {
+                const selectors = [
+                    '[class*="upload"] img',
+                    '[class*="Upload"] img',
+                    '[class*="image"] img',
+                    '[class*="Image"] img',
+                    '[class*="picture"] img',
+                    '[class*="Picture"] img',
+                    '.arco-upload-list img',
+                    '.semi-upload-list img',
+                    '.ant-upload-list img',
+                    'img[src^="blob:"]',
+                    'img[src^="data:image/"]'
+                ];
+
+                const nodes = selectors.flatMap((selector) => Array.from(document.querySelectorAll(selector)));
+                const uniqueKeys = new Set();
+
+                nodes.forEach((node) => {
+                    if (!(node instanceof HTMLImageElement)) {
+                        return;
+                    }
+                    const src = node.currentSrc || node.src || '';
+                    const width = node.naturalWidth || node.width || 0;
+                    const height = node.naturalHeight || node.height || 0;
+                    if (!src) {
+                        return;
+                    }
+                    if (width > 32 || height > 32 || /^blob:|^data:image\//.test(src)) {
+                        uniqueKeys.add(`${src}|${width}|${height}`);
+                    }
+                });
+
+                return uniqueKeys.size;
+            });
+        } catch (error) {
+            logger.warn(`抖店统计已上传图片候选失败: ${error?.message || error}`);
+            return 0;
+        }
+    }
+
+    async _waitForUploadConfirmation(page, beforeCount, imageIndex, inputIndex, fileName) {
+        try {
+            await page.waitForFunction((previousCount) => {
+                const selectors = [
+                    '[class*="upload"] img',
+                    '[class*="Upload"] img',
+                    '[class*="image"] img',
+                    '[class*="Image"] img',
+                    '[class*="picture"] img',
+                    '[class*="Picture"] img',
+                    '.arco-upload-list img',
+                    '.semi-upload-list img',
+                    '.ant-upload-list img',
+                    'img[src^="blob:"]',
+                    'img[src^="data:image/"]'
+                ];
+
+                const nodes = selectors.flatMap((selector) => Array.from(document.querySelectorAll(selector)));
+                const uniqueKeys = new Set();
+
+                nodes.forEach((node) => {
+                    if (!(node instanceof HTMLImageElement)) {
+                        return;
+                    }
+                    const src = node.currentSrc || node.src || '';
+                    const width = node.naturalWidth || node.width || 0;
+                    const height = node.naturalHeight || node.height || 0;
+                    if (!src) {
+                        return;
+                    }
+                    if (width > 32 || height > 32 || /^blob:|^data:image\//.test(src)) {
+                        uniqueKeys.add(`${src}|${width}|${height}`);
+                    }
+                });
+
+                return uniqueKeys.size > previousCount;
+            }, beforeCount, { timeout: 12000 });
+
+            const afterCount = await this._countUploadedImageCandidates(page);
+            logger.info(`抖店检测到页面上传预览数量增长: imageIndex=${imageIndex}, input[${inputIndex}], file=${fileName}, before=${beforeCount}, after=${afterCount}`);
+            return true;
+        } catch {
+            return false;
         }
     }
 }

@@ -124,6 +124,7 @@ class ApiServer {
         this.port = port;
         this.server = null;
         this.browserCheckTimer = null;
+        this.isStopping = false;
     }
 
     /**
@@ -170,10 +171,23 @@ class ApiServer {
     /**
      * 停止服务器
      */
-    stop() {
+    async stop() {
+        if (this.isStopping) {
+            return;
+        }
+        this.isStopping = true;
         this.stopBrowserCheckTimer();
+        try {
+            await closeBrowser();
+        } catch (error) {
+            logger.warn('停止 API 服务时关闭浏览器失败:', error?.message || error);
+        }
+
         if (this.server) {
-            this.server.close();
+            await new Promise((resolve) => {
+                this.server.close(() => resolve());
+            });
+            this.server = null;
             logger.info('API服务器已停止');
         }
     }
@@ -2073,3 +2087,50 @@ export default apiServer;
 
 // 作为入口运行时启动服务器（npm start 即 node src/api/server.js）
 apiServer.start();
+
+let shutdownTriggered = false;
+
+async function shutdownServer(reason, options = {}) {
+    if (shutdownTriggered) {
+        return;
+    }
+    shutdownTriggered = true;
+
+    const { exitCode = 0, error = null } = options;
+    logger.warn(`收到退出信号，开始清理发布端资源: ${reason}`);
+
+    if (error) {
+        logger.error(`发布端异常退出原因 (${reason}):`, error);
+    }
+
+    try {
+        await apiServer.stop();
+    } catch (stopError) {
+        logger.error('发布端停止过程中发生错误:', stopError);
+    } finally {
+        process.exit(exitCode);
+    }
+}
+
+process.on('SIGINT', () => {
+    shutdownServer('SIGINT', { exitCode: 0 });
+});
+
+process.on('SIGTERM', () => {
+    shutdownServer('SIGTERM', { exitCode: 0 });
+});
+
+process.on('SIGBREAK', () => {
+    shutdownServer('SIGBREAK', { exitCode: 0 });
+});
+
+process.on('uncaughtException', (error) => {
+    shutdownServer('uncaughtException', { exitCode: 1, error });
+});
+
+process.on('unhandledRejection', (reason) => {
+    shutdownServer('unhandledRejection', {
+        exitCode: 1,
+        error: reason instanceof Error ? reason : new Error(String(reason))
+    });
+});
