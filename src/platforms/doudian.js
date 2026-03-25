@@ -91,6 +91,10 @@ class DoudianPublisher {
 
             logger.info('抖店登录状态校验通过');
             const titleFilled = title ? await this._fillTitle(page, title) : false;
+            // 商品主图逻辑：标题填写后，展开主图操作区，为后续主图上传做准备。
+            if (titleFilled) {
+                await this._hoverMaterialButtonGuider(page);
+            }
             let uploadResult = {
                 requested: targetImages.length,
                 availableInputs: 0,
@@ -160,21 +164,24 @@ class DoudianPublisher {
         logger.info(`抖店上传参数: requested=${requested}, preferredStartIndex=${preferredStartIndex}`);
         await page.waitForLoadState('domcontentloaded').catch(() => undefined);
         await page.waitForTimeout(2000);
-        logger.info('抖店页面已完成基础加载，准备扫描文件输入框');
+        // 商品主图逻辑：仅定位“主图”字段区域下的文件输入框，避免误命中页面上其他上传入口。
+        logger.info('抖店页面已完成基础加载，准备扫描主图区域文件输入框');
+
+        const mainImageInputSelector = '[attr-field-id="主图"] input[type="file"]';
 
         try {
-            await page.waitForSelector('input[type="file"]', {
+            await page.waitForSelector(mainImageInputSelector, {
                 timeout: 15000,
                 state: 'attached'
             });
-            logger.info('抖店已检测到文件输入框选择器: input[type="file"]');
+            logger.info(`抖店已检测到主图文件输入框选择器: ${mainImageInputSelector}`);
         } catch {
-            logger.warn('抖店页面在等待 input[type="file"] 时超时');
+            logger.warn(`抖店页面在等待主图文件输入框时超时: ${mainImageInputSelector}`);
         }
 
-        const inputLocator = page.locator('input[type="file"]');
+        const inputLocator = page.locator(mainImageInputSelector);
         const initialInputCount = await inputLocator.count();
-        logger.info(`抖店检测到初始 input[type="file"] 数量: ${initialInputCount}`);
+        logger.info(`抖店检测到主图区域文件输入框数量: ${initialInputCount}`);
         const safeStartIndex = Number.isFinite(preferredStartIndex) && preferredStartIndex >= 0
             ? preferredStartIndex
             : 2;
@@ -197,10 +204,10 @@ class DoudianPublisher {
 
     async _uploadImagesByFirstInput(page, inputLocator, filePaths) {
         const candidateCount = await inputLocator.count();
-        logger.info(`抖店开始尝试首个文件输入框批量上传: candidateCount=${candidateCount}, fileCount=${filePaths.length}`);
+        logger.info(`抖店开始尝试主图首个文件输入框批量上传: candidateCount=${candidateCount}, fileCount=${filePaths.length}`);
 
         if (candidateCount <= 0) {
-            logger.warn('抖店未找到任何文件输入框');
+            logger.warn('抖店未找到主图区域文件输入框');
             return {
                 inputIndex: 0,
                 uploadedPaths: []
@@ -492,6 +499,49 @@ class DoudianPublisher {
 
         logger.info(`抖店标题填写完成: ${finalTitle}`);
         return true;
+    }
+
+    async _hoverMaterialButtonGuider(page) {
+        const selector = '#material-button-guider';
+        try {
+            await page.waitForSelector(selector, { timeout: 10000, state: 'visible' });
+            // 商品主图逻辑：先把主图引导按钮滚进可视区域，再执行 hover，确保后续操作按钮能稳定出现。
+            await page.locator(selector).scrollIntoViewIfNeeded();
+            logger.info(`抖店商品主图逻辑：已将元素滚动到可视区域: ${selector}`);
+            await page.waitForTimeout(300);
+            await page.hover(selector);
+            logger.info(`抖店商品主图逻辑：已执行悬停步骤: ${selector}`);
+            await page.waitForTimeout(500);
+            await this._clickMaterialActionAfter(page);
+        } catch (error) {
+            logger.warn(`抖店商品主图逻辑：悬停 ${selector} 失败: ${error?.message || error}`);
+        }
+    }
+
+    async _clickMaterialActionAfter(page) {
+        const selector = '[attr-field-id="主图"] [class*="hoverBottomWrapper"] [class*=index-module_actionAfter]';
+        const targetIndex = 1;
+        try {
+            await page.waitForSelector(selector, { timeout: 10000, state: 'visible' });
+            // 商品主图逻辑：点击主图区域 hover 后展开的第二个操作按钮。
+            const clicked = await page.evaluate(({ targetSelector, index }) => {
+                const target = document.querySelectorAll(targetSelector)?.[index];
+                if (!(target instanceof HTMLElement)) {
+                    return false;
+                }
+                target.click();
+                return true;
+            }, { targetSelector: selector, index: targetIndex });
+
+            if (!clicked) {
+                throw new Error(`未找到第 ${targetIndex + 1} 个匹配元素`);
+            }
+
+            logger.info(`抖店商品主图逻辑：已点击元素 document.querySelectorAll('${selector}')[${targetIndex}]`);
+            await page.waitForTimeout(500);
+        } catch (error) {
+            logger.warn(`抖店商品主图逻辑：点击 document.querySelectorAll('${selector}')[${targetIndex}] 失败: ${error?.message || error}`);
+        }
     }
 
     async _checkLogin(page) {
