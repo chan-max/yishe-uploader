@@ -314,7 +314,17 @@ export class TaskManager {
         };
 
         try {
-            const result = await executor(context);
+            const result = await logger.runWithContext({
+                handler: (entry) => {
+                    if (!entry?.message) return;
+                    this._appendLog(
+                        taskId,
+                        entry.level || 'info',
+                        entry.message,
+                        entry.data
+                    );
+                }
+            }, () => executor(context));
             this._setTaskState(taskId, {
                 status: 'success',
                 step: 'completed',
@@ -390,7 +400,27 @@ export class TaskManager {
         this.queue = this.queue.filter((item) => item.taskId !== taskId);
     }
 
+    _buildLogInfo(task, options = {}) {
+        const includeItems = options.includeItems === true;
+        const items = Array.isArray(task?.logs) ? task.logs : [];
+        const last = items.length > 0 ? items[items.length - 1] : null;
+
+        return {
+            count: items.length,
+            last: last ? {
+                id: last.id,
+                level: last.level,
+                message: last.message,
+                timestamp: last.timestamp,
+                data: cloneJsonSafe(last.data),
+            } : null,
+            ...(includeItems ? { items: items.map((item) => ({ ...item })) } : {}),
+        };
+    }
+
     _toTaskSummary(task) {
+        const logInfo = this._buildLogInfo(task);
+
         return {
             id: task.id,
             kind: task.kind,
@@ -407,15 +437,26 @@ export class TaskManager {
             progress: cloneJsonSafe(task.progress),
             result: cloneJsonSafe(task.result),
             error: cloneJsonSafe(task.error),
+            logInfo,
+            logCount: logInfo.count,
+            lastLog: logInfo.last ? {
+                level: logInfo.last.level,
+                message: logInfo.last.message,
+                timestamp: logInfo.last.timestamp,
+            } : null,
         };
     }
 
     _toTaskDetail(task) {
+        const summary = this._toTaskSummary(task);
+        const detailedLogInfo = this._buildLogInfo(task, { includeItems: true });
+
         return {
-            ...this._toTaskSummary(task),
+            ...summary,
             request: cloneJsonSafe(task.request),
             metadata: cloneJsonSafe(task.metadata),
-            logs: task.logs.map((item) => ({ ...item })),
+            logInfo: detailedLogInfo,
+            logs: detailedLogInfo.items || [],
         };
     }
 }

@@ -72,6 +72,7 @@
               <th>动作</th>
               <th>平台</th>
               <th>步骤</th>
+              <th>日志概览</th>
               <th>来源</th>
               <th>创建时间</th>
               <th>更新时间</th>
@@ -88,6 +89,10 @@
               <td>{{ task.action || '-' }}</td>
               <td>{{ task.platform || (task.platforms || []).join(', ') || '-' }}</td>
               <td>{{ task.step || '-' }}</td>
+              <td class="log-summary-cell" :title="formatLastLog(task.logInfo?.last || task.lastLog)">
+                <div class="log-summary-main">{{ formatLastLog(task.logInfo?.last || task.lastLog) }}</div>
+                <div class="log-summary-meta">共 {{ task.logInfo?.count ?? task.logCount ?? 0 }} 条</div>
+              </td>
               <td class="source-cell" :title="formatSource(task.source)">{{ formatSource(task.source) }}</td>
               <td>{{ formatDateTime(task.createdAt) }}</td>
               <td>{{ formatDateTime(task.updatedAt || task.createdAt) }}</td>
@@ -332,6 +337,11 @@ function formatSource(source) {
   return parts.length ? parts.join(' / ') : '-'
 }
 
+function formatLastLog(lastLog) {
+  if (!lastLog?.message) return '-'
+  return `[${String(lastLog.level || 'info').toUpperCase()}] ${lastLog.message}`
+}
+
 function prettyJson(value) {
   if (value === undefined) return '-'
   if (value === null) return 'null'
@@ -399,6 +409,10 @@ async function loadTaskDetail(taskId) {
   try {
     const res = await getTaskDetail(taskId)
     selectedTask.value = res?.data || null
+    if (Array.isArray(selectedTask.value?.logInfo?.items)) {
+      selectedLogs.value = selectedTask.value.logInfo.items
+      expandedLogIds.value = new Set()
+    }
   } catch (error) {
     console.error('[task-detail]', error)
     setStatus(error?.message || '获取任务详情失败', 'error')
@@ -566,6 +580,23 @@ onUnmounted(() => {
   word-break: break-all;
 }
 
+.log-summary-cell {
+  min-width: 220px;
+  max-width: 320px;
+}
+
+.log-summary-main {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.log-summary-meta {
+  margin-top: 0.2rem;
+  color: #6b7280;
+  font-size: 12px;
+}
+
 .source-cell {
   max-width: 240px;
 }
@@ -641,7 +672,6 @@ onUnmounted(() => {
   flex: 1 1 auto;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1.25fr) minmax(360px, 0.75fr);
   gap: 1.25rem;
   padding: 1.25rem 1.5rem 1.5rem;
 }
@@ -896,8 +926,6 @@ onUnmounted(() => {
 
 @media (max-width: 1200px) {
   .task-modal-body {
-    grid-template-columns: 1fr;
-    grid-template-rows: minmax(0, 1fr) 320px;
     padding: 1rem;
   }
 
