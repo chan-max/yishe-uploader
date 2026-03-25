@@ -786,20 +786,54 @@ async function getVisiblePagesDetailed() {
             seenPlaceholderKeys.add(key);
         }
 
-        visiblePages.push({ page, title, url });
+        let focusState = {
+            hasFocus: false,
+            visibilityState: 'unknown'
+        };
+        try {
+            focusState = await page.evaluate(() => ({
+                hasFocus: typeof document?.hasFocus === 'function' ? document.hasFocus() : false,
+                visibilityState: document?.visibilityState || 'unknown'
+            }));
+        } catch {
+            // ignore page state probing failures during navigation
+        }
+
+        visiblePages.push({
+            page,
+            title,
+            url,
+            hasFocus: !!focusState?.hasFocus,
+            visibilityState: String(focusState?.visibilityState || 'unknown')
+        });
     }
+
+    const focusedIndex = visiblePages.findIndex((item) => item.hasFocus);
+    const visibleIndex = visiblePages.findIndex((item) => item.visibilityState === 'visible');
 
     return visiblePages.map((item, index) => ({
         index,
         page: item.page,
         title: item.title,
-        url: item.url
+        url: item.url,
+        hasFocus: item.hasFocus,
+        visibilityState: item.visibilityState,
+        isFocusedTab: focusedIndex >= 0 ? index === focusedIndex : false,
+        isVisibleTab: visibleIndex >= 0 ? index === visibleIndex : false
     }));
 }
 
 export async function listBrowserPages() {
     const pages = await getVisiblePagesDetailed();
-    return pages.map(({ index, title, url }) => ({ index, title, url }));
+    return pages.map(({ index, title, url, hasFocus, visibilityState, isFocusedTab, isVisibleTab }) => ({
+        index,
+        title,
+        url,
+        hasFocus,
+        visibilityState,
+        isFocusedTab,
+        isVisibleTab
+    }));
 }
 
 export async function getBrowserPage(pageIndex) {

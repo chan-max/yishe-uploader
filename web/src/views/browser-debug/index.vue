@@ -14,7 +14,8 @@
             </div>
             <div class="ui tiny labels">
               <span class="ui tiny label">{{ browserPages.length }} Tabs</span>
-              <span class="ui tiny teal label" v-if="selectedPage">#{{ selectedPage.index }}</span>
+              <span class="ui tiny teal label" v-if="selectedPage">Selected #{{ selectedPage.index }}</span>
+              <span class="ui tiny orange label" v-if="focusedPage">Focused #{{ focusedPage.index }}</span>
             </div>
           </div>
 
@@ -43,11 +44,13 @@
                 :key="page.index"
                 type="button"
                 class="tab-chip"
-                :class="{ active: selectedPageIndex === page.index }"
+                :class="{ active: selectedPageIndex === page.index, focused: page.isFocusedTab, visible: page.isVisibleTab && !page.isFocusedTab }"
                 @click="selectPage(page.index)"
               >
                 <span class="tab-chip-index">#{{ page.index }}</span>
                 <span class="tab-chip-title">{{ page.title || 'Untitled' }}</span>
+                <span v-if="page.isFocusedTab" class="tab-chip-flag focused">FOCUSED</span>
+                <span v-else-if="page.isVisibleTab" class="tab-chip-flag visible">VISIBLE</span>
               </button>
             </div>
             <div v-else class="ui tiny message empty-inline-state">
@@ -542,6 +545,7 @@ const playwrightForm = reactive({
 })
 
 const selectedPage = computed(() => browserPages.value.find(item => item.index === selectedPageIndex.value) || null)
+const focusedPage = computed(() => browserPages.value.find(item => item.isFocusedTab) || null)
 const hasSelectedPage = computed(() => selectedPage.value !== null)
 const selectedBrowserJsTemplate = computed(() => browserJsTemplates.find(item => item.id === browserJsForm.templateId) || null)
 const selectedPlaywrightTemplate = computed(() => playwrightTemplates.find(item => item.id === playwrightForm.templateId) || null)
@@ -561,8 +565,13 @@ function syncSelectedPage() {
     selectedPageIndex.value = null
     return
   }
+
+  const preferredPage = browserPages.value.find(item => item.isFocusedTab)
+    || browserPages.value.find(item => item.isVisibleTab)
+    || browserPages.value[0]
+
   if (!browserPages.value.some(item => item.index === selectedPageIndex.value)) {
-    selectedPageIndex.value = browserPages.value[0].index
+    selectedPageIndex.value = preferredPage.index
   }
 }
 
@@ -769,17 +778,50 @@ onUnmounted(() => {
   gap: 0.45rem;
   max-width: 280px;
   border: 1px solid #d9e1ec;
-  background: #f8fafc;
+  background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
   border-radius: 999px;
   padding: 0.45rem 0.75rem;
   cursor: pointer;
-  transition: 0.2s ease;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease, background 0.2s ease;
 }
 
-.tab-chip:hover,
+.tab-chip:hover {
+  transform: translateY(-1px);
+  border-color: #93c5fd;
+  box-shadow: 0 10px 24px rgba(148, 163, 184, 0.18);
+}
+
 .tab-chip.active {
   border-color: #2185d0;
-  background: #edf6ff;
+  background: linear-gradient(180deg, #edf6ff 0%, #dbeafe 100%);
+  box-shadow: 0 10px 24px rgba(59, 130, 246, 0.16);
+}
+
+.tab-chip.focused {
+  border-color: #f59e0b;
+  background: linear-gradient(135deg, #fff7ed 0%, #ffedd5 52%, #fde68a 100%);
+  box-shadow: 0 14px 30px rgba(245, 158, 11, 0.28);
+}
+
+.tab-chip.focused.active {
+  border-color: #d97706;
+  box-shadow: 0 16px 34px rgba(217, 119, 6, 0.34);
+}
+
+.tab-chip.visible:not(.focused) {
+  border-color: #10b981;
+  background: linear-gradient(180deg, #ecfdf5 0%, #d1fae5 100%);
+  box-shadow: 0 10px 24px rgba(16, 185, 129, 0.16);
+}
+
+.tab-chip.focused .tab-chip-title,
+.tab-chip.focused .tab-chip-index {
+  color: #92400e;
+}
+
+.tab-chip.visible:not(.focused) .tab-chip-title,
+.tab-chip.visible:not(.focused) .tab-chip-index {
+  color: #065f46;
 }
 
 .tab-chip-index {
@@ -794,6 +836,26 @@ onUnmounted(() => {
   white-space: nowrap;
   color: #111827;
   font-size: 12px;
+}
+
+.tab-chip-flag {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.16rem 0.45rem;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.tab-chip-flag.focused {
+  color: #b45309;
+  background: #ffedd5;
+}
+
+.tab-chip-flag.visible {
+  color: #047857;
+  background: #d1fae5;
 }
 
 .empty-inline-state {
