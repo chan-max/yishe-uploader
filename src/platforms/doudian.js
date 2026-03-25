@@ -1,7 +1,9 @@
-import { BasicShopPublisher } from './basicShopPublisher.js';
 import { getOrCreateBrowser } from '../services/BrowserService.js';
+import { ImageManager } from '../services/ImageManager.js';
+import { PageOperator } from '../services/PageOperator.js';
 import { logger } from '../utils/logger.js';
 import path from 'path';
+import fs from 'fs';
 
 function toUserFriendlyPath(filePath) {
     return String(filePath || '').replace(/\\/g, '/');
@@ -23,45 +25,17 @@ function resolveDoudianCreateUrl(defaultUrl, copyId) {
     return `https://fxg.jinritemai.com/ffa/g/create?copyid=${encodeURIComponent(normalizedCopyId)}`;
 }
 
-class DoudianPublisher extends BasicShopPublisher {
+function normalizeDoudianTitle(title) {
+    return String(title || '').trim().slice(0, 30);
+}
+
+class DoudianPublisher {
     constructor() {
-        super({
-            platformKey: 'doudian',
-            platformName: '抖店',
-            uploadUrl: 'https://fxg.jinritemai.com/ffa/g/create',
-            selectors: {
-                titleInput: [
-                    'input[placeholder*="商品标题"]',
-                    'input[placeholder*="标题"]',
-                    'input[placeholder*="商品名称"]',
-                    'input[name*="title"]'
-                ],
-                contentInput: [
-                    'textarea[placeholder*="商品描述"]',
-                    'textarea[placeholder*="描述"]',
-                    'textarea',
-                    '[contenteditable="true"]'
-                ],
-                fileInput: 'input[type="file"]',
-                priceInput: [
-                    'input[placeholder*="价格"]',
-                    'input[placeholder*="售价"]',
-                    'input[name*="price"]'
-                ],
-                draftButton: [
-                    'button:has-text("保存草稿")',
-                    'button:has-text("暂存")',
-                    'button:has-text("保存")'
-                ],
-                submitButton: [
-                    'button:has-text("发布商品")',
-                    'button:has-text("提交审核")',
-                    'button:has-text("发布")'
-                ],
-                userElements: ['.header-user-info', '.account-info', '.user-info', '.avatar', '[class*="merchant"]'],
-                loginElements: ['.login-btn', '.login-button', '.auth-btn', 'text=登录', 'text=扫码登录']
-            }
-        });
+        this.platformKey = 'doudian';
+        this.platformName = '抖店';
+        this.uploadUrl = 'https://fxg.jinritemai.com/ffa/g/create';
+        this.imageManager = new ImageManager();
+        this.pageOperator = new PageOperator();
     }
 
     async publish(publishInfo = {}) {
@@ -70,6 +44,7 @@ class DoudianPublisher extends BasicShopPublisher {
 
         try {
             const settings = publishInfo.platformOptions || publishInfo.publishOptions || publishInfo.platformSettings?.[this.platformKey] || {};
+            const title = normalizeDoudianTitle(publishInfo.title || publishInfo.name || '');
             const images = Array.isArray(publishInfo.images) && publishInfo.images.length > 0
                 ? publishInfo.images.filter(Boolean)
                 : (Array.isArray(publishInfo.imageSources) ? publishInfo.imageSources.filter(Boolean) : []);
@@ -82,20 +57,9 @@ class DoudianPublisher extends BasicShopPublisher {
                 copyId,
                 targetCreateUrl,
                 imageCount: targetImages.length,
-                title: publishInfo.title || '',
+                title,
                 fileInputStartIndex: Number(settings.fileInputStartIndex ?? publishInfo.fileInputStartIndex ?? 2)
             });
-
-            if (targetImages.length === 0) {
-                return {
-                    success: false,
-                    message: '抖店图片上传失败：未提供可用图片',
-                    data: {
-                        uploaded: 0,
-                        requested: 0
-                    }
-                };
-            }
 
             const browser = await getOrCreateBrowser();
             logger.info('抖店已获取浏览器实例，准备创建新页面');
@@ -126,38 +90,48 @@ class DoudianPublisher extends BasicShopPublisher {
             }
 
             logger.info('抖店登录状态校验通过');
-            const preparedImages = await this._prepareImages(targetImages);
-            tempFiles.push(...preparedImages.tempFiles);
-            logger.info(`抖店准备上传的图片数量: ${preparedImages.filePaths.length}`);
-            logger.info('抖店准备上传的图片路径:', preparedImages.filePaths.map((item) => toUserFriendlyPath(item)));
-            logger.info('抖店图片预处理结果:', {
-                tempFileCount: preparedImages.tempFiles.length,
-                fileNames: preparedImages.filePaths.map((item) => getPathFileName(item))
-            });
+            const titleFilled = title ? await this._fillTitle(page, title) : false;
+            let uploadResult = {
+                requested: targetImages.length,
+                availableInputs: 0,
+                startIndex: 0,
+                uploadedPaths: []
+            };
 
-            if (preparedImages.filePaths.length === 0) {
-                return {
-                    success: false,
-                    message: '抖店图片上传失败：图片路径不可用',
-                    data: {
-                        uploaded: 0,
-                        requested: targetImages.length
-                    }
-                };
+            if (targetImages.length > 0) {
+                const preparedImages = await this._prepareImages(targetImages);
+                tempFiles.push(...preparedImages.tempFiles);
+                logger.info(`抖店准备上传的图片数量: ${preparedImages.filePaths.length}`);
+                logger.info('抖店准备上传的图片路径:', preparedImages.filePaths.map((item) => toUserFriendlyPath(item)));
+                logger.info('抖店图片预处理结果:', {
+                    tempFileCount: preparedImages.tempFiles.length,
+                    fileNames: preparedImages.filePaths.map((item) => getPathFileName(item))
+                });
+
+                if (preparedImages.filePaths.length > 0) {
+                    uploadResult = await this._uploadImagesToSeparateInputs(
+                        page,
+                        preparedImages.filePaths.slice(0, 5),
+                        Number(settings.fileInputStartIndex ?? publishInfo.fileInputStartIndex ?? 2)
+                    );
+                } else {
+                    logger.warn('抖店图片路径预处理后为空，跳过文件输入步骤');
+                }
+            } else {
+                logger.info('当前未提供图片，先跳过文件输入步骤');
             }
 
-            const uploadResult = await this._uploadImagesToSeparateInputs(
-                page,
-                preparedImages.filePaths.slice(0, 5),
-                Number(settings.fileInputStartIndex ?? publishInfo.fileInputStartIndex ?? 2)
-            );
             const uploaded = uploadResult.uploadedPaths.length;
 
             return {
-                success: uploaded > 0,
-                message: uploaded > 0
-                    ? `抖店商品图片已上传 ${uploaded}/${uploadResult.requested} 张`
-                    : '抖店商品图片上传失败：未找到可用的文件输入框',
+                success: titleFilled || uploaded > 0,
+                message: titleFilled
+                    ? (uploaded > 0
+                        ? `抖店标题已填写，商品图片已上传 ${uploaded}/${uploadResult.requested} 张`
+                        : '抖店标题已填写，图片步骤暂未执行或未完成')
+                    : (uploaded > 0
+                        ? `抖店商品图片已上传 ${uploaded}/${uploadResult.requested} 张，但标题未填写成功`
+                        : '抖店标题和图片步骤都未完成'),
                 data: {
                     uploaded,
                     requested: uploadResult.requested,
@@ -165,6 +139,8 @@ class DoudianPublisher extends BasicShopPublisher {
                     startIndex: uploadResult.startIndex,
                     uploadedPaths: uploadResult.uploadedPaths.map((item) => toUserFriendlyPath(item)),
                     uploadedNames: uploadResult.uploadedPaths.map((item) => getPathFileName(item)),
+                    titleFilled,
+                    titleValue: titleFilled ? title : '',
                     pageKeptOpen: true
                 }
             };
@@ -187,16 +163,16 @@ class DoudianPublisher extends BasicShopPublisher {
         logger.info('抖店页面已完成基础加载，准备扫描文件输入框');
 
         try {
-            await page.waitForSelector(this.selectors.fileInput, {
+            await page.waitForSelector('input[type="file"]', {
                 timeout: 15000,
                 state: 'attached'
             });
-            logger.info(`抖店已检测到文件输入框选择器: ${this.selectors.fileInput}`);
+            logger.info('抖店已检测到文件输入框选择器: input[type="file"]');
         } catch {
             logger.warn('抖店页面在等待 input[type="file"] 时超时');
         }
 
-        const inputLocator = page.locator(this.selectors.fileInput);
+        const inputLocator = page.locator('input[type="file"]');
         const initialInputCount = await inputLocator.count();
         logger.info(`抖店检测到初始 input[type="file"] 数量: ${initialInputCount}`);
         const safeStartIndex = Number.isFinite(preferredStartIndex) && preferredStartIndex >= 0
@@ -484,6 +460,116 @@ class DoudianPublisher extends BasicShopPublisher {
         } catch (error) {
             logger.warn(`抖店单输入框批量上传预览确认超时: input[${inputIndex}], before=${beforeCount}, expectedIncrease=${expectedIncrease}, error=${error?.message || error}`);
             return false;
+        }
+    }
+
+    async _fillTitle(page, title) {
+        const finalTitle = normalizeDoudianTitle(title);
+        if (!finalTitle) {
+            logger.info('抖店标题为空，跳过填写');
+            return false;
+        }
+
+        logger.info(`抖店准备填写标题: ${finalTitle}`);
+
+        const titleFilled = await this._fillDoudianTitleInput(page, finalTitle);
+        if (!titleFilled) {
+            logger.warn('抖店未找到标题输入框: #pg-title-input');
+            return false;
+        }
+
+        try {
+            await page.waitForFunction((selector, expectedValue) => {
+                const input = document.querySelector(selector);
+                if (!(input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement)) {
+                    return false;
+                }
+                return String(input.value || '').trim() === expectedValue;
+            }, '#pg-title-input', finalTitle, { timeout: 5000 });
+        } catch (error) {
+            logger.warn(`抖店标题回读校验未通过: ${error?.message || error}`);
+        }
+
+        logger.info(`抖店标题填写完成: ${finalTitle}`);
+        return true;
+    }
+
+    async _checkLogin(page) {
+        const userSelectors = ['.header-user-info', '.account-info', '.user-info', '.avatar', '[class*="merchant"]'];
+        for (const selector of userSelectors) {
+            try {
+                if (await page.locator(selector).first().count()) {
+                    return true;
+                }
+            } catch {
+                // ignore
+            }
+        }
+
+        const loginSelectors = ['.login-btn', '.login-button', '.auth-btn', 'text=登录', 'text=扫码登录'];
+        for (const selector of loginSelectors) {
+            try {
+                if (await page.locator(selector).first().count()) {
+                    return false;
+                }
+            } catch {
+                // ignore
+            }
+        }
+
+        return !/login|signin|passport/i.test(page.url());
+    }
+
+    async _prepareImages(images) {
+        const filePaths = [];
+        const tempFiles = [];
+
+        for (let i = 0; i < images.length; i += 1) {
+            const source = String(images[i] || '').trim();
+            if (!source) continue;
+
+            if (/^https?:\/\//i.test(source)) {
+                const tempPath = await this.imageManager.downloadImage(source, `${this.platformKey}_${Date.now()}_${i}`);
+                filePaths.push(tempPath);
+                tempFiles.push(tempPath);
+                continue;
+            }
+
+            if (fs.existsSync(source)) {
+                filePaths.push(source);
+            }
+        }
+
+        return { filePaths, tempFiles };
+    }
+
+    async _fillDoudianTitleInput(page, value) {
+        const selector = '#pg-title-input';
+
+        try {
+            await page.waitForSelector(selector, { timeout: 10000, state: 'visible' });
+        } catch {
+            return false;
+        }
+
+        const input = page.locator(selector).first();
+        try {
+            await input.scrollIntoViewIfNeeded().catch(() => undefined);
+            await input.click({ clickCount: 3 }).catch(() => undefined);
+            await input.fill('').catch(() => undefined);
+            await input.fill(value);
+            return true;
+        } catch {
+            try {
+                await input.click({ clickCount: 3 }).catch(() => undefined);
+                await page.keyboard.press('Control+A').catch(() => undefined);
+                await page.keyboard.press('Meta+A').catch(() => undefined);
+                await page.keyboard.press('Backspace').catch(() => undefined);
+                await page.keyboard.type(value, { delay: 20 });
+                return true;
+            } catch {
+                return false;
+            }
         }
     }
 }

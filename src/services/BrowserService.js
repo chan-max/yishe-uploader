@@ -41,6 +41,61 @@ let currentCdpEndpoint = null;
 let connectPromise = null;
 let lastConnectError = null;
 let currentBrowserOptions = {};
+const FOCUS_TRACKER_SCRIPT = `
+(() => {
+  if (globalThis.__yisheFocusTrackerInstalled) {
+    return;
+  }
+
+  const ensureState = () => {
+    const prev = globalThis.__yisheFocusTracker || {};
+    const now = Date.now();
+    const next = {
+      hasFocus: typeof document?.hasFocus === 'function' ? document.hasFocus() : false,
+      visibilityState: document?.visibilityState || 'unknown',
+      lastFocusAt: Number(prev.lastFocusAt || 0),
+      lastBlurAt: Number(prev.lastBlurAt || 0),
+      lastVisibleAt: Number(prev.lastVisibleAt || 0),
+      updatedAt: now
+    };
+
+    if (next.hasFocus && !next.lastFocusAt) next.lastFocusAt = now;
+    if (next.visibilityState === 'visible' && !next.lastVisibleAt) next.lastVisibleAt = now;
+
+    globalThis.__yisheFocusTracker = next;
+    return next;
+  };
+
+  const updateState = (reason) => {
+    const prev = ensureState();
+    const now = Date.now();
+    const next = {
+      ...prev,
+      hasFocus: typeof document?.hasFocus === 'function' ? document.hasFocus() : false,
+      visibilityState: document?.visibilityState || 'unknown',
+      updatedAt: now,
+      lastReason: reason || 'update'
+    };
+
+    if (reason === 'focus' || next.hasFocus) next.lastFocusAt = now;
+    if (reason === 'blur') next.lastBlurAt = now;
+    if (reason === 'visible' || next.visibilityState === 'visible') next.lastVisibleAt = now;
+
+    globalThis.__yisheFocusTracker = next;
+  };
+
+  globalThis.__yisheFocusTrackerInstalled = true;
+  ensureState();
+
+  window.addEventListener('focus', () => updateState('focus'), true);
+  window.addEventListener('blur', () => updateState('blur'), true);
+  document.addEventListener('visibilitychange', () => {
+    updateState(document.visibilityState === 'visible' ? 'visible' : 'hidden');
+  }, true);
+  window.addEventListener('pageshow', () => updateState('pageshow'), true);
+  window.addEventListener('load', () => updateState('load'), true);
+})();
+`;
 // 浏览器状态管理
 let browserStatus = {
     isInitialized: false,
@@ -523,6 +578,7 @@ export async function getOrCreateBrowser(options = {}) {
                     contextOptions.viewport = { width: 1920, height: 1080 };
                 }
                 contextInstance = browserInstance.contexts()[0] || await browserInstance.newContext(contextOptions);
+                await installFocusTracker(contextInstance);
                 await setBrowserWindowMaximized(contextInstance, headless);
 
                 browserStatus.isInitialized = true;
@@ -569,6 +625,7 @@ export async function getOrCreateBrowser(options = {}) {
                 );
             }
 
+            await installFocusTracker(contextInstance);
             await setBrowserWindowMaximized(contextInstance, headless);
 
             browserStatus.isInitialized = true;
@@ -730,6 +787,29 @@ function getPagesInternal() {
     return contextInstance ? contextInstance.pages() : (browserInstance ? browserInstance.pages() : []);
 }
 
+async function installFocusTrackerForPage(page) {
+    if (!page || (typeof page.isClosed === 'function' && page.isClosed())) return;
+
+    try {
+        await page.evaluate(FOCUS_TRACKER_SCRIPT);
+    } catch {
+        // 页面导航中或尚未可执行脚本时忽略
+    }
+}
+
+async function installFocusTracker(context) {
+    if (!context) return;
+
+    try {
+        await context.addInitScript(FOCUS_TRACKER_SCRIPT);
+    } catch (error) {
+        logger.debug('注入 focus tracker init script 失败:', error?.message || error);
+    }
+
+    const pages = typeof context.pages === 'function' ? context.pages() : [];
+    await Promise.all(pages.map((page) => installFocusTrackerForPage(page)));
+}
+
 function isUserVisiblePage(page, { title = '', url = '' } = {}) {
     if (!page) return false;
     if (typeof page.isClosed === 'function' && page.isClosed()) return false;
@@ -788,13 +868,30 @@ async function getVisiblePagesDetailed() {
 
         let focusState = {
             hasFocus: false,
-            visibilityState: 'unknown'
+            visibilityState: 'unknown',
+            lastFocusAt: 0,
+            lastBlurAt: 0,
+            lastVisibleAt: 0,
+            updatedAt: 0
         };
         try {
-            focusState = await page.evaluate(() => ({
-                hasFocus: typeof document?.hasFocus === 'function' ? document.hasFocus() : false,
-                visibilityState: document?.visibilityState || 'unknown'
-            }));
+            focusState = await page.evaluate((trackerScript) => {
+                try {
+                    globalThis.eval(trackerScript);
+                } catch {
+                    // ignore
+                }
+
+                const tracker = globalThis.__yisheFocusTracker || {};
+                return {
+                    hasFocus: typeof document?.hasFocus === 'function' ? document.hasFocus() : false,
+                    visibilityState: document?.visibilityState || 'unknown',
+                    lastFocusAt: Number(tracker.lastFocusAt || 0),
+                    lastBlurAt: Number(tracker.lastBlurAt || 0),
+                    lastVisibleAt: Number(tracker.lastVisibleAt || 0),
+                    updatedAt: Number(tracker.updatedAt || 0)
+                };
+            }, FOCUS_TRACKER_SCRIPT);
         } catch {
             // ignore page state probing failures during navigation
         }
@@ -804,12 +901,36 @@ async function getVisiblePagesDetailed() {
             title,
             url,
             hasFocus: !!focusState?.hasFocus,
-            visibilityState: String(focusState?.visibilityState || 'unknown')
+            visibilityState: String(focusState?.visibilityState || 'unknown'),
+            lastFocusAt: Number(focusState?.lastFocusAt || 0),
+            lastBlurAt: Number(focusState?.lastBlurAt || 0),
+            lastVisibleAt: Number(focusState?.lastVisibleAt || 0),
+            updatedAt: Number(focusState?.updatedAt || 0)
         });
     }
 
-    const focusedIndex = visiblePages.findIndex((item) => item.hasFocus);
-    const visibleIndex = visiblePages.findIndex((item) => item.visibilityState === 'visible');
+    const focusedCandidate = visiblePages
+        .map((item, index) => ({ item, index }))
+        .filter(({ item }) => item.hasFocus || item.lastFocusAt > 0)
+        .sort((a, b) => {
+            if (Number(b.item.hasFocus) !== Number(a.item.hasFocus)) {
+                return Number(b.item.hasFocus) - Number(a.item.hasFocus);
+            }
+            return (b.item.lastFocusAt || 0) - (a.item.lastFocusAt || 0);
+        })[0];
+
+    const visibleCandidate = visiblePages
+        .map((item, index) => ({ item, index }))
+        .filter(({ item }) => item.visibilityState === 'visible' || item.lastVisibleAt > 0)
+        .sort((a, b) => {
+            if ((b.item.visibilityState === 'visible') !== (a.item.visibilityState === 'visible')) {
+                return Number(b.item.visibilityState === 'visible') - Number(a.item.visibilityState === 'visible');
+            }
+            return (b.item.lastVisibleAt || 0) - (a.item.lastVisibleAt || 0);
+        })[0];
+
+    const focusedIndex = focusedCandidate ? focusedCandidate.index : -1;
+    const visibleIndex = visibleCandidate ? visibleCandidate.index : -1;
 
     return visiblePages.map((item, index) => ({
         index,

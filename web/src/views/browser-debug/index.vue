@@ -521,6 +521,7 @@ return {
 
 const browserPages = ref([])
 const selectedPageIndex = ref(null)
+const lastAutoSelectedPageIndex = ref(null)
 const tabsLoading = ref(false)
 const actionLoading = ref(false)
 const resultText = ref('')
@@ -563,6 +564,7 @@ function setStatus(message, type = 'info') {
 function syncSelectedPage() {
   if (!browserPages.value.length) {
     selectedPageIndex.value = null
+    lastAutoSelectedPageIndex.value = null
     return
   }
 
@@ -570,13 +572,21 @@ function syncSelectedPage() {
     || browserPages.value.find(item => item.isVisibleTab)
     || browserPages.value[0]
 
-  if (!browserPages.value.some(item => item.index === selectedPageIndex.value)) {
+  const hasCurrentSelection = browserPages.value.some(item => item.index === selectedPageIndex.value)
+  const shouldFollowFocusedPage =
+    !hasCurrentSelection
+    || selectedPageIndex.value === null
+    || selectedPageIndex.value === lastAutoSelectedPageIndex.value
+
+  if (shouldFollowFocusedPage) {
     selectedPageIndex.value = preferredPage.index
+    lastAutoSelectedPageIndex.value = preferredPage.index
   }
 }
 
 function selectPage(index) {
   selectedPageIndex.value = index
+  lastAutoSelectedPageIndex.value = null
 }
 
 function applyBrowserJsTemplate() {
@@ -656,6 +666,7 @@ async function runAction(action, extra = {}) {
       syncSelectedPage()
       if (action === 'newPage' && data.page?.index >= 0) {
         selectedPageIndex.value = data.page.index
+        lastAutoSelectedPageIndex.value = data.page.index
       }
     } else {
       await refreshTabs(true)
@@ -695,7 +706,7 @@ onMounted(async () => {
   await refreshTabs(true)
   pollTimer = setInterval(() => {
     refreshTabs(true)
-  }, 3000)
+  }, 1000)
 })
 
 onUnmounted(() => {

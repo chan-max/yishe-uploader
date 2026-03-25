@@ -196,6 +196,7 @@ export const PLATFORM_CONFIGS = {
         checkLogin: true,
         selectors: {
             titleInput: [
+                '#pg-title-input',
                 'input[placeholder*="商品标题"]',
                 'input[placeholder*="标题"]',
                 'input[placeholder*="商品名称"]',
