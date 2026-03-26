@@ -409,6 +409,7 @@ export async function publishToDoudian(publishInfo = {}) {
                     logger.info(`抖店首个文件输入框批量 setInputFiles 完成: input[0], count=${uploadFiles.length}`);
 
                     let inputAccepted = false;
+                    let inputAcceptErrorMessage = '';
                     try {
                         logger.info(`抖店等待单输入框接收多文件: input[0], expectedCount=${expectedNames.length}, files=${expectedNames}`);
                         await firstInput.waitFor({ state: 'attached', timeout: 5000 });
@@ -432,7 +433,7 @@ export async function publishToDoudian(publishInfo = {}) {
                         inputAccepted = true;
                         logger.info(`抖店单输入框已接收多文件: input[0], files=${expectedNames}`);
                     } catch (error) {
-                        logger.warn(`抖店单输入框接收多文件未确认: input[0], error=${error?.message || error}`);
+                        inputAcceptErrorMessage = error?.message || String(error || '');
                     }
 
                     let uploadConfirmed = false;
@@ -472,7 +473,14 @@ export async function publishToDoudian(publishInfo = {}) {
                         }
                     }
 
+                    if (!inputAccepted && uploadConfirmed) {
+                        logger.info(`抖店单输入框文件确认已跳过: input[0], 原因=${inputAcceptErrorMessage || 'input.files 已被页面清空，但预览已确认上传成功'}`);
+                    }
+
                     if (!inputAccepted && !uploadConfirmed) {
+                        if (inputAcceptErrorMessage) {
+                            logger.warn(`抖店单输入框接收多文件未确认: input[0], error=${inputAcceptErrorMessage}`);
+                        }
                         throw new Error('抖店首个文件输入框批量上传未确认成功: input[0]');
                     }
 
