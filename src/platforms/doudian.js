@@ -29,6 +29,11 @@ function normalizeDoudianTitle(title) {
     return String(title || '').trim().slice(0, 30);
 }
 
+function normalizeMaterialHoverMode(value) {
+    const mode = String(value || '').trim().toLowerCase();
+    return mode === 'js' ? 'js' : 'native';
+}
+
 class DoudianPublisher {
     constructor() {
         this.platformKey = 'doudian';
@@ -51,6 +56,12 @@ class DoudianPublisher {
             const targetImages = images.slice(0, 5);
             const copyId = String(settings.copyId || publishInfo.copyId || '').trim();
             const targetCreateUrl = resolveDoudianCreateUrl(this.uploadUrl, copyId);
+            const materialHoverMode = normalizeMaterialHoverMode(
+                settings.materialHoverMode
+                ?? settings.hoverMode
+                ?? publishInfo.materialHoverMode
+                ?? publishInfo.hoverMode
+            );
 
             logger.info('开始执行抖店商品图片上传流程');
             logger.info('抖店发布入参摘要:', {
@@ -58,7 +69,8 @@ class DoudianPublisher {
                 targetCreateUrl,
                 imageCount: targetImages.length,
                 title,
-                fileInputStartIndex: Number(settings.fileInputStartIndex ?? publishInfo.fileInputStartIndex ?? 2)
+                fileInputStartIndex: Number(settings.fileInputStartIndex ?? publishInfo.fileInputStartIndex ?? 2),
+                materialHoverMode
             });
 
             const browser = await getOrCreateBrowser();
@@ -91,9 +103,103 @@ class DoudianPublisher {
 
             logger.info('抖店登录状态校验通过');
             const titleFilled = title ? await this._fillTitle(page, title) : false;
-            // 商品主图逻辑：标题填写后，展开主图操作区，为后续主图上传做准备。
+
+            // 商品主图部分逻辑：展开主图操作区，准备执行主图上传。
             if (titleFilled) {
-                await this._hoverMaterialButtonGuider(page);
+                const guiderSelector = '#material-button-guider';
+                const actionSelector = '[attr-field-id="主图"] [class*="hoverBottomWrapper"] [class*=index-module_actionAfter]';
+                const actionIndex = 1;
+
+                try {
+                    logger.info(`抖店商品主图逻辑：准备展开主图操作区，模式=${materialHoverMode}`);
+
+                    if (materialHoverMode === 'js') {
+                        const hoverResult = await page.evaluate((selector) => {
+                            const element = document.querySelector(selector);
+                            if (!(element instanceof HTMLElement)) {
+                                throw new Error(`未找到元素: ${selector}`);
+                            }
+
+                            element.scrollIntoView({
+                                block: 'center',
+                                inline: 'center',
+                                behavior: 'instant'
+                            });
+
+                            const rect = element.getBoundingClientRect();
+                            const inViewport = rect.width > 0
+                                && rect.height > 0
+                                && rect.bottom > 0
+                                && rect.right > 0
+                                && rect.top < window.innerHeight
+                                && rect.left < window.innerWidth;
+
+                            if (!inViewport) {
+                                throw new Error(`元素未进入可视区域: ${selector}`);
+                            }
+
+                            const eventInit = {
+                                bubbles: true,
+                                cancelable: true,
+                                view: window,
+                                clientX: rect.left + (rect.width / 2),
+                                clientY: rect.top + (rect.height / 2)
+                            };
+
+                            element.dispatchEvent(new MouseEvent('pointerover', eventInit));
+                            element.dispatchEvent(new MouseEvent('mouseover', eventInit));
+                            element.dispatchEvent(new MouseEvent('mouseenter', eventInit));
+                            element.dispatchEvent(new MouseEvent('pointerenter', eventInit));
+                            element.dispatchEvent(new MouseEvent('mousemove', eventInit));
+
+                            return {
+                                top: rect.top,
+                                left: rect.left,
+                                width: rect.width,
+                                height: rect.height
+                            };
+                        }, guiderSelector);
+                        logger.info(`抖店商品主图逻辑：已使用JS方式滚动并悬停: ${guiderSelector}`, hoverResult);
+                    } else {
+                        const guider = page.locator(guiderSelector).first();
+                        await guider.waitFor({ timeout: 10000, state: 'visible' });
+                        await guider.scrollIntoViewIfNeeded();
+                        logger.info(`抖店商品主图逻辑：已使用原生方式滚动到可视区域: ${guiderSelector}`);
+                        await page.waitForTimeout(200);
+                        await guider.hover();
+                        logger.info(`抖店商品主图逻辑：已使用原生方式执行悬停: ${guiderSelector}`);
+                    }
+
+                    const actionLocator = page.locator(actionSelector).nth(actionIndex);
+                    await actionLocator.waitFor({ timeout: 5000, state: 'visible' });
+                    await actionLocator.scrollIntoViewIfNeeded().catch(() => undefined);
+                    await page.waitForTimeout(200);
+
+                    try {
+                        await actionLocator.click({ timeout: 3000 });
+                        logger.info(`抖店商品主图逻辑：已点击主图操作按钮 locator(${actionSelector}).nth(${actionIndex})`);
+                    } catch (clickError) {
+                        logger.warn(`抖店商品主图逻辑：原生点击失败，尝试JS点击: ${clickError?.message || clickError}`);
+                        const clicked = await page.evaluate(({ selector, index }) => {
+                            const target = document.querySelectorAll(selector)?.[index];
+                            if (!(target instanceof HTMLElement)) {
+                                return false;
+                            }
+                            target.click();
+                            return true;
+                        }, { selector: actionSelector, index: actionIndex });
+
+                        if (!clicked) {
+                            throw new Error(`未找到主图操作按钮: ${actionSelector}[${actionIndex}]`);
+                        }
+
+                        logger.info(`抖店商品主图逻辑：已使用JS点击主图操作按钮 document.querySelectorAll('${actionSelector}')[${actionIndex}]`);
+                    }
+
+                    await page.waitForTimeout(500);
+                } catch (error) {
+                    logger.warn(`抖店商品主图逻辑：展开主图操作区失败: ${error?.message || error}`);
+                }
             }
             let uploadResult = {
                 requested: targetImages.length,
@@ -102,6 +208,7 @@ class DoudianPublisher {
                 uploadedPaths: []
             };
 
+            // 商品主图部分逻辑：上传主图图片。
             if (targetImages.length > 0) {
                 const preparedImages = await this._prepareImages(targetImages);
                 tempFiles.push(...preparedImages.tempFiles);
@@ -123,6 +230,142 @@ class DoudianPublisher {
                 }
             } else {
                 logger.info('当前未提供图片，先跳过文件输入步骤');
+            }
+
+            // 商品详情部分逻辑：处理商品详情区域的覆盖元素。
+            try {
+                const detailFieldSelector = '[attr-field-id="商品详情"]';
+                const detailHoverSelector = `${detailFieldSelector} [class*="styles_imgWrapper__"]`;
+                const detailDeleteSelector = `${detailFieldSelector} [class*="styles_iconDelete__"]`;
+                const detailFillFromMainImageButtonSelector = `${detailFieldSelector} button`;
+
+                logger.info('抖店商品详情逻辑：准备删除覆盖元素');
+
+                if (materialHoverMode === 'js') {
+                    const hoverResult = await page.evaluate((selector) => {
+                        const element = document.querySelector(selector);
+                        if (!(element instanceof HTMLElement)) {
+                            throw new Error(`未找到元素: ${selector}`);
+                        }
+
+                        element.scrollIntoView({
+                            block: 'center',
+                            inline: 'center',
+                            behavior: 'instant'
+                        });
+
+                        const rect = element.getBoundingClientRect();
+                        const inViewport = rect.width > 0
+                            && rect.height > 0
+                            && rect.bottom > 0
+                            && rect.right > 0
+                            && rect.top < window.innerHeight
+                            && rect.left < window.innerWidth;
+
+                        if (!inViewport) {
+                            throw new Error(`元素未进入可视区域: ${selector}`);
+                        }
+
+                        const eventInit = {
+                            bubbles: true,
+                            cancelable: true,
+                            view: window,
+                            clientX: rect.left + (rect.width / 2),
+                            clientY: rect.top + (rect.height / 2)
+                        };
+
+                        element.dispatchEvent(new MouseEvent('pointerover', eventInit));
+                        element.dispatchEvent(new MouseEvent('mouseover', eventInit));
+                        element.dispatchEvent(new MouseEvent('mouseenter', eventInit));
+                        element.dispatchEvent(new MouseEvent('pointerenter', eventInit));
+                        element.dispatchEvent(new MouseEvent('mousemove', eventInit));
+
+                        return {
+                            top: rect.top,
+                            left: rect.left,
+                            width: rect.width,
+                            height: rect.height
+                        };
+                    }, detailHoverSelector);
+                    logger.info(`抖店商品详情逻辑：已使用JS方式滚动并悬停: ${detailHoverSelector}`, hoverResult);
+                } else {
+                    const detailHoverLocator = page.locator(detailHoverSelector).first();
+                    await detailHoverLocator.waitFor({ timeout: 5000, state: 'visible' });
+                    await detailHoverLocator.scrollIntoViewIfNeeded();
+                    logger.info(`抖店商品详情逻辑：已使用原生方式滚动到可视区域: ${detailHoverSelector}`);
+                    await page.waitForTimeout(200);
+                    await detailHoverLocator.hover();
+                    logger.info(`抖店商品详情逻辑：已使用原生方式执行悬停: ${detailHoverSelector}`);
+                }
+
+                const detailDeleteLocator = page.locator(detailDeleteSelector).first();
+                await detailDeleteLocator.waitFor({ timeout: 5000, state: 'visible' });
+                await detailDeleteLocator.scrollIntoViewIfNeeded().catch(() => undefined);
+                await page.waitForTimeout(200);
+
+                try {
+                    await detailDeleteLocator.click({ timeout: 3000 });
+                    logger.info(`抖店商品详情逻辑：已点击删除按钮 locator(${detailDeleteSelector}).first()`);
+                } catch (clickError) {
+                    logger.warn(`抖店商品详情逻辑：原生点击删除按钮失败，尝试JS点击: ${clickError?.message || clickError}`);
+                    const clicked = await page.evaluate((selector) => {
+                        const target = document.querySelector(selector);
+                        if (!(target instanceof HTMLElement)) {
+                            return false;
+                        }
+                        target.click();
+                        return true;
+                    }, detailDeleteSelector);
+
+                    if (!clicked) {
+                        throw new Error(`未找到删除按钮: ${detailDeleteSelector}`);
+                    }
+
+                    logger.info(`抖店商品详情逻辑：已使用JS点击删除按钮 ${detailDeleteSelector}`);
+                }
+
+                await page.waitForTimeout(300);
+
+                logger.info('抖店商品详情逻辑：准备点击“从主图填入”按钮');
+                const detailFillButton = page.locator(detailFillFromMainImageButtonSelector).filter({ hasText: '从主图填入' }).first();
+                await detailFillButton.waitFor({ timeout: 5000, state: 'visible' });
+                await detailFillButton.scrollIntoViewIfNeeded().catch(() => undefined);
+                await page.waitForTimeout(200);
+
+                try {
+                    await detailFillButton.click({ timeout: 3000 });
+                    logger.info('抖店商品详情逻辑：已点击“从主图填入”按钮');
+                } catch (clickError) {
+                    logger.warn(`抖店商品详情逻辑：“从主图填入”原生点击失败，尝试JS点击: ${clickError?.message || clickError}`);
+                    const clicked = await page.evaluate((fieldSelector) => {
+                        const field = document.querySelector(fieldSelector);
+                        if (!(field instanceof HTMLElement)) {
+                            return false;
+                        }
+
+                        const buttons = Array.from(field.querySelectorAll('button'));
+                        const target = buttons.find((button) => {
+                            return button instanceof HTMLElement && String(button.textContent || '').includes('从主图填入');
+                        });
+
+                        if (!(target instanceof HTMLElement)) {
+                            return false;
+                        }
+
+                        target.click();
+                        return true;
+                    }, detailFieldSelector);
+
+                    if (!clicked) {
+                        throw new Error('未找到“从主图填入”按钮');
+                    }
+
+                    logger.info('抖店商品详情逻辑：已使用JS点击“从主图填入”按钮');
+                }
+
+                await page.waitForTimeout(300);
+            } catch (error) {
+                logger.warn(`抖店商品详情逻辑执行失败: ${error?.message || error}`);
             }
 
             const uploaded = uploadResult.uploadedPaths.length;
@@ -499,49 +742,6 @@ class DoudianPublisher {
 
         logger.info(`抖店标题填写完成: ${finalTitle}`);
         return true;
-    }
-
-    async _hoverMaterialButtonGuider(page) {
-        const selector = '#material-button-guider';
-        try {
-            await page.waitForSelector(selector, { timeout: 10000, state: 'visible' });
-            // 商品主图逻辑：先把主图引导按钮滚进可视区域，再执行 hover，确保后续操作按钮能稳定出现。
-            await page.locator(selector).scrollIntoViewIfNeeded();
-            logger.info(`抖店商品主图逻辑：已将元素滚动到可视区域: ${selector}`);
-            await page.waitForTimeout(300);
-            await page.hover(selector);
-            logger.info(`抖店商品主图逻辑：已执行悬停步骤: ${selector}`);
-            await page.waitForTimeout(500);
-            await this._clickMaterialActionAfter(page);
-        } catch (error) {
-            logger.warn(`抖店商品主图逻辑：悬停 ${selector} 失败: ${error?.message || error}`);
-        }
-    }
-
-    async _clickMaterialActionAfter(page) {
-        const selector = '[attr-field-id="主图"] [class*="hoverBottomWrapper"] [class*=index-module_actionAfter]';
-        const targetIndex = 1;
-        try {
-            await page.waitForSelector(selector, { timeout: 10000, state: 'visible' });
-            // 商品主图逻辑：点击主图区域 hover 后展开的第二个操作按钮。
-            const clicked = await page.evaluate(({ targetSelector, index }) => {
-                const target = document.querySelectorAll(targetSelector)?.[index];
-                if (!(target instanceof HTMLElement)) {
-                    return false;
-                }
-                target.click();
-                return true;
-            }, { targetSelector: selector, index: targetIndex });
-
-            if (!clicked) {
-                throw new Error(`未找到第 ${targetIndex + 1} 个匹配元素`);
-            }
-
-            logger.info(`抖店商品主图逻辑：已点击元素 document.querySelectorAll('${selector}')[${targetIndex}]`);
-            await page.waitForTimeout(500);
-        } catch (error) {
-            logger.warn(`抖店商品主图逻辑：点击 document.querySelectorAll('${selector}')[${targetIndex}] 失败: ${error?.message || error}`);
-        }
     }
 
     async _checkLogin(page) {
