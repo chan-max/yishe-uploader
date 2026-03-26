@@ -1,833 +1,650 @@
+import fs from 'fs';
+import path from 'path';
 import { getOrCreateBrowser } from '../services/BrowserService.js';
 import { ImageManager } from '../services/ImageManager.js';
 import { PageOperator } from '../services/PageOperator.js';
 import { logger } from '../utils/logger.js';
-import path from 'path';
-import fs from 'fs';
+
+const PLATFORM_KEY = 'doudian';
+const DEFAULT_CREATE_URL = 'https://fxg.jinritemai.com/ffa/g/create';
+const PREVIEW_IMAGE_SELECTORS = [
+    '[class*="upload"] img',
+    '[class*="Upload"] img',
+    '[class*="image"] img',
+    '[class*="Image"] img',
+    '[class*="picture"] img',
+    '[class*="Picture"] img',
+    '.arco-upload-list img',
+    '.semi-upload-list img',
+    '.ant-upload-list img',
+    'img[src^="blob:"]',
+    'img[src^="data:image/"]'
+];
 
 function toUserFriendlyPath(filePath) {
     return String(filePath || '').replace(/\\/g, '/');
 }
 
 function getPathFileName(filePath) {
-    const normalizedPath = String(filePath || '').replace(/\\/g, '/');
-    if (!normalizedPath) {
-        return '';
-    }
-    return path.posix.basename(normalizedPath);
+    return path.posix.basename(toUserFriendlyPath(filePath));
 }
 
-function resolveDoudianCreateUrl(defaultUrl, copyId) {
-    const normalizedCopyId = String(copyId || '').trim();
-    if (!normalizedCopyId) {
-        return defaultUrl;
-    }
-    return `https://fxg.jinritemai.com/ffa/g/create?copyid=${encodeURIComponent(normalizedCopyId)}`;
-}
-
-function normalizeDoudianTitle(title) {
+function normalizeTitle(title) {
     return String(title || '').trim().slice(0, 30);
 }
 
-function normalizeMaterialHoverMode(value) {
-    const mode = String(value || '').trim().toLowerCase();
-    return mode === 'js' ? 'js' : 'native';
+function normalizeHoverMode(value) {
+    return String(value || '').trim().toLowerCase() === 'js' ? 'js' : 'native';
 }
 
-class DoudianPublisher {
-    constructor() {
-        this.platformKey = 'doudian';
-        this.platformName = '抖店';
-        this.uploadUrl = 'https://fxg.jinritemai.com/ffa/g/create';
-        this.imageManager = new ImageManager();
-        this.pageOperator = new PageOperator();
-    }
+function resolveCreateUrl(copyId) {
+    const normalizedCopyId = String(copyId || '').trim();
+    return normalizedCopyId
+        ? `${DEFAULT_CREATE_URL}?copyid=${encodeURIComponent(normalizedCopyId)}`
+        : DEFAULT_CREATE_URL;
+}
 
-    async publish(publishInfo = {}) {
-        let page = null;
-        const tempFiles = [];
+async function countUploadedPreviewImages(page) {
+    try {
+        return await page.evaluate((selectors) => {
+            const nodes = selectors.flatMap((selector) => Array.from(document.querySelectorAll(selector)));
+            const uniqueKeys = new Set();
 
-        try {
-            const settings = publishInfo.platformOptions || publishInfo.publishOptions || publishInfo.platformSettings?.[this.platformKey] || {};
-            const title = normalizeDoudianTitle(publishInfo.title || publishInfo.name || '');
-            const images = Array.isArray(publishInfo.images) && publishInfo.images.length > 0
-                ? publishInfo.images.filter(Boolean)
-                : (Array.isArray(publishInfo.imageSources) ? publishInfo.imageSources.filter(Boolean) : []);
-            const targetImages = images.slice(0, 5);
-            const copyId = String(settings.copyId || publishInfo.copyId || '').trim();
-            const targetCreateUrl = resolveDoudianCreateUrl(this.uploadUrl, copyId);
-            const materialHoverMode = normalizeMaterialHoverMode(
-                settings.materialHoverMode
-                ?? settings.hoverMode
-                ?? publishInfo.materialHoverMode
-                ?? publishInfo.hoverMode
-            );
-
-            logger.info('开始执行抖店商品图片上传流程');
-            logger.info('抖店发布入参摘要:', {
-                copyId,
-                targetCreateUrl,
-                imageCount: targetImages.length,
-                title,
-                fileInputStartIndex: Number(settings.fileInputStartIndex ?? publishInfo.fileInputStartIndex ?? 2),
-                materialHoverMode
+            nodes.forEach((node) => {
+                if (!(node instanceof HTMLImageElement)) return;
+                const src = node.currentSrc || node.src || '';
+                const width = node.naturalWidth || node.width || 0;
+                const height = node.naturalHeight || node.height || 0;
+                if (!src) return;
+                if (width > 32 || height > 32 || /^blob:|^data:image\//.test(src)) {
+                    uniqueKeys.add(`${src}|${width}|${height}`);
+                }
             });
 
-            const browser = await getOrCreateBrowser();
-            logger.info('抖店已获取浏览器实例，准备创建新页面');
-            page = await browser.newPage();
-            logger.info('抖店新页面创建成功');
-            await this.pageOperator.setupAntiDetection(page);
-            logger.info('抖店页面反检测设置完成');
+            return uniqueKeys.size;
+        }, PREVIEW_IMAGE_SELECTORS);
+    } catch (error) {
+        logger.warn(`抖店统计已上传图片候选失败: ${error?.message || error}`);
+        return 0;
+    }
+}
 
-            logger.info(`抖店准备打开商品发布页: ${targetCreateUrl}`);
-            await page.goto(targetCreateUrl, {
-                waitUntil: 'domcontentloaded',
-                timeout: 60000
+async function collectUploadedPreviewKeys(page) {
+    try {
+        return await page.evaluate((selectors) => {
+            const nodes = selectors.flatMap((selector) => Array.from(document.querySelectorAll(selector)));
+            const uniqueKeys = new Set();
+
+            nodes.forEach((node) => {
+                if (!(node instanceof HTMLImageElement)) return;
+                const src = node.currentSrc || node.src || '';
+                const width = node.naturalWidth || node.width || 0;
+                const height = node.naturalHeight || node.height || 0;
+                if (!src) return;
+                if (width > 32 || height > 32 || /^blob:|^data:image\//.test(src)) {
+                    uniqueKeys.add(`${src}|${width}|${height}`);
+                }
             });
-            await page.waitForTimeout(5000);
-            logger.info(`抖店当前页面: ${page.url()}`);
-            logger.info(`抖店当前标题: ${await page.title().catch(() => '')}`);
 
-            const isLoggedIn = await this._checkLogin(page);
-            if (!isLoggedIn) {
-                return {
-                    success: false,
-                    message: '请先登录抖店商家后台',
-                    data: {
-                        uploaded: 0,
-                        requested: targetImages.length
-                    }
-                };
+            return Array.from(uniqueKeys);
+        }, PREVIEW_IMAGE_SELECTORS);
+    } catch (error) {
+        logger.warn(`抖店采集已上传图片候选失败: ${error?.message || error}`);
+        return [];
+    }
+}
+
+async function triggerHover(page, selector, mode, logPrefix) {
+    if (mode === 'js') {
+        const result = await page.evaluate((targetSelector) => {
+            const element = document.querySelector(targetSelector);
+            if (!(element instanceof HTMLElement)) {
+                throw new Error(`未找到元素: ${targetSelector}`);
             }
 
-            logger.info('抖店登录状态校验通过');
-            const titleFilled = title ? await this._fillTitle(page, title) : false;
+            element.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+            const rect = element.getBoundingClientRect();
+            const inViewport = rect.width > 0
+                && rect.height > 0
+                && rect.bottom > 0
+                && rect.right > 0
+                && rect.top < window.innerHeight
+                && rect.left < window.innerWidth;
 
-            // 商品主图部分逻辑：展开主图操作区，准备执行主图上传。
-            if (titleFilled) {
-                const guiderSelector = '#material-button-guider';
-                const actionSelector = '[attr-field-id="主图"] [class*="hoverBottomWrapper"] [class*=index-module_actionAfter]';
-                const actionIndex = 1;
-
-                try {
-                    logger.info(`抖店商品主图逻辑：准备展开主图操作区，模式=${materialHoverMode}`);
-
-                    if (materialHoverMode === 'js') {
-                        const hoverResult = await page.evaluate((selector) => {
-                            const element = document.querySelector(selector);
-                            if (!(element instanceof HTMLElement)) {
-                                throw new Error(`未找到元素: ${selector}`);
-                            }
-
-                            element.scrollIntoView({
-                                block: 'center',
-                                inline: 'center',
-                                behavior: 'instant'
-                            });
-
-                            const rect = element.getBoundingClientRect();
-                            const inViewport = rect.width > 0
-                                && rect.height > 0
-                                && rect.bottom > 0
-                                && rect.right > 0
-                                && rect.top < window.innerHeight
-                                && rect.left < window.innerWidth;
-
-                            if (!inViewport) {
-                                throw new Error(`元素未进入可视区域: ${selector}`);
-                            }
-
-                            const eventInit = {
-                                bubbles: true,
-                                cancelable: true,
-                                view: window,
-                                clientX: rect.left + (rect.width / 2),
-                                clientY: rect.top + (rect.height / 2)
-                            };
-
-                            element.dispatchEvent(new MouseEvent('pointerover', eventInit));
-                            element.dispatchEvent(new MouseEvent('mouseover', eventInit));
-                            element.dispatchEvent(new MouseEvent('mouseenter', eventInit));
-                            element.dispatchEvent(new MouseEvent('pointerenter', eventInit));
-                            element.dispatchEvent(new MouseEvent('mousemove', eventInit));
-
-                            return {
-                                top: rect.top,
-                                left: rect.left,
-                                width: rect.width,
-                                height: rect.height
-                            };
-                        }, guiderSelector);
-                        logger.info(`抖店商品主图逻辑：已使用JS方式滚动并悬停: ${guiderSelector}`, hoverResult);
-                    } else {
-                        const guider = page.locator(guiderSelector).first();
-                        await guider.waitFor({ timeout: 10000, state: 'visible' });
-                        await guider.scrollIntoViewIfNeeded();
-                        logger.info(`抖店商品主图逻辑：已使用原生方式滚动到可视区域: ${guiderSelector}`);
-                        await page.waitForTimeout(200);
-                        await guider.hover();
-                        logger.info(`抖店商品主图逻辑：已使用原生方式执行悬停: ${guiderSelector}`);
-                    }
-
-                    const actionLocator = page.locator(actionSelector).nth(actionIndex);
-                    await actionLocator.waitFor({ timeout: 5000, state: 'visible' });
-                    await actionLocator.scrollIntoViewIfNeeded().catch(() => undefined);
-                    await page.waitForTimeout(200);
-
-                    try {
-                        await actionLocator.click({ timeout: 3000 });
-                        logger.info(`抖店商品主图逻辑：已点击主图操作按钮 locator(${actionSelector}).nth(${actionIndex})`);
-                    } catch (clickError) {
-                        logger.warn(`抖店商品主图逻辑：原生点击失败，尝试JS点击: ${clickError?.message || clickError}`);
-                        const clicked = await page.evaluate(({ selector, index }) => {
-                            const target = document.querySelectorAll(selector)?.[index];
-                            if (!(target instanceof HTMLElement)) {
-                                return false;
-                            }
-                            target.click();
-                            return true;
-                        }, { selector: actionSelector, index: actionIndex });
-
-                        if (!clicked) {
-                            throw new Error(`未找到主图操作按钮: ${actionSelector}[${actionIndex}]`);
-                        }
-
-                        logger.info(`抖店商品主图逻辑：已使用JS点击主图操作按钮 document.querySelectorAll('${actionSelector}')[${actionIndex}]`);
-                    }
-
-                    await page.waitForTimeout(500);
-                } catch (error) {
-                    logger.warn(`抖店商品主图逻辑：展开主图操作区失败: ${error?.message || error}`);
-                }
+            if (!inViewport) {
+                throw new Error(`元素未进入可视区域: ${targetSelector}`);
             }
-            let uploadResult = {
-                requested: targetImages.length,
-                availableInputs: 0,
-                startIndex: 0,
-                uploadedPaths: []
+
+            const eventInit = {
+                bubbles: true,
+                cancelable: true,
+                view: window,
+                clientX: rect.left + (rect.width / 2),
+                clientY: rect.top + (rect.height / 2)
             };
 
-            // 商品主图部分逻辑：上传主图图片。
-            if (targetImages.length > 0) {
-                const preparedImages = await this._prepareImages(targetImages);
-                tempFiles.push(...preparedImages.tempFiles);
-                logger.info(`抖店准备上传的图片数量: ${preparedImages.filePaths.length}`);
-                logger.info('抖店准备上传的图片路径:', preparedImages.filePaths.map((item) => toUserFriendlyPath(item)));
-                logger.info('抖店图片预处理结果:', {
-                    tempFileCount: preparedImages.tempFiles.length,
-                    fileNames: preparedImages.filePaths.map((item) => getPathFileName(item))
-                });
-
-                if (preparedImages.filePaths.length > 0) {
-                    uploadResult = await this._uploadImagesToSeparateInputs(
-                        page,
-                        preparedImages.filePaths.slice(0, 5),
-                        Number(settings.fileInputStartIndex ?? publishInfo.fileInputStartIndex ?? 2)
-                    );
-                } else {
-                    logger.warn('抖店图片路径预处理后为空，跳过文件输入步骤');
-                }
-            } else {
-                logger.info('当前未提供图片，先跳过文件输入步骤');
-            }
-
-            // 商品详情部分逻辑：处理商品详情区域的覆盖元素。
-            try {
-                const detailFieldSelector = '[attr-field-id="商品详情"]';
-                const detailHoverSelector = `${detailFieldSelector} [class*="styles_imgWrapper__"]`;
-                const detailDeleteSelector = `${detailFieldSelector} [class*="styles_iconDelete__"]`;
-                const detailFillFromMainImageButtonSelector = `${detailFieldSelector} button`;
-
-                logger.info('抖店商品详情逻辑：准备删除覆盖元素');
-
-                if (materialHoverMode === 'js') {
-                    const hoverResult = await page.evaluate((selector) => {
-                        const element = document.querySelector(selector);
-                        if (!(element instanceof HTMLElement)) {
-                            throw new Error(`未找到元素: ${selector}`);
-                        }
-
-                        element.scrollIntoView({
-                            block: 'center',
-                            inline: 'center',
-                            behavior: 'instant'
-                        });
-
-                        const rect = element.getBoundingClientRect();
-                        const inViewport = rect.width > 0
-                            && rect.height > 0
-                            && rect.bottom > 0
-                            && rect.right > 0
-                            && rect.top < window.innerHeight
-                            && rect.left < window.innerWidth;
-
-                        if (!inViewport) {
-                            throw new Error(`元素未进入可视区域: ${selector}`);
-                        }
-
-                        const eventInit = {
-                            bubbles: true,
-                            cancelable: true,
-                            view: window,
-                            clientX: rect.left + (rect.width / 2),
-                            clientY: rect.top + (rect.height / 2)
-                        };
-
-                        element.dispatchEvent(new MouseEvent('pointerover', eventInit));
-                        element.dispatchEvent(new MouseEvent('mouseover', eventInit));
-                        element.dispatchEvent(new MouseEvent('mouseenter', eventInit));
-                        element.dispatchEvent(new MouseEvent('pointerenter', eventInit));
-                        element.dispatchEvent(new MouseEvent('mousemove', eventInit));
-
-                        return {
-                            top: rect.top,
-                            left: rect.left,
-                            width: rect.width,
-                            height: rect.height
-                        };
-                    }, detailHoverSelector);
-                    logger.info(`抖店商品详情逻辑：已使用JS方式滚动并悬停: ${detailHoverSelector}`, hoverResult);
-                } else {
-                    const detailHoverLocator = page.locator(detailHoverSelector).first();
-                    await detailHoverLocator.waitFor({ timeout: 5000, state: 'visible' });
-                    await detailHoverLocator.scrollIntoViewIfNeeded();
-                    logger.info(`抖店商品详情逻辑：已使用原生方式滚动到可视区域: ${detailHoverSelector}`);
-                    await page.waitForTimeout(200);
-                    await detailHoverLocator.hover();
-                    logger.info(`抖店商品详情逻辑：已使用原生方式执行悬停: ${detailHoverSelector}`);
-                }
-
-                const detailDeleteLocator = page.locator(detailDeleteSelector).first();
-                await detailDeleteLocator.waitFor({ timeout: 5000, state: 'visible' });
-                await detailDeleteLocator.scrollIntoViewIfNeeded().catch(() => undefined);
-                await page.waitForTimeout(200);
-
-                try {
-                    await detailDeleteLocator.click({ timeout: 3000 });
-                    logger.info(`抖店商品详情逻辑：已点击删除按钮 locator(${detailDeleteSelector}).first()`);
-                } catch (clickError) {
-                    logger.warn(`抖店商品详情逻辑：原生点击删除按钮失败，尝试JS点击: ${clickError?.message || clickError}`);
-                    const clicked = await page.evaluate((selector) => {
-                        const target = document.querySelector(selector);
-                        if (!(target instanceof HTMLElement)) {
-                            return false;
-                        }
-                        target.click();
-                        return true;
-                    }, detailDeleteSelector);
-
-                    if (!clicked) {
-                        throw new Error(`未找到删除按钮: ${detailDeleteSelector}`);
-                    }
-
-                    logger.info(`抖店商品详情逻辑：已使用JS点击删除按钮 ${detailDeleteSelector}`);
-                }
-
-                await page.waitForTimeout(300);
-
-                logger.info('抖店商品详情逻辑：准备点击“从主图填入”按钮');
-                const detailFillButton = page.locator(detailFillFromMainImageButtonSelector).filter({ hasText: '从主图填入' }).first();
-                await detailFillButton.waitFor({ timeout: 5000, state: 'visible' });
-                await detailFillButton.scrollIntoViewIfNeeded().catch(() => undefined);
-                await page.waitForTimeout(200);
-
-                try {
-                    await detailFillButton.click({ timeout: 3000 });
-                    logger.info('抖店商品详情逻辑：已点击“从主图填入”按钮');
-                } catch (clickError) {
-                    logger.warn(`抖店商品详情逻辑：“从主图填入”原生点击失败，尝试JS点击: ${clickError?.message || clickError}`);
-                    const clicked = await page.evaluate((fieldSelector) => {
-                        const field = document.querySelector(fieldSelector);
-                        if (!(field instanceof HTMLElement)) {
-                            return false;
-                        }
-
-                        const buttons = Array.from(field.querySelectorAll('button'));
-                        const target = buttons.find((button) => {
-                            return button instanceof HTMLElement && String(button.textContent || '').includes('从主图填入');
-                        });
-
-                        if (!(target instanceof HTMLElement)) {
-                            return false;
-                        }
-
-                        target.click();
-                        return true;
-                    }, detailFieldSelector);
-
-                    if (!clicked) {
-                        throw new Error('未找到“从主图填入”按钮');
-                    }
-
-                    logger.info('抖店商品详情逻辑：已使用JS点击“从主图填入”按钮');
-                }
-
-                await page.waitForTimeout(300);
-            } catch (error) {
-                logger.warn(`抖店商品详情逻辑执行失败: ${error?.message || error}`);
-            }
-
-            const uploaded = uploadResult.uploadedPaths.length;
-
-            return {
-                success: titleFilled || uploaded > 0,
-                message: titleFilled
-                    ? (uploaded > 0
-                        ? `抖店标题已填写，商品图片已上传 ${uploaded}/${uploadResult.requested} 张`
-                        : '抖店标题已填写，图片步骤暂未执行或未完成')
-                    : (uploaded > 0
-                        ? `抖店商品图片已上传 ${uploaded}/${uploadResult.requested} 张，但标题未填写成功`
-                        : '抖店标题和图片步骤都未完成'),
-                data: {
-                    uploaded,
-                    requested: uploadResult.requested,
-                    availableInputs: uploadResult.availableInputs,
-                    startIndex: uploadResult.startIndex,
-                    uploadedPaths: uploadResult.uploadedPaths.map((item) => toUserFriendlyPath(item)),
-                    uploadedNames: uploadResult.uploadedPaths.map((item) => getPathFileName(item)),
-                    titleFilled,
-                    titleValue: titleFilled ? title : '',
-                    pageKeptOpen: true
-                }
-            };
-        } catch (error) {
-            logger.error('抖店图片上传失败:', error);
-            return {
-                success: false,
-                message: error?.message || '抖店图片上传失败'
-            };
-        } finally {
-            tempFiles.forEach((file) => this.imageManager.deleteTempFile(file));
-        }
+            element.dispatchEvent(new MouseEvent('pointerover', eventInit));
+            element.dispatchEvent(new MouseEvent('mouseover', eventInit));
+            element.dispatchEvent(new MouseEvent('mouseenter', eventInit));
+            element.dispatchEvent(new MouseEvent('pointerenter', eventInit));
+            element.dispatchEvent(new MouseEvent('mousemove', eventInit));
+            return { top: rect.top, left: rect.left, width: rect.width, height: rect.height };
+        }, selector);
+        logger.info(`${logPrefix}：已使用JS方式滚动并悬停: ${selector}`, result);
+        return;
     }
 
-    async _uploadImagesToSeparateInputs(page, filePaths, preferredStartIndex = 2) {
-        const requested = filePaths.length;
-        logger.info(`抖店上传参数: requested=${requested}, preferredStartIndex=${preferredStartIndex}`);
-        await page.waitForLoadState('domcontentloaded').catch(() => undefined);
-        await page.waitForTimeout(2000);
-        // 商品主图逻辑：仅定位“主图”字段区域下的文件输入框，避免误命中页面上其他上传入口。
-        logger.info('抖店页面已完成基础加载，准备扫描主图区域文件输入框');
+    const locator = page.locator(selector).first();
+    await locator.waitFor({ timeout: 10000, state: 'visible' });
+    await locator.scrollIntoViewIfNeeded();
+    logger.info(`${logPrefix}：已使用原生方式滚动到可视区域: ${selector}`);
+    await page.waitForTimeout(200);
+    await locator.hover();
+    logger.info(`${logPrefix}：已使用原生方式执行悬停: ${selector}`);
+}
 
-        const mainImageInputSelector = '[attr-field-id="主图"] input[type="file"]';
-
-        try {
-            await page.waitForSelector(mainImageInputSelector, {
-                timeout: 15000,
-                state: 'attached'
-            });
-            logger.info(`抖店已检测到主图文件输入框选择器: ${mainImageInputSelector}`);
-        } catch {
-            logger.warn(`抖店页面在等待主图文件输入框时超时: ${mainImageInputSelector}`);
-        }
-
-        const inputLocator = page.locator(mainImageInputSelector);
-        const initialInputCount = await inputLocator.count();
-        logger.info(`抖店检测到主图区域文件输入框数量: ${initialInputCount}`);
-        const safeStartIndex = Number.isFinite(preferredStartIndex) && preferredStartIndex >= 0
-            ? preferredStartIndex
-            : 2;
-        const startIndex = initialInputCount > safeStartIndex
-            ? safeStartIndex
-            : 0;
-        const usableInputCount = Math.max(0, initialInputCount - startIndex);
-        const maxUploadCount = Math.min(requested, usableInputCount, 5);
-        logger.info(`抖店上传索引策略: startIndex=${startIndex}, usableInputCount=${usableInputCount}, maxUploadCount=${maxUploadCount}`);
-
-        const batchUploadResult = await this._uploadImagesByFirstInput(page, inputLocator, filePaths.slice(0, Math.min(requested, 5)));
-        logger.info(`抖店上传流程结束: uploaded=${batchUploadResult.uploadedPaths.length}/${requested}`);
-        return {
-            requested,
-            availableInputs: initialInputCount,
-            startIndex: batchUploadResult.inputIndex,
-            uploadedPaths: batchUploadResult.uploadedPaths
-        };
-    }
-
-    async _uploadImagesByFirstInput(page, inputLocator, filePaths) {
-        const candidateCount = await inputLocator.count();
-        logger.info(`抖店开始尝试主图首个文件输入框批量上传: candidateCount=${candidateCount}, fileCount=${filePaths.length}`);
-
-        if (candidateCount <= 0) {
-            logger.warn('抖店未找到主图区域文件输入框');
-            return {
-                inputIndex: 0,
-                uploadedPaths: []
-            };
-        }
-
-        const locator = inputLocator.first();
-        const inputIndex = 0;
-        let snapshot = null;
-
-        try {
-            snapshot = await locator.evaluate((el) => ({
-                className: el.className || '',
-                id: el.id || '',
-                name: el.getAttribute('name') || '',
-                accept: el.getAttribute('accept') || '',
-                multiple: !!el.multiple,
-                disabled: !!el.disabled,
-                existingFiles: Array.from(el.files || []).map((file) => file.name)
-            }));
-            logger.info(`抖店首个文件输入框快照: input[${inputIndex}]`, snapshot);
-        } catch (error) {
-            logger.warn(`抖店读取首个文件输入框快照失败: input[${inputIndex}], error=${error?.message || error}`);
+async function clickWithFallback(locator, fallback, successMessage, fallbackMessage) {
+    try {
+        await locator.click({ timeout: 3000 });
+        logger.info(successMessage);
+    } catch (error) {
+        logger.warn(`${successMessage}失败，尝试JS点击: ${error?.message || error}`);
+        const clicked = await fallback();
+        if (!clicked) {
             throw error;
         }
+        logger.info(fallbackMessage);
+    }
+}
 
-        if (snapshot?.disabled) {
-            throw new Error('抖店首个文件输入框不可用（disabled）');
+async function prepareImages(images, imageManager) {
+    const filePaths = [];
+    const tempFiles = [];
+
+    for (const [index, rawSource] of images.entries()) {
+        const source = String(rawSource || '').trim();
+        if (!source) continue;
+
+        if (/^https?:\/\//i.test(source)) {
+            const tempPath = await imageManager.downloadImage(source, `${PLATFORM_KEY}_${Date.now()}_${index}`);
+            filePaths.push(tempPath);
+            tempFiles.push(tempPath);
+            continue;
         }
 
-        const beforeUploadedCount = await this._countUploadedImageCandidates(page);
-        logger.info(`抖店准备使用首个文件输入框批量上传: input[${inputIndex}], beforePreviewCount=${beforeUploadedCount}, files=${filePaths.map((item) => toUserFriendlyPath(item))}`);
-        await locator.setInputFiles(filePaths);
-        logger.info(`抖店首个文件输入框批量 setInputFiles 完成: input[${inputIndex}], count=${filePaths.length}`);
-
-        const inputAccepted = await this._waitForInputReceiveFiles(locator, filePaths, inputIndex);
-        const uploadConfirmed = await this._waitForBatchUploadConfirmation(page, beforeUploadedCount, filePaths, inputIndex);
-
-        if (!inputAccepted && !uploadConfirmed) {
-            throw new Error(`抖店首个文件输入框批量上传未确认成功: input[${inputIndex}]`);
+        if (fs.existsSync(source)) {
+            filePaths.push(source);
         }
-
-        await page.waitForTimeout(3000);
-        return {
-            inputIndex,
-            uploadedPaths: [...filePaths]
-        };
     }
 
-    async _waitForInputReceiveFile(locator, targetFile, imageIndex, inputIndex) {
-        const fileName = getPathFileName(targetFile);
-        logger.info(`抖店等待 input[${inputIndex}] 接收文件: imageIndex=${imageIndex}, fileName=${fileName}`);
+    return { filePaths, tempFiles };
+}
 
+async function checkLogin(page) {
+    for (const selector of ['.header-user-info', '.account-info', '.user-info', '.avatar', '[class*="merchant"]']) {
         try {
-            await locator.waitFor({ state: 'attached', timeout: 5000 });
-            await locator.evaluate((el, expectedFileName) => {
-                return new Promise((resolve, reject) => {
-                    const startedAt = Date.now();
-                    const check = () => {
-                        const files = el.files;
-                        const matched = files && files.length > 0 && (!expectedFileName || files[0]?.name === expectedFileName);
-                        if (matched) {
-                            resolve(true);
-                            return;
-                        }
-                        if (Date.now() - startedAt > 8000) {
-                            reject(new Error('文件未进入 input'));
-                            return;
-                        }
-                        setTimeout(check, 150);
-                    };
-                    check();
-                });
-            }, fileName);
-            logger.info(`抖店检测到 input[${inputIndex}] 已接收文件: imageIndex=${imageIndex}, fileName=${fileName}`);
-            return true;
-        } catch (error) {
-            logger.warn(`抖店第 ${imageIndex} 张图片写入 input[${inputIndex}] 后未检测到文件状态: ${error?.message || error}`);
-            return false;
+            if (await page.locator(selector).first().count()) return true;
+        } catch {
+            // ignore
         }
     }
 
-    async _waitForInputReceiveFiles(locator, targetFiles, inputIndex) {
-        const expectedNames = targetFiles.map((item) => getPathFileName(item)).filter(Boolean);
-        logger.info(`抖店等待单输入框接收多文件: input[${inputIndex}], expectedCount=${expectedNames.length}, files=${expectedNames}`);
-
+    for (const selector of ['.login-btn', '.login-button', '.auth-btn', 'text=登录', 'text=扫码登录']) {
         try {
-            await locator.waitFor({ state: 'attached', timeout: 5000 });
-            await locator.evaluate((el, expected) => {
-                return new Promise((resolve, reject) => {
-                    const startedAt = Date.now();
-                    const check = () => {
-                        const names = Array.from(el.files || []).map((file) => file.name);
-                        const matched = expected.length > 0
-                            && names.length === expected.length
-                            && expected.every((name, index) => names[index] === name);
-                        if (matched) {
-                            resolve(true);
-                            return;
-                        }
-                        if (Date.now() - startedAt > 8000) {
-                            reject(new Error(`文件未完整进入 input, current=${names.join(', ')}`));
-                            return;
-                        }
-                        setTimeout(check, 150);
-                    };
-                    check();
-                });
-            }, expectedNames);
-            logger.info(`抖店单输入框已接收多文件: input[${inputIndex}], files=${expectedNames}`);
-            return true;
-        } catch (error) {
-            logger.warn(`抖店单输入框接收多文件未确认: input[${inputIndex}], error=${error?.message || error}`);
-            return false;
+            if (await page.locator(selector).first().count()) return false;
+        } catch {
+            // ignore
         }
     }
 
-    async _countUploadedImageCandidates(page) {
-        try {
-            return await page.evaluate(() => {
-                const selectors = [
-                    '[class*="upload"] img',
-                    '[class*="Upload"] img',
-                    '[class*="image"] img',
-                    '[class*="Image"] img',
-                    '[class*="picture"] img',
-                    '[class*="Picture"] img',
-                    '.arco-upload-list img',
-                    '.semi-upload-list img',
-                    '.ant-upload-list img',
-                    'img[src^="blob:"]',
-                    'img[src^="data:image/"]'
-                ];
+    return !/login|signin|passport/i.test(page.url());
+}
 
-                const nodes = selectors.flatMap((selector) => Array.from(document.querySelectorAll(selector)));
-                const uniqueKeys = new Set();
+export async function publishToDoudian(publishInfo = {}) {
+    const imageManager = new ImageManager();
+    const pageOperator = new PageOperator();
+    const tempFiles = [];
+    let page = null;
 
-                nodes.forEach((node) => {
-                    if (!(node instanceof HTMLImageElement)) {
-                        return;
-                    }
-                    const src = node.currentSrc || node.src || '';
-                    const width = node.naturalWidth || node.width || 0;
-                    const height = node.naturalHeight || node.height || 0;
-                    if (!src) {
-                        return;
-                    }
-                    if (width > 32 || height > 32 || /^blob:|^data:image\//.test(src)) {
-                        uniqueKeys.add(`${src}|${width}|${height}`);
-                    }
-                });
+    try {
+        const settings = publishInfo.platformOptions || publishInfo.publishOptions || publishInfo.platformSettings?.[PLATFORM_KEY] || {};
+        const title = normalizeTitle(publishInfo.title || publishInfo.name || '');
+        const sourceImages = Array.isArray(publishInfo.images) && publishInfo.images.length
+            ? publishInfo.images
+            : (Array.isArray(publishInfo.imageSources) ? publishInfo.imageSources : []);
+        const targetImages = sourceImages.filter(Boolean).slice(0, 5);
+        const copyId = String(settings.copyId || publishInfo.copyId || '').trim();
+        const targetCreateUrl = resolveCreateUrl(copyId);
+        const productCode = String(
+            settings.productCode
+            ?? publishInfo.productCode
+            ?? publishInfo.data?.productCode
+            ?? ''
+        ).trim();
+        const hoverMode = normalizeHoverMode(
+            settings.materialHoverMode
+            ?? settings.hoverMode
+            ?? publishInfo.materialHoverMode
+            ?? publishInfo.hoverMode
+        );
+        const fileInputStartIndex = Number(settings.fileInputStartIndex ?? publishInfo.fileInputStartIndex ?? 2);
 
-                return uniqueKeys.size;
-            });
-        } catch (error) {
-            logger.warn(`抖店统计已上传图片候选失败: ${error?.message || error}`);
-            return 0;
+        logger.info('开始执行抖店商品发布流程');
+        logger.info('抖店发布入参摘要:', {
+            copyId,
+            targetCreateUrl,
+            imageCount: targetImages.length,
+            title,
+            productCode,
+            fileInputStartIndex,
+            materialHoverMode: hoverMode
+        });
+
+        const browser = await getOrCreateBrowser();
+        logger.info('抖店已获取浏览器实例，准备创建新页面');
+        page = await browser.newPage();
+        logger.info('抖店新页面创建成功');
+        await pageOperator.setupAntiDetection(page);
+        logger.info('抖店页面反检测设置完成');
+
+        logger.info(`抖店准备打开商品发布页: ${targetCreateUrl}`);
+        await page.goto(targetCreateUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+        await page.waitForTimeout(5000);
+        logger.info(`抖店当前页面: ${page.url()}`);
+        logger.info(`抖店当前标题: ${await page.title().catch(() => '')}`);
+
+        if (!(await checkLogin(page))) {
+            return {
+                success: false,
+                message: '请先登录抖店商家后台',
+                data: { uploaded: 0, requested: targetImages.length }
+            };
         }
-    }
 
-    async _waitForUploadConfirmation(page, beforeCount, imageIndex, inputIndex, fileName) {
-        try {
-            logger.info(`抖店等待页面上传确认: imageIndex=${imageIndex}, input[${inputIndex}], file=${fileName}, beforePreviewCount=${beforeCount}`);
-            await page.waitForFunction((previousCount) => {
-                const selectors = [
-                    '[class*="upload"] img',
-                    '[class*="Upload"] img',
-                    '[class*="image"] img',
-                    '[class*="Image"] img',
-                    '[class*="picture"] img',
-                    '[class*="Picture"] img',
-                    '.arco-upload-list img',
-                    '.semi-upload-list img',
-                    '.ant-upload-list img',
-                    'img[src^="blob:"]',
-                    'img[src^="data:image/"]'
-                ];
+        logger.info('抖店登录状态校验通过');
 
-                const nodes = selectors.flatMap((selector) => Array.from(document.querySelectorAll(selector)));
-                const uniqueKeys = new Set();
-
-                nodes.forEach((node) => {
-                    if (!(node instanceof HTMLImageElement)) {
-                        return;
-                    }
-                    const src = node.currentSrc || node.src || '';
-                    const width = node.naturalWidth || node.width || 0;
-                    const height = node.naturalHeight || node.height || 0;
-                    if (!src) {
-                        return;
-                    }
-                    if (width > 32 || height > 32 || /^blob:|^data:image\//.test(src)) {
-                        uniqueKeys.add(`${src}|${width}|${height}`);
-                    }
-                });
-
-                return uniqueKeys.size > previousCount;
-            }, beforeCount, { timeout: 12000 });
-
-            const afterCount = await this._countUploadedImageCandidates(page);
-            logger.info(`抖店检测到页面上传预览数量增长: imageIndex=${imageIndex}, input[${inputIndex}], file=${fileName}, before=${beforeCount}, after=${afterCount}`);
-            return true;
-        } catch (error) {
-            logger.warn(`抖店等待页面上传确认超时: imageIndex=${imageIndex}, input[${inputIndex}], file=${fileName}, beforePreviewCount=${beforeCount}, error=${error?.message || error}`);
-            return false;
-        }
-    }
-
-    async _waitForBatchUploadConfirmation(page, beforeCount, targetFiles, inputIndex) {
-        const expectedIncrease = targetFiles.length;
-        const fileNames = targetFiles.map((item) => getPathFileName(item));
-        logger.info(`抖店等待单输入框批量上传确认: input[${inputIndex}], beforePreviewCount=${beforeCount}, expectedIncrease=${expectedIncrease}, files=${fileNames}`);
-
-        try {
-            await page.waitForFunction((payload) => {
-                const selectors = [
-                    '[class*="upload"] img',
-                    '[class*="Upload"] img',
-                    '[class*="image"] img',
-                    '[class*="Image"] img',
-                    '[class*="picture"] img',
-                    '[class*="Picture"] img',
-                    '.arco-upload-list img',
-                    '.semi-upload-list img',
-                    '.ant-upload-list img',
-                    'img[src^="blob:"]',
-                    'img[src^="data:image/"]'
-                ];
-
-                const nodes = selectors.flatMap((selector) => Array.from(document.querySelectorAll(selector)));
-                const uniqueKeys = new Set();
-
-                nodes.forEach((node) => {
-                    if (!(node instanceof HTMLImageElement)) {
-                        return;
-                    }
-                    const src = node.currentSrc || node.src || '';
-                    const width = node.naturalWidth || node.width || 0;
-                    const height = node.naturalHeight || node.height || 0;
-                    if (!src) {
-                        return;
-                    }
-                    if (width > 32 || height > 32 || /^blob:|^data:image\//.test(src)) {
-                        uniqueKeys.add(`${src}|${width}|${height}`);
-                    }
-                });
-
-                return uniqueKeys.size >= payload.beforeCount + payload.expectedIncrease;
-            }, {
-                beforeCount,
-                expectedIncrease
-            }, { timeout: 15000 });
-
-            const afterCount = await this._countUploadedImageCandidates(page);
-            logger.info(`抖店单输入框批量上传预览确认成功: input[${inputIndex}], before=${beforeCount}, after=${afterCount}, files=${fileNames}`);
-            return true;
-        } catch (error) {
-            logger.warn(`抖店单输入框批量上传预览确认超时: input[${inputIndex}], before=${beforeCount}, expectedIncrease=${expectedIncrease}, error=${error?.message || error}`);
-            return false;
-        }
-    }
-
-    async _fillTitle(page, title) {
-        const finalTitle = normalizeDoudianTitle(title);
-        if (!finalTitle) {
+        let titleFilled = false;
+        if (!title) {
             logger.info('抖店标题为空，跳过填写');
-            return false;
-        }
+        } else {
+            logger.info(`抖店准备填写标题: ${title}`);
+            const titleInput = page.locator('#pg-title-input').first();
 
-        logger.info(`抖店准备填写标题: ${finalTitle}`);
-
-        const titleFilled = await this._fillDoudianTitleInput(page, finalTitle);
-        if (!titleFilled) {
-            logger.warn('抖店未找到标题输入框: #pg-title-input');
-            return false;
-        }
-
-        try {
-            await page.waitForFunction((selector, expectedValue) => {
-                const input = document.querySelector(selector);
-                if (!(input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement)) {
-                    return false;
-                }
-                return String(input.value || '').trim() === expectedValue;
-            }, '#pg-title-input', finalTitle, { timeout: 5000 });
-        } catch (error) {
-            logger.warn(`抖店标题回读校验未通过: ${error?.message || error}`);
-        }
-
-        logger.info(`抖店标题填写完成: ${finalTitle}`);
-        return true;
-    }
-
-    async _checkLogin(page) {
-        const userSelectors = ['.header-user-info', '.account-info', '.user-info', '.avatar', '[class*="merchant"]'];
-        for (const selector of userSelectors) {
             try {
-                if (await page.locator(selector).first().count()) {
+                await titleInput.waitFor({ timeout: 10000, state: 'visible' });
+                await titleInput.scrollIntoViewIfNeeded().catch(() => undefined);
+                await titleInput.click({ clickCount: 3 }).catch(() => undefined);
+                await titleInput.fill('').catch(() => undefined);
+                await titleInput.fill(title);
+                titleFilled = true;
+            } catch {
+                try {
+                    await titleInput.click({ clickCount: 3 }).catch(() => undefined);
+                    await page.keyboard.press('Control+A').catch(() => undefined);
+                    await page.keyboard.press('Meta+A').catch(() => undefined);
+                    await page.keyboard.press('Backspace').catch(() => undefined);
+                    await page.keyboard.type(title, { delay: 20 });
+                    titleFilled = true;
+                } catch {
+                    titleFilled = false;
+                }
+            }
+
+            if (!titleFilled) {
+                logger.warn('抖店未找到标题输入框: #pg-title-input');
+            } else {
+                try {
+                    await page.waitForFunction((expectedValue) => {
+                        const input = document.querySelector('#pg-title-input');
+                        return (input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement)
+                            && String(input.value || '').trim() === expectedValue;
+                    }, title, { timeout: 5000 });
+                } catch (error) {
+                    logger.warn(`抖店标题回读校验未通过: ${error?.message || error}`);
+                }
+                logger.info(`抖店标题填写完成: ${title}`);
+            }
+        }
+
+        let mainImageActionReady = false;
+        if (titleFilled) {
+            try {
+                const guiderSelector = '#material-button-guider';
+                const actionSelector = '[attr-field-id="主图"] [class*="hoverBottomWrapper"] [class*=index-module_actionAfter]';
+                logger.info(`抖店商品主图逻辑：准备展开主图操作区，模式=${hoverMode}`);
+                await triggerHover(page, guiderSelector, hoverMode, '抖店商品主图逻辑');
+
+                const actionLocator = page.locator(actionSelector).nth(1);
+                await actionLocator.waitFor({ timeout: 5000, state: 'visible' });
+                await actionLocator.scrollIntoViewIfNeeded().catch(() => undefined);
+                await page.waitForTimeout(200);
+                await clickWithFallback(
+                    actionLocator,
+                    () => page.evaluate(({ selector, index }) => {
+                        const target = document.querySelectorAll(selector)?.[index];
+                        if (!(target instanceof HTMLElement)) return false;
+                        target.click();
+                        return true;
+                    }, { selector: actionSelector, index: 1 }),
+                    `抖店商品主图逻辑：已点击主图操作按钮 locator(${actionSelector}).nth(1)`,
+                    `抖店商品主图逻辑：已使用JS点击主图操作按钮 document.querySelectorAll('${actionSelector}')[1]`
+                );
+                mainImageActionReady = true;
+                await page.waitForTimeout(500);
+            } catch (error) {
+                logger.warn(`抖店商品主图逻辑：展开主图操作区失败: ${error?.message || error}`);
+            }
+        }
+
+        let uploadResult = {
+            requested: targetImages.length,
+            availableInputs: 0,
+            startIndex: 0,
+            uploadedPaths: []
+        };
+
+        if (targetImages.length > 0) {
+            const preparedImages = await prepareImages(targetImages, imageManager);
+            tempFiles.push(...preparedImages.tempFiles);
+            logger.info(`抖店准备上传的图片数量: ${preparedImages.filePaths.length}`);
+            logger.info('抖店准备上传的图片路径:', preparedImages.filePaths.map(toUserFriendlyPath));
+            logger.info('抖店图片预处理结果:', {
+                tempFileCount: preparedImages.tempFiles.length,
+                fileNames: preparedImages.filePaths.map(getPathFileName)
+            });
+
+            if (preparedImages.filePaths.length > 0) {
+                const inputSelector = '[attr-field-id="主图"] input[type="file"]';
+                logger.info(`抖店上传参数: requested=${preparedImages.filePaths.length}, preferredStartIndex=${fileInputStartIndex}`);
+                await page.waitForLoadState('domcontentloaded').catch(() => undefined);
+                await page.waitForTimeout(2000);
+                logger.info('抖店页面已完成基础加载，准备扫描主图区域文件输入框');
+
+                try {
+                    await page.waitForSelector(inputSelector, { timeout: 15000, state: 'attached' });
+                    logger.info(`抖店已检测到主图文件输入框选择器: ${inputSelector}`);
+                } catch {
+                    logger.warn(`抖店页面在等待主图文件输入框时超时: ${inputSelector}`);
+                }
+
+                const inputLocator = page.locator(inputSelector);
+                const inputCount = await inputLocator.count();
+                const startIndex = inputCount > fileInputStartIndex ? fileInputStartIndex : 0;
+                const uploadFiles = preparedImages.filePaths.slice(0, 5);
+                uploadResult.availableInputs = inputCount;
+                uploadResult.startIndex = startIndex;
+                uploadResult.requested = uploadFiles.length;
+
+                logger.info(`抖店检测到主图区域文件输入框数量: ${inputCount}`);
+                logger.info(`抖店上传索引策略: startIndex=${startIndex}, usableInputCount=${Math.max(0, inputCount - startIndex)}, maxUploadCount=${Math.min(uploadFiles.length, 5)}`);
+
+                if (inputCount <= 0) {
+                    logger.warn('抖店未找到主图区域文件输入框');
+                } else {
+                    const firstInput = inputLocator.first();
+                    const snapshot = await firstInput.evaluate((el) => ({
+                        className: el.className || '',
+                        id: el.id || '',
+                        name: el.getAttribute('name') || '',
+                        accept: el.getAttribute('accept') || '',
+                        multiple: !!el.multiple,
+                        disabled: !!el.disabled,
+                        existingFiles: Array.from(el.files || []).map((file) => file.name)
+                    })).catch((error) => {
+                        logger.warn(`抖店读取首个文件输入框快照失败: input[0], error=${error?.message || error}`);
+                        throw error;
+                    });
+
+                    logger.info('抖店首个文件输入框快照: input[0]', snapshot);
+
+                    if (snapshot?.disabled) {
+                        throw new Error('抖店首个文件输入框不可用（disabled）');
+                    }
+
+                    const beforeKeys = await collectUploadedPreviewKeys(page);
+                    const beforeCount = beforeKeys.length;
+                    const expectedNames = uploadFiles.map(getPathFileName).filter(Boolean);
+                    logger.info(`抖店准备使用首个文件输入框批量上传: input[0], beforePreviewCount=${beforeCount}, files=${uploadFiles.map(toUserFriendlyPath)}`);
+                    await firstInput.setInputFiles(uploadFiles);
+                    logger.info(`抖店首个文件输入框批量 setInputFiles 完成: input[0], count=${uploadFiles.length}`);
+
+                    let inputAccepted = false;
+                    try {
+                        logger.info(`抖店等待单输入框接收多文件: input[0], expectedCount=${expectedNames.length}, files=${expectedNames}`);
+                        await firstInput.waitFor({ state: 'attached', timeout: 5000 });
+                        await firstInput.evaluate((el, expected) => {
+                            return new Promise((resolve, reject) => {
+                                const startedAt = Date.now();
+                                const check = () => {
+                                    const names = Array.from(el.files || []).map((file) => file.name);
+                                    const matched = expected.length > 0
+                                        && names.length >= expected.length
+                                        && expected.every((name) => names.includes(name));
+                                    if (matched) return resolve(true);
+                                    if (Date.now() - startedAt > 8000) {
+                                        return reject(new Error(`文件未完整进入 input, current=${names.join(', ')}`));
+                                    }
+                                    setTimeout(check, 150);
+                                };
+                                check();
+                            });
+                        }, expectedNames);
+                        inputAccepted = true;
+                        logger.info(`抖店单输入框已接收多文件: input[0], files=${expectedNames}`);
+                    } catch (error) {
+                        logger.warn(`抖店单输入框接收多文件未确认: input[0], error=${error?.message || error}`);
+                    }
+
+                    let uploadConfirmed = false;
+                    try {
+                        logger.info(`抖店等待单输入框批量上传确认: input[0], beforePreviewCount=${beforeCount}, files=${expectedNames}`);
+                        await page.waitForFunction((payload) => {
+                            const nodes = payload.selectors.flatMap((selector) => Array.from(document.querySelectorAll(selector)));
+                            const uniqueKeys = new Set();
+
+                            nodes.forEach((node) => {
+                                if (!(node instanceof HTMLImageElement)) return;
+                                const src = node.currentSrc || node.src || '';
+                                const width = node.naturalWidth || node.width || 0;
+                                const height = node.naturalHeight || node.height || 0;
+                                if (!src) return;
+                                if (width > 32 || height > 32 || /^blob:|^data:image\//.test(src)) {
+                                    uniqueKeys.add(`${src}|${width}|${height}`);
+                                }
+                            });
+
+                            const keys = Array.from(uniqueKeys);
+                            const hasNewPreview = keys.some((key) => !payload.beforeKeys.includes(key));
+                            return keys.length > payload.beforeCount || hasNewPreview;
+                        }, { beforeCount, beforeKeys, selectors: PREVIEW_IMAGE_SELECTORS }, { timeout: 15000 });
+                        uploadConfirmed = true;
+                        const afterCount = await countUploadedPreviewImages(page);
+                        logger.info(`抖店单输入框批量上传预览确认成功: input[0], before=${beforeCount}, after=${afterCount}, files=${expectedNames}`);
+                    } catch (error) {
+                        logger.warn(`抖店单输入框批量上传预览确认超时: input[0], before=${beforeCount}, expectedIncrease=${uploadFiles.length}, error=${error?.message || error}`);
+                        await page.waitForTimeout(3000);
+                        const afterKeys = await collectUploadedPreviewKeys(page);
+                        const afterCount = afterKeys.length;
+                        const hasNewPreview = afterKeys.some((key) => !beforeKeys.includes(key));
+                        if (afterCount > beforeCount || hasNewPreview) {
+                            uploadConfirmed = true;
+                            logger.info(`抖店单输入框批量上传超时后补充确认成功: input[0], before=${beforeCount}, after=${afterCount}, hasNewPreview=${hasNewPreview}`);
+                        }
+                    }
+
+                    if (!inputAccepted && !uploadConfirmed) {
+                        throw new Error('抖店首个文件输入框批量上传未确认成功: input[0]');
+                    }
+
+                    await page.waitForTimeout(3000);
+                    uploadResult.uploadedPaths = [...uploadFiles];
+                    logger.info(`抖店上传流程结束: uploaded=${uploadResult.uploadedPaths.length}/${uploadResult.requested}`);
+                }
+            } else {
+                logger.warn('抖店图片路径预处理后为空，跳过文件输入步骤');
+            }
+        } else {
+            logger.info('当前未提供图片，先跳过文件输入步骤');
+        }
+
+        let detailSectionReady = false;
+        try {
+            const detailFieldSelector = '[attr-field-id="商品详情"]';
+            const detailHoverSelector = `${detailFieldSelector} [class*="styles_imgWrapper__"]`;
+            const detailDeleteSelector = `${detailFieldSelector} [class*="styles_iconDelete__"]`;
+            logger.info('抖店商品详情逻辑：准备处理商品详情区域');
+
+            await triggerHover(page, detailHoverSelector, hoverMode, '抖店商品详情逻辑');
+
+            const deleteLocator = page.locator(detailDeleteSelector).first();
+            await deleteLocator.waitFor({ timeout: 5000, state: 'visible' });
+            await deleteLocator.scrollIntoViewIfNeeded().catch(() => undefined);
+            await page.waitForTimeout(200);
+            await clickWithFallback(
+                deleteLocator,
+                () => page.evaluate((selector) => {
+                    const target = document.querySelector(selector);
+                    if (!(target instanceof HTMLElement)) return false;
+                    target.click();
                     return true;
-                }
-            } catch {
-                // ignore
-            }
+                }, detailDeleteSelector),
+                `抖店商品详情逻辑：已点击删除按钮 locator(${detailDeleteSelector}).first()`,
+                `抖店商品详情逻辑：已使用JS点击删除按钮 ${detailDeleteSelector}`
+            );
+
+            await page.waitForTimeout(300);
+            logger.info('抖店商品详情逻辑：准备点击“从主图填入”按钮');
+            const fillButton = page.locator(`${detailFieldSelector} button`).filter({ hasText: '从主图填入' }).first();
+            await fillButton.waitFor({ timeout: 5000, state: 'visible' });
+            await fillButton.scrollIntoViewIfNeeded().catch(() => undefined);
+            await page.waitForTimeout(200);
+            await clickWithFallback(
+                fillButton,
+                () => page.evaluate((fieldSelector) => {
+                    const field = document.querySelector(fieldSelector);
+                    if (!(field instanceof HTMLElement)) return false;
+                    const target = Array.from(field.querySelectorAll('button')).find((button) => String(button.textContent || '').includes('从主图填入'));
+                    if (!(target instanceof HTMLElement)) return false;
+                    target.click();
+                    return true;
+                }, detailFieldSelector),
+                '抖店商品详情逻辑：已点击“从主图填入”按钮',
+                '抖店商品详情逻辑：已使用JS点击“从主图填入”按钮'
+            );
+            detailSectionReady = true;
+            await page.waitForTimeout(300);
+        } catch (error) {
+            logger.warn(`抖店商品详情逻辑执行失败: ${error?.message || error}`);
         }
 
-        const loginSelectors = ['.login-btn', '.login-button', '.auth-btn', 'text=登录', 'text=扫码登录'];
-        for (const selector of loginSelectors) {
+        let productCodeFilledCount = 0;
+        if (!productCode) {
+            logger.info('抖店商家编码逻辑：productCode 为空，跳过填写');
+        } else {
             try {
-                if (await page.locator(selector).first().count()) {
-                    return false;
+                const productCodeSelector = 'td.attr-column-field_code input[type="text"]';
+                const productCodeInputs = page.locator(productCodeSelector);
+                const inputCount = await productCodeInputs.count();
+                logger.info(`抖店商家编码逻辑：准备填写商家编码，inputCount=${inputCount}, value=${productCode}`);
+
+                for (let index = 0; index < inputCount; index += 1) {
+                    const input = productCodeInputs.nth(index);
+                    await input.waitFor({ timeout: 5000, state: 'visible' });
+                    await input.scrollIntoViewIfNeeded().catch(() => undefined);
+                    await input.click({ clickCount: 3 }).catch(() => undefined);
+                    await input.fill('').catch(() => undefined);
+                    await input.fill(productCode);
+                    productCodeFilledCount += 1;
+                    logger.info(`抖店商家编码逻辑：已填写 input[${index}]`);
                 }
-            } catch {
-                // ignore
+            } catch (error) {
+                logger.warn(`抖店商家编码逻辑执行失败: ${error?.message || error}`);
             }
         }
 
-        return !/login|signin|passport/i.test(page.url());
-    }
+        const productCodeFilled = !productCode || productCodeFilledCount > 0;
 
-    async _prepareImages(images) {
-        const filePaths = [];
-        const tempFiles = [];
-
-        for (let i = 0; i < images.length; i += 1) {
-            const source = String(images[i] || '').trim();
-            if (!source) continue;
-
-            if (/^https?:\/\//i.test(source)) {
-                const tempPath = await this.imageManager.downloadImage(source, `${this.platformKey}_${Date.now()}_${i}`);
-                filePaths.push(tempPath);
-                tempFiles.push(tempPath);
-                continue;
-            }
-
-            if (fs.existsSync(source)) {
-                filePaths.push(source);
-            }
-        }
-
-        return { filePaths, tempFiles };
-    }
-
-    async _fillDoudianTitleInput(page, value) {
-        const selector = '#pg-title-input';
-
+        let publishSubmitted = false;
         try {
-            await page.waitForSelector(selector, { timeout: 10000, state: 'visible' });
-        } catch {
-            return false;
+            logger.info('抖店发布提交流程：准备点击“发布商品”按钮');
+            const publishButton = page.locator('button').filter({ hasText: '发布商品' }).first();
+            await publishButton.waitFor({ timeout: 5000, state: 'visible' });
+            await publishButton.scrollIntoViewIfNeeded().catch(() => undefined);
+            await page.waitForTimeout(200);
+            await clickWithFallback(
+                publishButton,
+                () => page.evaluate(() => {
+                    const buttons = Array.from(document.querySelectorAll('button'));
+                    const target = buttons.find((button) => String(button.textContent || '').includes('发布商品'));
+                    if (!(target instanceof HTMLElement)) return false;
+                    target.click();
+                    return true;
+                }),
+                '抖店发布提交流程：已点击“发布商品”按钮',
+                '抖店发布提交流程：已使用JS点击“发布商品”按钮'
+            );
+            publishSubmitted = true;
+            logger.info('抖店发布提交流程：已提交发布，等待 10 秒确认页面状态');
+            await page.waitForTimeout(10000);
+        } catch (error) {
+            logger.warn(`抖店发布提交流程执行失败: ${error?.message || error}`);
         }
 
-        const input = page.locator(selector).first();
-        try {
-            await input.scrollIntoViewIfNeeded().catch(() => undefined);
-            await input.click({ clickCount: 3 }).catch(() => undefined);
-            await input.fill('').catch(() => undefined);
-            await input.fill(value);
-            return true;
-        } catch {
-            try {
-                await input.click({ clickCount: 3 }).catch(() => undefined);
-                await page.keyboard.press('Control+A').catch(() => undefined);
-                await page.keyboard.press('Meta+A').catch(() => undefined);
-                await page.keyboard.press('Backspace').catch(() => undefined);
-                await page.keyboard.type(value, { delay: 20 });
-                return true;
-            } catch {
-                return false;
-            }
+        const uploaded = uploadResult.uploadedPaths.length;
+        const success = !!titleFilled
+            && !!mainImageActionReady
+            && uploaded > 0
+            && !!detailSectionReady
+            && !!productCodeFilled
+            && !!publishSubmitted;
+        if (page && success) {
+            await page.close().catch(() => undefined);
+            page = null;
+            logger.info('抖店页面已关闭');
         }
+
+        const failureReasons = [];
+        if (!titleFilled) failureReasons.push('标题未填写成功');
+        if (!mainImageActionReady) failureReasons.push('商品主图区域未准备完成');
+        if (uploaded <= 0) failureReasons.push('主图未上传成功');
+        if (!detailSectionReady) failureReasons.push('商品详情未处理成功');
+        if (!productCodeFilled) failureReasons.push('商家编码未填写成功');
+        if (!publishSubmitted) failureReasons.push('未点击发布商品');
+
+        return {
+            success,
+            message: success
+                ? '抖店发布流程已提交'
+                : `抖店发布失败：${failureReasons.join('，') || '关键步骤未完成'}`,
+            data: {
+                uploaded,
+                requested: uploadResult.requested,
+                availableInputs: uploadResult.availableInputs,
+                startIndex: uploadResult.startIndex,
+                uploadedPaths: uploadResult.uploadedPaths.map(toUserFriendlyPath),
+                uploadedNames: uploadResult.uploadedPaths.map(getPathFileName),
+                titleFilled,
+                titleValue: titleFilled ? title : '',
+                mainImageActionReady,
+                detailSectionReady,
+                productCode,
+                productCodeFilledCount,
+                productCodeFilled,
+                publishSubmitted,
+                pageKeptOpen: !success
+            }
+        };
+    } catch (error) {
+        logger.error('抖店图片上传失败:', error);
+        return {
+            success: false,
+            message: error?.message || '抖店图片上传失败'
+        };
+    } finally {
+        tempFiles.forEach((file) => imageManager.deleteTempFile(file));
     }
 }
 
-export const doudianPublisher = new DoudianPublisher();
-
-export async function publishToDoudian(publishInfo) {
-    return await doudianPublisher.publish(publishInfo);
-}
+export const doudianPublisher = { publish: publishToDoudian };
 
 export default doudianPublisher;
