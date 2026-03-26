@@ -17,6 +17,7 @@ class KuaishouShopPublisher extends BasicShopPublisher {
             uploadUrl: DEFAULT_CREATE_URL,
             enablePrice: false,
             enableProductCode: true,
+            keepPageOpen: true,
             resolveUploadUrl: ({ settings = {}, publishInfo = {}, defaultUrl }) => {
                 const sameId = String(settings.sameId || publishInfo.sameId || '').trim();
                 return sameId ? resolveCreateUrl(sameId) : defaultUrl;

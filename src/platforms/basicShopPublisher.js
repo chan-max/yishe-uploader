@@ -14,6 +14,7 @@ export class BasicShopPublisher {
             : null;
         this.enablePrice = config.enablePrice !== false;
         this.enableProductCode = config.enableProductCode === true;
+        this.keepPageOpen = config.keepPageOpen === true;
         this.selectors = config.selectors;
         this.imageManager = new ImageManager();
         this.pageOperator = new PageOperator();
@@ -115,22 +116,30 @@ export class BasicShopPublisher {
 
             return {
                 success: true,
-                message: `${this.platformName}基础发布流程已执行完成`
+                message: `${this.platformName}基础发布流程已执行完成`,
+                data: {
+                    pageKeptOpen: this.keepPageOpen,
+                },
             };
         } catch (error) {
             logger.error(`${this.platformName}发布失败:`, error);
             return {
                 success: false,
-                message: error?.message || `${this.platformName}发布失败`
+                message: error?.message || `${this.platformName}发布失败`,
+                data: {
+                    pageKeptOpen: this.keepPageOpen,
+                },
             };
         } finally {
             tempFiles.forEach((file) => this.imageManager.deleteTempFile(file));
-            if (page) {
+            if (page && !this.keepPageOpen) {
                 try {
                     await page.close();
                 } catch (closeError) {
                     logger.warn(`${this.platformName}关闭页面失败:`, closeError);
                 }
+            } else if (page && this.keepPageOpen) {
+                logger.info(`${this.platformName}调试模式：保留页面，不自动关闭 tab`);
             }
         }
     }
