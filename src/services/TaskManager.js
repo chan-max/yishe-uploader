@@ -23,6 +23,10 @@ function toIsoString(value = new Date()) {
     return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
 }
 
+function isPlainObject(value) {
+    return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
 function normalizeSource(source = {}) {
     const normalized = {
         system: String(source.system || 'unknown').trim() || 'unknown',
@@ -248,7 +252,7 @@ export class TaskManager {
             taskId,
             level,
             message: String(message || ''),
-            data: cloneJsonSafe(data),
+            data: cloneJsonSafe(this._summarizeLogData(message, data)),
             timestamp: toIsoString(),
         };
         task.logs.push(logItem);
@@ -400,6 +404,67 @@ export class TaskManager {
         this.queue = this.queue.filter((item) => item.taskId !== taskId);
     }
 
+    _summarizePlatformResult(result) {
+        if (!isPlainObject(result)) {
+            return cloneJsonSafe(result);
+        }
+
+        return {
+            action: result.action,
+            message: result.message,
+            success: result.success,
+            platform: result.platform,
+            timestamp: result.timestamp,
+        };
+    }
+
+    _summarizeTaskResult(result) {
+        if (!isPlainObject(result)) {
+            return cloneJsonSafe(result);
+        }
+
+        if (Array.isArray(result.results)) {
+            return {
+                success: result.success,
+                action: result.action,
+                total: result.total,
+                successCount: result.successCount,
+                failedCount: result.failedCount,
+                timestamp: result.timestamp,
+                results: result.results.map((item) => this._summarizePlatformResult(item)),
+            };
+        }
+
+        if (Object.prototype.hasOwnProperty.call(result, 'platform') && Object.prototype.hasOwnProperty.call(result, 'success')) {
+            return this._summarizePlatformResult(result);
+        }
+
+        return cloneJsonSafe(result);
+    }
+
+    _summarizeLogData(message, data) {
+        if (data === undefined) {
+            return undefined;
+        }
+
+        const normalizedMessage = String(message || '');
+        if (
+            normalizedMessage === '任务执行完成'
+            || normalizedMessage === '任务执行返回结果'
+        ) {
+            return this._summarizeTaskResult(data);
+        }
+
+        if (normalizedMessage.includes('执行结果')) {
+            if (Array.isArray(data)) {
+                return data.map((item) => this._summarizePlatformResult(item));
+            }
+            return this._summarizePlatformResult(data);
+        }
+
+        return data;
+    }
+
     _buildLogInfo(task, options = {}) {
         const includeItems = options.includeItems === true;
         const items = Array.isArray(task?.logs) ? task.logs : [];
@@ -412,7 +477,6 @@ export class TaskManager {
                 level: last.level,
                 message: last.message,
                 timestamp: last.timestamp,
-                data: cloneJsonSafe(last.data),
             } : null,
             ...(includeItems ? { items: items.map((item) => ({ ...item })) } : {}),
         };
@@ -435,7 +499,7 @@ export class TaskManager {
             startedAt: task.startedAt,
             finishedAt: task.finishedAt,
             progress: cloneJsonSafe(task.progress),
-            result: cloneJsonSafe(task.result),
+            result: this._summarizeTaskResult(task.result),
             error: cloneJsonSafe(task.error),
             logInfo,
             logCount: logInfo.count,
@@ -449,14 +513,13 @@ export class TaskManager {
 
     _toTaskDetail(task) {
         const summary = this._toTaskSummary(task);
-        const detailedLogInfo = this._buildLogInfo(task, { includeItems: true });
+        const detailedLogInfo = this._buildLogInfo(task);
 
         return {
             ...summary,
             request: cloneJsonSafe(task.request),
             metadata: cloneJsonSafe(task.metadata),
             logInfo: detailedLogInfo,
-            logs: detailedLogInfo.items || [],
         };
     }
 }
