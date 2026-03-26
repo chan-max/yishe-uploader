@@ -9,6 +9,11 @@ export class BasicShopPublisher {
         this.platformKey = config.platformKey;
         this.platformName = config.platformName;
         this.uploadUrl = config.uploadUrl;
+        this.resolveUploadUrl = typeof config.resolveUploadUrl === 'function'
+            ? config.resolveUploadUrl
+            : null;
+        this.enablePrice = config.enablePrice !== false;
+        this.enableProductCode = config.enableProductCode === true;
         this.selectors = config.selectors;
         this.imageManager = new ImageManager();
         this.pageOperator = new PageOperator();
@@ -20,18 +25,27 @@ export class BasicShopPublisher {
 
         try {
             const settings = publishInfo.platformOptions || publishInfo.publishOptions || publishInfo.platformSettings?.[this.platformKey] || {};
-            const draftOnly = settings.draftOnly !== false;
             const title = String(publishInfo.title || publishInfo.name || '').trim();
             const description = String(publishInfo.description || publishInfo.content || '').trim();
             const images = Array.isArray(publishInfo.images) ? publishInfo.images.filter(Boolean) : [];
+            const productCode = String(
+                settings.productCode
+                ?? publishInfo.productCode
+                ?? publishInfo.data?.productCode
+                ?? ''
+            ).trim();
+            const targetUploadUrl = this.resolveUploadUrl
+                ? this.resolveUploadUrl({ settings, publishInfo, defaultUrl: this.uploadUrl })
+                : this.uploadUrl;
 
             logger.info(`开始执行${this.platformName}基础发布流程`);
+            logger.info(`${this.platformName}目标发布页: ${targetUploadUrl}`);
 
             const browser = await getOrCreateBrowser();
             page = await browser.newPage();
             await this.pageOperator.setupAntiDetection(page);
 
-            await page.goto(this.uploadUrl, {
+            await page.goto(targetUploadUrl, {
                 waitUntil: 'domcontentloaded',
                 timeout: 60000
             });
@@ -59,7 +73,7 @@ export class BasicShopPublisher {
                 }
             }
 
-            if (settings.price !== undefined && settings.price !== null && settings.price !== '') {
+            if (this.enablePrice && this.selectors.priceInput && settings.price !== undefined && settings.price !== null && settings.price !== '') {
                 const filled = await this._fillField(page, this.selectors.priceInput, String(settings.price));
                 if (filled) {
                     logger.info(`${this.platformName}价格已填充`);
@@ -77,13 +91,23 @@ export class BasicShopPublisher {
                 }
             }
 
-            const actionSelectors = draftOnly ? this.selectors.draftButton : this.selectors.submitButton;
+            if (this.enableProductCode) {
+                const productCodeFilledCount = await this._fillProductCode(page, productCode);
+                if (productCode && productCodeFilledCount <= 0) {
+                    return {
+                        success: false,
+                        message: `${this.platformName}商家编码未填写成功`
+                    };
+                }
+            }
+
+            const actionSelectors = this.selectors.submitButton;
             const clicked = await this._clickFirstButton(page, actionSelectors);
 
             if (!clicked) {
                 return {
                     success: false,
-                    message: `${this.platformName}基础支持已接入，但暂未识别到${draftOnly ? '草稿' : '发布'}按钮`
+                    message: `${this.platformName}基础支持已接入，但暂未识别到发布按钮`
                 };
             }
 
@@ -91,9 +115,7 @@ export class BasicShopPublisher {
 
             return {
                 success: true,
-                message: draftOnly
-                    ? `${this.platformName}基础草稿流程已执行完成`
-                    : `${this.platformName}基础发布流程已执行完成`
+                message: `${this.platformName}基础发布流程已执行完成`
             };
         } catch (error) {
             logger.error(`${this.platformName}发布失败:`, error);
@@ -221,5 +243,49 @@ export class BasicShopPublisher {
             }
         }
         return false;
+    }
+
+    async _fillProductCode(page, productCode) {
+        if (!this.enableProductCode) return 0;
+        if (!productCode) {
+            logger.info(`${this.platformName}商家编码逻辑：productCode 为空，跳过填写`);
+            return 0;
+        }
+
+        const selectorList = Array.isArray(this.selectors.productCodeInput)
+            ? this.selectors.productCodeInput
+            : [this.selectors.productCodeInput].filter(Boolean);
+
+        let filledCount = 0;
+
+        for (const selector of selectorList) {
+            if (!selector) continue;
+            try {
+                const inputs = page.locator(selector);
+                const count = await inputs.count();
+                if (!count) continue;
+
+                logger.info(`${this.platformName}商家编码逻辑：准备填写商家编码，selector=${selector}, inputCount=${count}, value=${productCode}`);
+
+                for (let index = 0; index < count; index += 1) {
+                    const input = inputs.nth(index);
+                    await input.waitFor({ timeout: 5000, state: 'visible' });
+                    await input.scrollIntoViewIfNeeded().catch(() => undefined);
+                    await input.click({ clickCount: 3 }).catch(() => undefined);
+                    await input.fill('').catch(() => undefined);
+                    await input.fill(productCode);
+                    filledCount += 1;
+                    logger.info(`${this.platformName}商家编码逻辑：已填写 ${selector}[${index}]`);
+                }
+
+                if (filledCount > 0) {
+                    return filledCount;
+                }
+            } catch (error) {
+                logger.warn(`${this.platformName}商家编码逻辑执行失败: ${error?.message || error}`);
+            }
+        }
+
+        return filledCount;
     }
 }

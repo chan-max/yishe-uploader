@@ -234,7 +234,7 @@ export const PLATFORM_CONFIGS = {
     },
     kuaishou_shop: {
         name: '快手小店',
-        uploadUrl: 'https://fxg.kwaixiaodian.com/merchant/goods/create',
+        uploadUrl: 'https://s.kwaixiaodian.com/zone/goods/nexus/self/release/add',
         waitUntil: 'domcontentloaded',
         timeout: 45000,
         antiDetection: true,
@@ -253,16 +253,6 @@ export const PLATFORM_CONFIGS = {
                 '[contenteditable="true"]'
             ],
             fileInput: 'input[type="file"]',
-            priceInput: [
-                'input[placeholder*="价格"]',
-                'input[placeholder*="售价"]',
-                'input[name*="price"]'
-            ],
-            draftButton: [
-                'button:has-text("保存草稿")',
-                'button:has-text("暂存")',
-                'button:has-text("保存")'
-            ],
             submitButton: [
                 'button:has-text("发布商品")',
                 'button:has-text("提交审核")',
