@@ -573,6 +573,7 @@ export async function publishToDoudian(publishInfo = {}) {
         const productCodeFilled = !productCode || productCodeFilledCount > 0;
 
         let publishSubmitted = false;
+        let publishSuccessConfirmed = false;
         try {
             logger.info('抖店发布提交流程：准备点击“发布商品”按钮');
             const publishButton = page.locator('button').filter({ hasText: '发布商品' }).first();
@@ -592,8 +593,13 @@ export async function publishToDoudian(publishInfo = {}) {
                 '抖店发布提交流程：已使用JS点击“发布商品”按钮'
             );
             publishSubmitted = true;
-            logger.info('抖店发布提交流程：已提交发布，等待 10 秒确认页面状态');
-            await page.waitForTimeout(10000);
+            logger.info('抖店发布提交流程：已提交发布，等待成功提示“商品提交成功，继续发布商品视频，分享到抖音”');
+            await page.getByText('商品提交成功，继续发布商品视频，分享到抖音').waitFor({
+                timeout: 10000,
+                state: 'visible'
+            });
+            publishSuccessConfirmed = true;
+            logger.info('抖店发布提交流程：已确认发布成功提示');
         } catch (error) {
             logger.warn(`抖店发布提交流程执行失败: ${error?.message || error}`);
         }
@@ -604,7 +610,8 @@ export async function publishToDoudian(publishInfo = {}) {
             && uploaded > 0
             && !!detailSectionReady
             && !!productCodeFilled
-            && !!publishSubmitted;
+            && !!publishSubmitted
+            && !!publishSuccessConfirmed;
         if (page && success) {
             await page.close().catch(() => undefined);
             page = null;
@@ -618,6 +625,7 @@ export async function publishToDoudian(publishInfo = {}) {
         if (!detailSectionReady) failureReasons.push('商品详情未处理成功');
         if (!productCodeFilled) failureReasons.push('商家编码未填写成功');
         if (!publishSubmitted) failureReasons.push('未点击发布商品');
+        if (!publishSuccessConfirmed) failureReasons.push('未确认商品提交成功');
 
         return {
             success,
@@ -639,6 +647,7 @@ export async function publishToDoudian(publishInfo = {}) {
                 productCodeFilledCount,
                 productCodeFilled,
                 publishSubmitted,
+                publishSuccessConfirmed,
                 pageKeptOpen: !success
             }
         };

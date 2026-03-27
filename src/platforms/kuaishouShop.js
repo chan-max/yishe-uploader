@@ -10,6 +10,7 @@ const DEFAULT_CREATE_URL = 'https://s.kwaixiaodian.com/zone/goods/nexus/self/rel
 const BASE_INFO_TITLE_SELECTOR = '#BaseInfo > :nth-child(2) input';
 const BASE_INFO_SHORT_TITLE_SELECTOR = '#BaseInfo > :nth-child(3) input';
 const GOODS_IMAGE_UPLOAD_CONTAINER_SELECTOR = '#GoodsImg > :nth-child(2)';
+const GOODS_DETAIL_IMAGE_UPLOAD_CONTAINER_SELECTOR = '#GoodsImg > :nth-child(6)';
 const SKU_AND_PRICE_CONTAINER_SELECTOR = '#SkuAndPrice > :nth-child(4)';
 const GOODS_IMAGE_DELETE_CONTAINER_SELECTORS = [
     '#GoodsImg > :nth-child(2)',
@@ -139,48 +140,170 @@ async function uploadGoodsImages(page, filePaths) {
     }
 
     try {
+        const beforeCount = await page.locator(`${GOODS_IMAGE_UPLOAD_CONTAINER_SELECTOR} [aria-label="close-circle"]`).count().catch(() => 0);
         const fileInput = page.locator(`${GOODS_IMAGE_UPLOAD_CONTAINER_SELECTOR} input[type="file"]`).first();
         await fileInput.waitFor({ timeout: 10000, state: 'attached' });
         await fileInput.setInputFiles(filePaths);
-        await page.waitForTimeout(3000);
-        logger.info(`${PLATFORM_NAME}商品主图逻辑：已在商品图区域执行上传，count=${filePaths.length}`);
-        return filePaths.length;
+        logger.info(`${PLATFORM_NAME}商品主图逻辑：已触发商品图上传，beforeCount=${beforeCount}, expectedAdd=${filePaths.length}`);
+        await page.waitForFunction(
+            ({ selector, targetCount }) => {
+                const container = document.querySelector(selector);
+                if (!(container instanceof HTMLElement)) return false;
+                const uploadedCount = container.querySelectorAll('[aria-label="close-circle"]').length;
+                const loadingCount = container.querySelectorAll('.loading,[class*="loading"],[class*="uploading"],[class*="progress"]').length;
+                return uploadedCount >= targetCount && loadingCount === 0;
+            },
+            {
+                selector: GOODS_IMAGE_UPLOAD_CONTAINER_SELECTOR,
+                targetCount: beforeCount + filePaths.length
+            },
+            { timeout: 300000 }
+        );
+        const uploadedCount = await page.locator(`${GOODS_IMAGE_UPLOAD_CONTAINER_SELECTOR} [aria-label="close-circle"]`).count().catch(() => 0);
+        logger.info(`${PLATFORM_NAME}商品主图逻辑：商品图上传确认完成，uploadedCount=${uploadedCount}, expectedTotal=${beforeCount + filePaths.length}`);
+        return Math.max(0, uploadedCount - beforeCount);
     } catch (error) {
         logger.warn(`${PLATFORM_NAME}商品主图逻辑：商品图上传失败: ${error?.message || error}`);
         return 0;
     }
 }
 
-async function fillSkuProductCode(page, productCode) {
-    if (!productCode) {
-        logger.info(`${PLATFORM_NAME}SKU编码逻辑：productCode 为空，跳过填写`);
+async function uploadGoodsDetailImages(page, filePaths) {
+    if (!filePaths.length) {
         return 0;
     }
 
     try {
-        const result = await page.evaluate(async ({ containerSelector, value }) => {
-            const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+        const beforeCount = await page.locator(`${GOODS_DETAIL_IMAGE_UPLOAD_CONTAINER_SELECTOR} [aria-label="close-circle"]`).count().catch(() => 0);
+        const fileInput = page.locator(`${GOODS_DETAIL_IMAGE_UPLOAD_CONTAINER_SELECTOR} input[type="file"]`).first();
+        await fileInput.waitFor({ timeout: 10000, state: 'attached' });
+        await fileInput.setInputFiles(filePaths);
+        logger.info(`${PLATFORM_NAME}商品详情图逻辑：已触发详情图上传，beforeCount=${beforeCount}, expectedAdd=${filePaths.length}`);
+        await page.waitForFunction(
+            ({ selector, targetCount }) => {
+                const container = document.querySelector(selector);
+                if (!(container instanceof HTMLElement)) return false;
+                const uploadedCount = container.querySelectorAll('[aria-label="close-circle"]').length;
+                const loadingCount = container.querySelectorAll('.loading,[class*="loading"],[class*="uploading"],[class*="progress"]').length;
+                return uploadedCount >= targetCount && loadingCount === 0;
+            },
+            {
+                selector: GOODS_DETAIL_IMAGE_UPLOAD_CONTAINER_SELECTOR,
+                targetCount: beforeCount + filePaths.length
+            },
+            { timeout: 300000 }
+        );
+        const uploadedCount = await page.locator(`${GOODS_DETAIL_IMAGE_UPLOAD_CONTAINER_SELECTOR} [aria-label="close-circle"]`).count().catch(() => 0);
+        logger.info(`${PLATFORM_NAME}商品详情图逻辑：详情图上传确认完成，uploadedCount=${uploadedCount}, expectedTotal=${beforeCount + filePaths.length}`);
+        return Math.max(0, uploadedCount - beforeCount);
+    } catch (error) {
+        logger.warn(`${PLATFORM_NAME}商品详情图逻辑：详情图上传失败: ${error?.message || error}`);
+        return 0;
+    }
+}
+
+async function clickSubmitAudit(page) {
+    try {
+        const button = page.locator('button').filter({ hasText: '提交审核' }).first();
+        await button.waitFor({ timeout: 10000, state: 'visible' });
+        await button.scrollIntoViewIfNeeded().catch(() => undefined);
+        await button.click({ delay: 100 });
+        logger.info(`${PLATFORM_NAME}提交流程：已点击“提交审核”按钮`);
+        logger.info(`${PLATFORM_NAME}提交流程：等待成功提示“商品上传成功”`);
+        await page.getByText('商品上传成功').waitFor({
+            timeout: 20000,
+            state: 'visible'
+        });
+        logger.info(`${PLATFORM_NAME}提交流程：已确认“商品上传成功”提示`);
+        return true;
+    } catch (error) {
+        logger.warn(`${PLATFORM_NAME}提交流程执行失败或超时: ${error?.message || error}`);
+        return false;
+    }
+}
+
+async function fillTableColumnInputs(page, { containerSelector, columnKeyword, value, logPrefix }) {
+    try {
+        const result = await page.evaluate(({ containerSelector, columnKeyword, markerPrefix }) => {
+            const getNodePath = (node) => {
+                if (!(node instanceof Element)) return '';
+                const parts = [];
+                let current = node;
+                while (current && current instanceof Element && parts.length < 6) {
+                    let part = current.tagName.toLowerCase();
+                    if (current.id) {
+                        part += `#${current.id}`;
+                    } else if (current.classList.length) {
+                        part += `.${Array.from(current.classList).slice(0, 2).join('.')}`;
+                    }
+                    const parent = current.parentElement;
+                    if (parent) {
+                        const siblings = Array.from(parent.children).filter((child) => child.tagName === current.tagName);
+                        if (siblings.length > 1) {
+                            part += `:nth-of-type(${siblings.indexOf(current) + 1})`;
+                        }
+                    }
+                    parts.unshift(part);
+                    current = current.parentElement;
+                }
+                return parts.join(' > ');
+            };
+            const getInputSelector = (node) => {
+                if (!(node instanceof HTMLInputElement)) return '';
+                if (node.id) return `#${node.id}`;
+                const path = [];
+                let current = node;
+                while (current && current instanceof Element && path.length < 8) {
+                    let part = current.tagName.toLowerCase();
+                    if (current.classList.length) {
+                        part += `.${Array.from(current.classList).slice(0, 2).join('.')}`;
+                    }
+                    const parent = current.parentElement;
+                    if (parent) {
+                        const siblings = Array.from(parent.children).filter((child) => child.tagName === current.tagName);
+                        if (siblings.length > 1) {
+                            part += `:nth-of-type(${siblings.indexOf(current) + 1})`;
+                        }
+                    }
+                    path.unshift(part);
+                    current = current.parentElement;
+                    if (current?.id) {
+                        path.unshift(`#${current.id}`);
+                        break;
+                    }
+                }
+                return path.join(' > ');
+            };
             const container = document.querySelector(containerSelector);
             if (!(container instanceof HTMLElement)) {
                 throw new Error(`未找到 SKU 区域: ${containerSelector}`);
             }
 
-            const table = container.querySelector('table');
-            if (!(table instanceof HTMLTableElement)) {
-                throw new Error('未找到 SKU 表格');
+            const headerRoot = container.querySelector('.kwaishop-goods-nexus-pc-table-header');
+            const bodyRoot = container.querySelector('.kwaishop-goods-nexus-pc-table-body');
+            if (!(headerRoot instanceof HTMLElement)) {
+                throw new Error('未找到 SKU 表头区域');
+            }
+            if (!(bodyRoot instanceof HTMLElement)) {
+                throw new Error('未找到 SKU 表体区域');
             }
 
-            const headerCells = Array.from(table.querySelectorAll('thead th'));
-            const columnIndex = headerCells.findIndex((cell) => String(cell.textContent || '').includes('SKU编码'));
+            const headerTable = headerRoot.querySelector('table');
+            const bodyTable = bodyRoot.querySelector('table');
+            const headerCells = Array.from((headerTable || headerRoot).querySelectorAll('th'));
+            const columnIndex = headerCells.findIndex((cell) => {
+                const text = String(cell.textContent || '').trim().toLowerCase();
+                return text === columnKeyword || text.includes(columnKeyword);
+            });
             if (columnIndex < 0) {
-                throw new Error('未找到“SKU编码”列');
+                throw new Error(`未找到“${columnKeyword}”列`);
             }
 
             const headerCell = headerCells[columnIndex];
-            const tableRows = Array.from(table.querySelectorAll('tr'));
-            const bodyRows = tableRows.filter((row) => row.querySelectorAll('td').length > columnIndex);
+            const bodyRows = Array.from((bodyTable || bodyRoot).querySelectorAll('tr')).filter((row) => row.querySelectorAll('td').length > columnIndex);
             const columnInputs = [];
-            let filledCount = 0;
+            const candidateInputs = [];
+            const taggedInputIds = [];
 
             for (const row of bodyRows) {
                 const cells = Array.from(row.querySelectorAll('td'));
@@ -190,7 +313,21 @@ async function fillSkuProductCode(page, productCode) {
                 const inputs = Array.from(cell.querySelectorAll('input'));
                 inputs.forEach((input) => {
                     if (input instanceof HTMLInputElement) {
+                        const inputId = `${markerPrefix}-${Math.random().toString(36).slice(2, 10)}`;
+                        input.setAttribute('data-yishe-sku-code-id', inputId);
                         columnInputs.push(input);
+                        taggedInputIds.push(inputId);
+                        candidateInputs.push({
+                            source: 'table-column',
+                            value: input.value,
+                            placeholder: input.getAttribute('placeholder') || '',
+                            name: input.getAttribute('name') || '',
+                            className: input.className || '',
+                            path: getNodePath(input),
+                            selector: getInputSelector(input),
+                            tempSelector: `[data-yishe-sku-code-id="${inputId}"]`,
+                            cellText: String(cell.textContent || '').trim().slice(0, 120)
+                        });
                     }
                 });
             }
@@ -205,49 +342,119 @@ async function fillSkuProductCode(page, productCode) {
                         const dataLabel = String(input.getAttribute('data-label') || '');
                         const nearbyText = String(input.parentElement?.textContent || '');
                         if (
-                            ariaLabel.includes('SKU编码')
-                            || placeholder.includes('SKU编码')
-                            || name.includes('SKU')
-                            || dataLabel.includes('SKU编码')
-                            || nearbyText.includes('SKU编码')
+                            ariaLabel.toLowerCase().includes(columnKeyword)
+                            || placeholder.toLowerCase().includes(columnKeyword)
+                            || name.toLowerCase().includes(columnKeyword)
+                            || dataLabel.toLowerCase().includes(columnKeyword)
+                            || nearbyText.toLowerCase().includes(columnKeyword)
                         ) {
+                            const inputId = `${markerPrefix}-${Math.random().toString(36).slice(2, 10)}`;
+                            input.setAttribute('data-yishe-sku-code-id', inputId);
                             columnInputs.push(input);
+                            taggedInputIds.push(inputId);
+                            candidateInputs.push({
+                                source: 'fallback-search',
+                                value: input.value,
+                                placeholder,
+                                name,
+                                className: input.className || '',
+                                ariaLabel,
+                                dataLabel,
+                                path: getNodePath(input),
+                                selector: getInputSelector(input),
+                                tempSelector: `[data-yishe-sku-code-id="${inputId}"]`,
+                                cellText: nearbyText.trim().slice(0, 120)
+                            });
                         }
                     }
                 });
             }
 
-            for (const input of columnInputs) {
-                input.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
-                input.focus();
-                input.value = '';
-                input.dispatchEvent(new Event('input', { bubbles: true }));
-                input.dispatchEvent(new Event('change', { bubbles: true }));
-                await sleep(50);
-                input.value = value;
-                input.dispatchEvent(new Event('input', { bubbles: true }));
-                input.dispatchEvent(new Event('change', { bubbles: true }));
-                input.blur();
-                filledCount += 1;
-                await sleep(50);
-            }
-
             return {
+                containerFound: true,
+                tableFound: !!headerTable || !!bodyTable,
+                headerRootFound: true,
+                bodyRootFound: true,
+                containerSelector,
                 columnIndex,
                 rowCount: bodyRows.length,
-                filledCount,
                 headerText: String(headerCell?.textContent || '').trim(),
-                candidateInputCount: columnInputs.length
+                headerTexts: headerCells.map((cell) => String(cell.textContent || '').trim()),
+                candidateInputCount: columnInputs.length,
+                candidateInputs: candidateInputs.slice(0, 10),
+                taggedInputIds
             };
         }, {
-            containerSelector: SKU_AND_PRICE_CONTAINER_SELECTOR,
-            value: productCode
+            containerSelector,
+            columnKeyword: String(columnKeyword || '').trim().toLowerCase(),
+            markerPrefix: `yishe-${String(columnKeyword || 'column').trim().toLowerCase()}`
         });
 
-        logger.info(`${PLATFORM_NAME}SKU编码逻辑：已填写 SKU编码 列，columnIndex=${result.columnIndex}, headerText=${result.headerText}, rowCount=${result.rowCount}, candidateInputCount=${result.candidateInputCount}, filledCount=${result.filledCount}, value=${productCode}`);
-        return result.filledCount || 0;
+        logger.info(`${PLATFORM_NAME}${logPrefix}：容器和表格扫描结果`, {
+            containerSelector: result.containerSelector,
+            containerFound: result.containerFound,
+            tableFound: result.tableFound,
+            headerRootFound: result.headerRootFound,
+            bodyRootFound: result.bodyRootFound,
+            headerTexts: result.headerTexts,
+            columnIndex: result.columnIndex,
+            headerText: result.headerText,
+            rowCount: result.rowCount,
+            candidateInputCount: result.candidateInputCount,
+            value
+        });
+        logger.info(`${PLATFORM_NAME}${logPrefix}：候选输入框明细`, result.candidateInputs || []);
+
+        const fillDebug = [];
+        let filledCount = 0;
+        const bodyRoot = page.locator(`${containerSelector} .kwaishop-goods-nexus-pc-table-body`).first();
+        await bodyRoot.scrollIntoViewIfNeeded().catch(() => undefined);
+
+        for (const inputId of result.taggedInputIds || []) {
+            const tempSelector = `[data-yishe-sku-code-id="${inputId}"]`;
+            try {
+                const input = page.locator(tempSelector).first();
+                await input.waitFor({ timeout: 5000, state: 'visible' });
+                const beforeValue = await input.inputValue().catch(() => '');
+                await input.focus().catch(() => undefined);
+                await input.evaluate((node) => {
+                    if (node instanceof HTMLInputElement) {
+                        node.select();
+                    }
+                }).catch(() => undefined);
+                await page.keyboard.press('Backspace').catch(() => undefined);
+                await input.type(String(value), { delay: 30 });
+                await input.blur().catch(() => undefined);
+                await page.waitForTimeout(150);
+                const afterValue = await input.inputValue().catch(() => '');
+                fillDebug.push({
+                    tempSelector,
+                    beforeValue,
+                    afterValue
+                });
+                if (String(afterValue).trim() === String(value)) {
+                    filledCount += 1;
+                }
+            } catch (error) {
+                fillDebug.push({
+                    tempSelector,
+                    error: error?.message || String(error || '')
+                });
+            }
+        }
+
+        await page.evaluate(() => {
+            document.querySelectorAll('[data-yishe-sku-code-id]').forEach((node) => {
+                if (node instanceof HTMLElement) {
+                    node.removeAttribute('data-yishe-sku-code-id');
+                }
+            });
+        }).catch(() => undefined);
+
+        logger.info(`${PLATFORM_NAME}${logPrefix}：输入执行明细`, fillDebug.slice(0, 10));
+        return filledCount;
     } catch (error) {
-        logger.warn(`${PLATFORM_NAME}SKU编码逻辑执行失败: ${error?.message || error}`);
+        logger.warn(`${PLATFORM_NAME}${logPrefix}执行失败: ${error?.message || error}`);
         return 0;
     }
 }
@@ -271,6 +478,7 @@ export async function publishToKuaishouShop(publishInfo = {}) {
             ?? publishInfo.data?.productCode
             ?? ''
         ).trim();
+        const inventoryValue = '999';
 
         logger.info(`开始执行${PLATFORM_NAME}发布流程`);
         logger.info(`${PLATFORM_NAME}目标发布页: ${targetUploadUrl}`);
@@ -306,7 +514,10 @@ export async function publishToKuaishouShop(publishInfo = {}) {
         let deletedCount = 0;
         let preparedImageCount = 0;
         let uploadedImageCount = 0;
+        let uploadedDetailImageCount = 0;
         let productCodeFilledCount = 0;
+        let inventoryFilledCount = 0;
+        let submitAuditClicked = false;
         if (images.length > 0) {
             deletedCount = await clearGoodsImages(page);
             const preparedImages = await prepareImages(images, imageManager);
@@ -314,15 +525,59 @@ export async function publishToKuaishouShop(publishInfo = {}) {
             preparedImageCount = preparedImages.filePaths.length;
             logger.info(`${PLATFORM_NAME}图片已预处理完成，count=${preparedImageCount}`);
             uploadedImageCount = await uploadGoodsImages(page, preparedImages.filePaths);
+            if (uploadedImageCount < preparedImageCount) {
+                return {
+                    success: false,
+                    message: `${PLATFORM_NAME}商品图上传未完成`,
+                    data: {
+                        pageKeptOpen: true,
+                        deletedCount,
+                        preparedImageCount,
+                        uploadedImageCount
+                    }
+                };
+            }
+            uploadedDetailImageCount = await uploadGoodsDetailImages(page, preparedImages.filePaths);
+            if (uploadedDetailImageCount < preparedImageCount) {
+                return {
+                    success: false,
+                    message: `${PLATFORM_NAME}商品详情图上传未完成`,
+                    data: {
+                        pageKeptOpen: true,
+                        deletedCount,
+                        preparedImageCount,
+                        uploadedImageCount,
+                        uploadedDetailImageCount
+                    }
+                };
+            }
         }
 
-        productCodeFilledCount = await fillSkuProductCode(page, productCode);
+        if (!productCode) {
+            logger.info(`${PLATFORM_NAME}SKU编码逻辑：productCode 为空，跳过填写`);
+        } else {
+            productCodeFilledCount = await fillTableColumnInputs(page, {
+                containerSelector: SKU_AND_PRICE_CONTAINER_SELECTOR,
+                columnKeyword: 'sku',
+                value: productCode,
+                logPrefix: 'SKU编码逻辑'
+            });
+        }
+
+        inventoryFilledCount = await fillTableColumnInputs(page, {
+            containerSelector: SKU_AND_PRICE_CONTAINER_SELECTOR,
+            columnKeyword: '库存',
+            value: inventoryValue,
+            logPrefix: '库存逻辑'
+        });
+
+        submitAuditClicked = await clickSubmitAudit(page);
 
         return {
-            success: !!titleFilled && !!shortTitleFilled,
-            message: titleFilled && shortTitleFilled
-                ? `${PLATFORM_NAME}基础信息已填写完成`
-                : `${PLATFORM_NAME}基础信息填写失败`,
+            success: !!titleFilled && !!shortTitleFilled && !!submitAuditClicked,
+            message: titleFilled && shortTitleFilled && submitAuditClicked
+                ? `${PLATFORM_NAME}发布流程已提交`
+                : `${PLATFORM_NAME}发布流程未完成`,
             data: {
                 pageKeptOpen: true,
                 titleFilled,
@@ -332,8 +587,12 @@ export async function publishToKuaishouShop(publishInfo = {}) {
                 deletedCount,
                 preparedImageCount,
                 uploadedImageCount,
+                uploadedDetailImageCount,
                 productCode,
-                productCodeFilledCount
+                productCodeFilledCount,
+                inventoryValue,
+                inventoryFilledCount,
+                submitAuditClicked
             }
         };
     } catch (error) {
