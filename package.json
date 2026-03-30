@@ -5,7 +5,7 @@
     "main": "src/index.js",
     "type": "module",
     "scripts": {
-        "dev": "vite build --config web/vite.config.js && node --inspect=9229 --watch src/api/server.js",
+        "dev": "vite build --config web/vite.config.js && node  --watch src/api/server.js",
         "dev:no-watch": "vite build --config web/vite.config.js && node src/api/server.js"
     },
     "keywords": [
