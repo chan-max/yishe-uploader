@@ -19,6 +19,14 @@ const UPLOAD_WAIT_POLL_INTERVAL_MS = 1000;
 const UPLOAD_WAIT_LOG_INTERVAL_MS = 5000;
 const SUBMIT_AUDIT_RETRY_COUNT = 5;
 const SUBMIT_AUDIT_RETRY_DELAY_MS = 5000;
+const SUBMIT_AUDIT_WAIT_TIMEOUT_MS = 15000;
+const SUBMIT_AUDIT_WAIT_POLL_INTERVAL_MS = 500;
+const SUBMIT_AUDIT_SUCCESS_TEXTS = [
+    '发布成功',
+    '商品上传成功',
+    '提交审核成功',
+    '提交成功'
+];
 const GOODS_IMAGE_DELETE_CONTAINER_SELECTORS = [
     '#GoodsImg > :nth-child(2)',
     '#GoodsImg > :nth-child(3)',
@@ -37,6 +45,55 @@ function resolveCreateUrl(sameId) {
 
 function normalizeLimitedText(value, maxLength) {
     return String(value || '').trim().slice(0, maxLength);
+}
+
+async function inspectSubmitAuditSuccess(page) {
+    return page.evaluate((successTexts) => {
+        const normalize = (value) => String(value || '').replace(/\s+/g, ' ').trim();
+        const bodyText = normalize(document.body?.textContent || '');
+        const matchedText = successTexts.find((text) => bodyText.includes(text));
+
+        return {
+            success: !!matchedText,
+            matchedText: matchedText || '',
+            bodySnippet: bodyText.slice(0, 500),
+            pageUrl: String(window.location.href || '')
+        };
+    }, SUBMIT_AUDIT_SUCCESS_TEXTS).catch((error) => ({
+        success: false,
+        matchedText: '',
+        bodySnippet: '',
+        pageUrl: page.url(),
+        error: error?.message || String(error || '')
+    }));
+}
+
+async function waitForSubmitAuditSuccess(page, { timeoutMs = SUBMIT_AUDIT_WAIT_TIMEOUT_MS, pollingMs = SUBMIT_AUDIT_WAIT_POLL_INTERVAL_MS } = {}) {
+    const startedAt = Date.now();
+    let lastSnapshot = null;
+
+    while (Date.now() - startedAt < timeoutMs) {
+        lastSnapshot = await inspectSubmitAuditSuccess(page);
+        if (lastSnapshot?.success) {
+            return {
+                ...lastSnapshot,
+                type: 'success',
+                signal: 'success_text',
+                text: lastSnapshot.matchedText,
+                elapsedMs: Date.now() - startedAt
+            };
+        }
+        await page.waitForTimeout(pollingMs);
+    }
+
+    return {
+        ...(lastSnapshot || {}),
+        success: false,
+        type: 'timeout',
+        signal: 'success_text_not_found',
+        text: lastSnapshot?.matchedText || '',
+        elapsedMs: Date.now() - startedAt
+    };
 }
 
 async function checkLogin(page) {
@@ -501,58 +558,65 @@ async function clickSubmitAudit(page) {
         }
 
         for (let attempt = 1; attempt <= SUBMIT_AUDIT_RETRY_COUNT; attempt += 1) {
+            const currentButton = page.locator('button').filter({ hasText: /^提交审核$/ }).first();
+            const currentButtonCount = await currentButton.count().catch(() => 0);
+            if (!currentButtonCount) {
+                logger.warn(`${PLATFORM_NAME}提交流程：第${attempt}次提交前未找到“提交审核”按钮，先等待成功文案确认`, {
+                    waitTimeoutMs: SUBMIT_AUDIT_WAIT_TIMEOUT_MS
+                });
+                const submitResult = await waitForSubmitAuditSuccess(page);
+                logger.info(`${PLATFORM_NAME}提交流程：按钮缺失后的成功文案检查结果`, { attempt, ...submitResult });
+                return !!submitResult?.success;
+            }
+
             let clickMethod = 'locator.click';
             try {
-                await button.click({ delay: 100, timeout: 5000 });
+                await currentButton.click({ delay: 100, timeout: 5000 });
             } catch (clickError) {
                 logger.warn(`${PLATFORM_NAME}提交流程：第${attempt}次常规点击失败，尝试 DOM click`, {
                     message: clickError?.message || String(clickError || '')
                 });
                 clickMethod = 'dom.click';
-                await button.evaluate((node) => {
-                    if (node instanceof HTMLButtonElement) {
-                        node.click();
+                const domClickResult = await page.evaluate(() => {
+                    const buttons = Array.from(document.querySelectorAll('button'));
+                    const target = buttons.find((node) => {
+                        if (!(node instanceof HTMLButtonElement)) return false;
+                        return String(node.textContent || '').replace(/\s+/g, ' ').trim() === '提交审核';
+                    });
+
+                    if (!(target instanceof HTMLButtonElement)) {
+                        return {
+                            clicked: false,
+                            reason: 'button_not_found'
+                        };
                     }
-                });
+
+                    target.click();
+                    return {
+                        clicked: true
+                    };
+                }).catch((domClickError) => ({
+                    clicked: false,
+                    reason: 'dom_click_failed',
+                    error: domClickError?.message || String(domClickError || '')
+                }));
+
+                if (!domClickResult?.clicked) {
+                    logger.warn(`${PLATFORM_NAME}提交流程：第${attempt}次 DOM click 未执行成功`, {
+                        domClickResult
+                    });
+                    return false;
+                }
             }
 
             logger.info(`${PLATFORM_NAME}提交流程：已触发“提交审核”按钮点击`, { attempt, clickMethod });
-
-            const submitResult = await page.waitForFunction(() => {
-                const bodyText = String(document.body?.textContent || '');
-                if (bodyText.includes('商品上传成功')) {
-                    return {
-                        success: true,
-                        type: 'success',
-                        text: '商品上传成功'
-                    };
-                }
-
-                const errorKeywords = ['请填写', '不能为空', '校验失败', '提交失败', '保存失败', '上传失败', '请先', '错误'];
-                const matched = errorKeywords.find((keyword) => bodyText.includes(keyword));
-                if (matched) {
-                    const lines = bodyText
-                        .split(/\n+/)
-                        .map((line) => line.trim())
-                        .filter(Boolean);
-                    const errorLine = lines.find((line) => line.includes(matched)) || matched;
-                    return {
-                        success: false,
-                        type: 'validation',
-                        text: errorLine.slice(0, 200)
-                    };
-                }
-
-                return null;
-            }, { timeout: 10000 }).then((handle) => handle.jsonValue()).catch(async (error) => {
-                const bodySnippet = await page.evaluate(() => String(document.body?.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 500)).catch(() => '');
-                return {
-                    success: false,
-                    type: 'timeout',
-                    text: bodySnippet,
-                    error: error?.message || String(error || '')
-                };
+            logger.info(`${PLATFORM_NAME}提交流程：等待成功页面文案`, {
+                attempt,
+                successTexts: SUBMIT_AUDIT_SUCCESS_TEXTS,
+                timeoutMs: SUBMIT_AUDIT_WAIT_TIMEOUT_MS
             });
+
+            const submitResult = await waitForSubmitAuditSuccess(page);
 
             logger.info(`${PLATFORM_NAME}提交流程：提交结果`, { attempt, ...submitResult });
             if (submitResult?.success) {
@@ -566,7 +630,7 @@ async function clickSubmitAudit(page) {
                 });
                 await page.waitForTimeout(SUBMIT_AUDIT_RETRY_DELAY_MS);
             } else {
-                logger.warn(`${PLATFORM_NAME}提交流程：三次提交均未成功`, submitResult);
+                logger.warn(`${PLATFORM_NAME}提交流程：${SUBMIT_AUDIT_RETRY_COUNT}次提交均未成功`, submitResult);
             }
         }
 
