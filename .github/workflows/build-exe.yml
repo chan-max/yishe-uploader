@@ -94,7 +94,7 @@ jobs:
         if: matrix.os == 'windows-latest' && env.TAG_EXISTS == 'false'
         shell: pwsh
         run: |
-          $exeName = "yishe-uploader-v$env:VERSION.exe"
+          $exeName = "yishe-auto-browser-windows.exe"
           # 复制并重命名
           Copy-Item -Path "yishe-uploader.exe" -Destination $exeName
           # 创建输出目录并移动
@@ -106,15 +106,7 @@ jobs:
         if: startsWith(matrix.os, 'macos-') && env.TAG_EXISTS == 'false'
         shell: bash
         run: |
-          MAC_ARCH=$(uname -m)
-          if [ "$MAC_ARCH" = "x86_64" ]; then
-            MAC_ARCH_LABEL="x64"
-          elif [ "$MAC_ARCH" = "arm64" ]; then
-            MAC_ARCH_LABEL="arm64"
-          else
-            MAC_ARCH_LABEL="$MAC_ARCH"
-          fi
-          BINARY_NAME="yishe-uploader-v$VERSION-mac-$MAC_ARCH_LABEL"
+          BINARY_NAME="yishe-auto-browser-mac"
           cp yishe-uploader "$BINARY_NAME"
           chmod +x "$BINARY_NAME"
           file "$BINARY_NAME"

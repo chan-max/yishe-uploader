@@ -69,7 +69,8 @@ npm run build:exe
 
 ```
 your-app/
-├── yishe-auto-browser.exe
+├── yishe-auto-browser-windows.exe
+├── yishe-auto-browser-mac
 ├── node_modules/          # playwright 等原生依赖
 ├── web/
 │   └── dist/              # 前端静态文件
@@ -115,4 +116,11 @@ npx playwright install chromium
 > [!NOTE]
 > nexe 官方预编译版本较旧。本项目当前策略是：
 > - Windows: 通过 `--remote` 使用社区维护的预编译二进制
-> - macOS: 通过 `--build` 本地编译，避免远端缺少 `macos-arm64-20.18.3` 之类目标时直接失败
+> - macOS: 优先使用社区维护的 arm64 预编译基座，失败时再回退到 `--build` 本地编译
+
+## Release 产物
+
+GitHub Release 会固定生成两个下载文件：
+
+- `yishe-auto-browser-windows.exe`
+- `yishe-auto-browser-mac`
