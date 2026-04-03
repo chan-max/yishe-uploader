@@ -11,7 +11,7 @@ on:
 permissions:
   contents: write
 
- jobs:
+jobs:
   build-and-release:
     strategy:
       matrix:
