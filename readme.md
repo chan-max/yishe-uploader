@@ -40,19 +40,48 @@ npm install
 
 ### 启动
 
+当前仓库可直接使用下面几个脚本：
+
 ```bash
-# 一键启动：构建前端 + 启动后端（端口 7010）
-npm start
+# 构建前端静态资源
+npm run web:build
 
-# 或分别启动：
-# 1. 先构建前端：npm run web:build
-# 2. 再启动后端：npm run dev
+# 启动服务端（端口 7010，带 watch）
+npm run dev
 
-# 前端开发模式（端口 5173，需后端运行在 7010）
-npm run web:dev
+# 启动服务端（端口 7010，不带 watch）
+npm run dev:no-watch
 ```
 
-访问 http://localhost:7010 即可使用 Web 界面。
+执行 `npm run dev` 或 `npm run dev:no-watch` 后，访问 `http://localhost:7010` 即可使用 Web 界面。
+
+### 可执行文件运行
+
+GitHub Release 默认提供两个可执行文件：
+
+- Windows: `yishe-auto-browser-windows.exe`
+- macOS: `yishe-auto-browser-mac`
+
+运行方式如下：
+
+```bash
+# Windows
+yishe-auto-browser-windows.exe
+
+# macOS
+chmod +x yishe-auto-browser-mac
+./yishe-auto-browser-mac
+```
+
+如果 macOS 首次运行被系统拦截，可再执行：
+
+```bash
+xattr -d com.apple.quarantine yishe-auto-browser-mac
+./yishe-auto-browser-mac
+```
+
+注意：当前可执行文件运行时仍依赖同目录下的 `node_modules`。
+前端页面资源会随可执行文件一起打包，不需要再额外拷贝 `web/dist`。
 
 ### 构建 EXE 可执行文件
 

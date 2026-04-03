@@ -49,8 +49,8 @@ npm run build:exe
    - 建议将 EXE 与 `node_modules` 放在同一目录
    - 或者在目标机器上运行 `npx playwright install` 安装浏览器
 
-2. **前端资源**: 确保 `web/dist` 目录与 EXE 在同一父目录下
-   - 默认情况下，EXE 会在其所在目录的 `web/dist` 中查找前端文件
+2. **前端资源**: `web/dist` 会随可执行文件一起打包
+   - 正常情况下不需要再手动拷贝 `web/dist`
 
 3. **首次构建**:
    - Windows 默认使用远端预编译 Node.js 二进制，首次下载可能较慢
@@ -72,8 +72,6 @@ your-app/
 ├── yishe-auto-browser-windows.exe
 ├── yishe-auto-browser-mac
 ├── node_modules/          # playwright 等原生依赖
-├── web/
-│   └── dist/              # 前端静态文件
 └── temp/                  # 临时文件目录（可选，会自动创建）
 ```
 
@@ -88,9 +86,10 @@ npx playwright install chromium
 
 ### 问题：EXE 启动后提示"前端未构建"
 
-**解决方案**: 
-- 确保 `web/dist` 目录存在且与 EXE 在同一父目录
-- 或设置环境变量 `FRONTEND_DIST` 指向正确的路径
+**解决方案**:
+- 先确认当前可执行文件是最新版本
+- 如果是历史版本，可手动补一个同级 `web/dist`
+- 或设置环境变量 `FRONTEND_DIST` 指向正确的前端目录
 
 ### 问题：浏览器连接失败
 

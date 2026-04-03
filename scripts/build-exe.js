@@ -17,6 +17,7 @@ const nexeCacheDir = path.join(tempDir, 'nexe-cache');
 const nodeVersion = '20.18.3';
 const remote = 'https://github.com/urbdyn/nexe_builds/releases/download/0.4.0/';
 const prebuiltMacAssetUrl = `${remote}mac-arm64-${nodeVersion}-tmp.3`;
+const webDistResourceGlob = 'web/dist/**/*';
 
 // 检测当前平台并设置构建参数
 const platform = process.platform;
@@ -181,7 +182,7 @@ try {
         '--exclude', 'web/**',
         '--exclude', 'scripts/**',
         '--exclude', 'docs/**',
-        '--resource', `"${path.join(rootDir, 'web/dist/**/*')}"`,
+        '--resource', `"${webDistResourceGlob}"`,
     ];
 
     if (useRemote) {

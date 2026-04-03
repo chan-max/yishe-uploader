@@ -198,7 +198,8 @@ async function checkCdpEndpointAvailable(endpoint) {
  * API服务器类
  */
 const BROWSER_CHECK_INTERVAL_MS = Number(process.env.BROWSER_CHECK_INTERVAL_MS) || 10000;
-const QUIET_REQUEST_PATHS = new Set([
+const SILENT_REQUEST_PATHS = new Set([
+    '/api',
     '/api/browser/status',
     '/api/browser/pages'
 ]);
@@ -361,9 +362,7 @@ class ApiServer {
             const reqPath = url.pathname;
             const method = req.method;
 
-            if (QUIET_REQUEST_PATHS.has(reqPath)) {
-                logger.debug(`${method} ${reqPath}`);
-            } else {
+            if (!SILENT_REQUEST_PATHS.has(reqPath)) {
                 logger.info(`${method} ${reqPath}`);
             }
 
