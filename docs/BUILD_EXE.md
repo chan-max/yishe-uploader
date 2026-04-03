@@ -1,6 +1,9 @@
 # 构建 EXE 可执行文件
 
-本项目支持使用 nexe 将整个应用打包成单一的 Windows EXE 可执行文件。
+本项目支持使用 nexe 将整个应用打包成单一可执行文件：
+
+- Windows: 生成 `.exe`
+- macOS: 生成无扩展名可执行文件
 
 ## 使用方法
 
@@ -19,15 +22,21 @@ npm run build:exe
 构建过程包括三个步骤：
 1. **构建前端**: 自动运行 `npm run web:build` 生成 `web/dist` 目录
 2. **打包后端**: 使用 esbuild 将 ESM 格式的后端代码打包成单一的 CommonJS 文件
-3. **生成 EXE**: 使用 nexe 将打包后的代码编译成 `yishe-auto-browser.exe`
+3. **生成可执行文件**: 使用 nexe 将打包后的代码编译为单文件程序
 
 ### 3. 运行 EXE
 
-构建完成后，会在项目根目录生成 `yishe-auto-browser.exe` 文件。
+构建完成后，会在项目根目录生成对应平台的文件：
+
+- Windows: `yishe-uploader.exe`
+- macOS: `yishe-uploader`
 
 ```bash
-# 直接运行
-.\yishe-auto-browser.exe
+# Windows
+.\yishe-uploader.exe
+
+# macOS
+./yishe-uploader
 ```
 
 然后访问 `http://localhost:7010` 即可使用。
@@ -43,7 +52,9 @@ npm run build:exe
 2. **前端资源**: 确保 `web/dist` 目录与 EXE 在同一父目录下
    - 默认情况下，EXE 会在其所在目录的 `web/dist` 中查找前端文件
 
-3. **首次构建**: nexe 首次运行时需要下载 Node.js 二进制文件，可能需要较长时间（几分钟），请耐心等待
+3. **首次构建**:
+   - Windows 默认使用远端预编译 Node.js 二进制，首次下载可能较慢
+   - macOS 默认使用 `--build` 本地源码构建，耗时会明显更长
 
 ### 环境变量
 
@@ -97,9 +108,11 @@ npx playwright install chromium
 
 - **打包工具**: nexe (将 Node.js 应用编译为独立可执行文件)
 - **代码打包**: esbuild (将 ESM 模块打包为 CommonJS)
-- **目标平台**: Windows x64, Node.js 20.18.3
+- **目标平台**: Windows x64 / macOS 当前架构, Node.js 20.18.3
 - **前端构建**: Vite (Vue 3 SPA)
-- **预编译源**: 使用社区维护的 [urbdyn/nexe_builds](https://github.com/urbdyn/nexe_builds) 提供的预编译 Node.js 二进制文件
+- **预编译源**: Windows 使用社区维护的 [urbdyn/nexe_builds](https://github.com/urbdyn/nexe_builds) 提供的预编译 Node.js 二进制文件
 
 > [!NOTE]
-> nexe 官方的预编译版本已过时（最新只到 Node.js 14.15.3）。本项目使用社区维护的 `urbdyn/nexe_builds` 仓库提供的更新版本，通过 `--remote` 参数指定远程源。
+> nexe 官方预编译版本较旧。本项目当前策略是：
+> - Windows: 通过 `--remote` 使用社区维护的预编译二进制
+> - macOS: 通过 `--build` 本地编译，避免远端缺少 `macos-arm64-20.18.3` 之类目标时直接失败
