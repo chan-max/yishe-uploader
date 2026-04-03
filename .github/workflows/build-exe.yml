@@ -3,7 +3,7 @@ name: Build and Release EXE
 on:
   push:
     branches:
-      - master
+      - main
     paths:
       - 'package.json'
   workflow_dispatch:
@@ -11,9 +11,12 @@ on:
 permissions:
   contents: write
 
-jobs:
+ jobs:
   build-and-release:
-    runs-on: windows-latest
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     
     steps:
       - name: Checkout code
@@ -29,69 +32,108 @@ jobs:
 
       - name: Read version
         id: get_version
-        shell: pwsh
+        shell: bash
         run: |
-          $ver = (Get-Content package.json | ConvertFrom-Json).version
-          if ([string]::IsNullOrWhiteSpace($ver)) { throw "Version not found in package.json" }
-          "VERSION=$ver" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          Write-Host "Detected version: $ver"
+          VERSION=$(node -e "console.log(require('./package.json').version)")
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "Detected version: $VERSION"
 
       - name: Check if tag exists
-        shell: pwsh
+        id: check_tag
+        shell: bash
         run: |
-          $tag = "v$env:VERSION"
+          TAG="v$VERSION"
           git fetch --tags --force
-          if (git tag -l $tag) {
-            Write-Host "Tag $tag already exists. Skipping build."
-            echo "TAG_EXISTS=true" >> $env:GITHUB_ENV
-          } else {
-            echo "TAG_EXISTS=false" >> $env:GITHUB_ENV
-          }
+          if git tag -l "$TAG" | grep -q "$TAG"; then
+            echo "Tag $TAG already exists. Skipping build."
+            echo "TAG_EXISTS=true" >> $GITHUB_ENV
+          else
+            echo "TAG_EXISTS=false" >> $GITHUB_ENV
+          fi
 
       - name: Install dependencies
         if: env.TAG_EXISTS == 'false'
         run: npm ci
 
-      - name: Build EXE
+      - name: Build Program
         if: env.TAG_EXISTS == 'false'
         run: npm run build:exe
 
-      - name: Rename EXE with Version
-        if: env.TAG_EXISTS == 'false'
+      - name: Prepare Release Asset (Windows)
+        if: matrix.os == 'windows-latest' && env.TAG_EXISTS == 'false'
         shell: pwsh
         run: |
           $exeName = "yishe-uploader-v$env:VERSION.exe"
-          $exePath = "${{ github.workspace }}\yishe-uploader.exe"
-          if (-Not (Test-Path $exePath)) {
-            Write-Host "Error: EXE not found at $exePath"
-            exit 1
-          }
-          Rename-Item -Path $exePath -NewName $exeName
-          Write-Host "Renamed to $exeName"
-          "EXE_NAME=$exeName" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          # 复制并重命名
+          Copy-Item -Path "yishe-uploader.exe" -Destination $exeName
+          # 创建输出目录并移动
+          New-Item -ItemType Directory -Force -Path "release_assets"
+          Move-Item -Path $exeName -Destination "release_assets\"
+          "ASSET_DIR=release_assets" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Package Release Asset
-        if: env.TAG_EXISTS == 'false'
-        shell: pwsh
+      - name: Prepare Release Asset (macOS)
+        if: matrix.os == 'macos-latest' && env.TAG_EXISTS == 'false'
+        shell: bash
         run: |
-          $zipName = "yishe-uploader-v$env:VERSION-windows-x64.zip"
-          Compress-Archive -Path $env:EXE_NAME -DestinationPath $zipName
-          "ASSET_PATH=$zipName" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          BINARY_NAME="yishe-uploader-v$VERSION-mac"
+          cp yishe-uploader "$BINARY_NAME"
+          mkdir -p release_assets
+          mv "$BINARY_NAME" release_assets/
+          echo "ASSET_DIR=release_assets" >> $GITHUB_ENV
+
+      - name: Upload Artifact
+        if: env.TAG_EXISTS == 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.os }}-artifact
+          path: ${{ env.ASSET_DIR }}/*
+
+  create-release:
+    needs: build-and-release
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+    steps:
+      - name: Download Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Checkout for version information
+        uses: actions/checkout@v4
+
+      - name: Get version
+        id: get_version
+        run: |
+          VERSION=$(node -e "console.log(require('./package.json').version)")
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+      - name: Check if tag exists
+        id: check_tag
+        run: |
+          TAG="v$VERSION"
+          git fetch --tags --force
+          if git tag -l "$TAG" | grep -q "$TAG"; then
+            echo "TAG_EXISTS=true" >> $GITHUB_ENV
+          else
+            echo "TAG_EXISTS=false" >> $GITHUB_ENV
+          fi
 
       - name: Create Tag and Push
         if: env.TAG_EXISTS == 'false'
-        shell: pwsh
         run: |
-          $tag = "v$env:VERSION"
+          TAG="v$VERSION"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag $tag
-          git push origin $tag
+          git tag "$TAG"
+          git push origin "$TAG"
 
       - name: Create Release
         if: env.TAG_EXISTS == 'false'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ env.VERSION }}
-          files: ${{ env.ASSET_PATH }}
+          files: artifacts/*
           generate_release_notes: true
