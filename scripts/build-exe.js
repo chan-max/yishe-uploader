@@ -101,11 +101,15 @@ try {
 
     const remote = 'https://github.com/urbdyn/nexe_builds/releases/download/0.4.0/';
     
-    // 根据平台选择 target
-    let target = 'windows-x64-20.18.3';
+    // 根据平台和架构选择 target
+    const arch = process.arch; // e.g., 'x64' or 'arm64'
+    let target = isWin ? `windows-x64-20.18.3` : `macos-${arch}-20.18.3`;
+    
+    // 如果是 Mac，确保 target 字符串符合 nexe 预期的格式 (nexe 会将 macos 转换为 mac)
     if (isMac) {
-        // macOS 默认为 x64
-        target = 'macos-x64-20.18.3';
+        // 由于 urbdyn/nexe_builds 0.4.0 提供了 mac-arm64-20.18.3
+        // 我们需要确保架构匹配。GitHub Actions macos-latest 目前是 arm64。
+        console.log(`💻 检测到架构: ${arch}`);
     }
 
     // 检查并删除已存在的输出文件
