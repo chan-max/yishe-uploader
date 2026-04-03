@@ -14,9 +14,15 @@ permissions:
 jobs:
   build-and-release:
     strategy:
+      fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest]
+        include:
+          - os: windows-latest
+            allow_failure: false
+          - os: macos-latest
+            allow_failure: true
     runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.allow_failure }}
     
     steps:
       - name: Checkout code
@@ -51,12 +57,27 @@ jobs:
             echo "TAG_EXISTS=false" >> $GITHUB_ENV
           fi
 
+      - name: Setup Python for macOS build
+        if: matrix.os == 'macos-latest' && env.TAG_EXISTS == 'false'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Verify Python for macOS build
+        if: matrix.os == 'macos-latest' && env.TAG_EXISTS == 'false'
+        shell: bash
+        run: |
+          python --version
+          which python
+
       - name: Install dependencies
         if: env.TAG_EXISTS == 'false'
         run: npm ci
 
       - name: Build Program
         if: env.TAG_EXISTS == 'false'
+        env:
+          PYTHON: python
         run: npm run build:exe
 
       - name: Prepare Release Asset (Windows)
