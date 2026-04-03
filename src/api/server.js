@@ -2384,7 +2384,7 @@ class ApiServer {
         }
 
         try {
-            const stat = await fs.promises.stat(filePath);
+            const stat = fs.statSync(filePath);
             if (stat.isFile()) {
                 const ext = path.extname(filePath);
                 const mimeTypes = {
@@ -2412,7 +2412,7 @@ class ApiServer {
             if (err.code === 'ENOENT') {
                 const indexPath = path.join(WEB_DIR, 'index.html');
                 try {
-                    await fs.promises.access(indexPath);
+                    fs.accessSync(indexPath, fs.constants.F_OK);
                     res.writeHead(200, { 'Content-Type': 'text/html' });
                     fs.createReadStream(indexPath).pipe(res);
                 } catch {
