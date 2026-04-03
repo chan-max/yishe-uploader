@@ -6,6 +6,8 @@ on:
       - main
     paths:
       - 'package.json'
+      - 'scripts/build-exe.js'
+      - '.github/workflows/build-exe.yml'
   workflow_dispatch:
 
 permissions:
@@ -19,8 +21,8 @@ jobs:
         include:
           - os: windows-latest
             allow_failure: false
-          - os: macos-latest
-            allow_failure: true
+          - os: macos-14
+            allow_failure: false
     runs-on: ${{ matrix.os }}
     continue-on-error: ${{ matrix.allow_failure }}
     
@@ -58,17 +60,25 @@ jobs:
           fi
 
       - name: Setup Python for macOS build
-        if: matrix.os == 'macos-latest' && env.TAG_EXISTS == 'false'
+        if: startsWith(matrix.os, 'macos-') && env.TAG_EXISTS == 'false'
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
       - name: Verify Python for macOS build
-        if: matrix.os == 'macos-latest' && env.TAG_EXISTS == 'false'
+        if: startsWith(matrix.os, 'macos-') && env.TAG_EXISTS == 'false'
         shell: bash
         run: |
           python --version
           which python
+
+      - name: Print runner information
+        if: env.TAG_EXISTS == 'false'
+        shell: bash
+        run: |
+          uname -a
+          uname -m
+          node -p "process.platform + ' ' + process.arch"
 
       - name: Install dependencies
         if: env.TAG_EXISTS == 'false'
@@ -93,11 +103,21 @@ jobs:
           "ASSET_DIR=release_assets" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Prepare Release Asset (macOS)
-        if: matrix.os == 'macos-latest' && env.TAG_EXISTS == 'false'
+        if: startsWith(matrix.os, 'macos-') && env.TAG_EXISTS == 'false'
         shell: bash
         run: |
-          BINARY_NAME="yishe-uploader-v$VERSION-mac"
+          MAC_ARCH=$(uname -m)
+          if [ "$MAC_ARCH" = "x86_64" ]; then
+            MAC_ARCH_LABEL="x64"
+          elif [ "$MAC_ARCH" = "arm64" ]; then
+            MAC_ARCH_LABEL="arm64"
+          else
+            MAC_ARCH_LABEL="$MAC_ARCH"
+          fi
+          BINARY_NAME="yishe-uploader-v$VERSION-mac-$MAC_ARCH_LABEL"
           cp yishe-uploader "$BINARY_NAME"
+          chmod +x "$BINARY_NAME"
+          file "$BINARY_NAME"
           mkdir -p release_assets
           mv "$BINARY_NAME" release_assets/
           echo "ASSET_DIR=release_assets" >> $GITHUB_ENV
