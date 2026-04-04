@@ -16,6 +16,7 @@ import { PublishService } from '../services/PublishService.js';
 import taskManager from '../services/TaskManager.js';
 import { logger } from '../utils/logger.js';
 import { PLATFORM_CONFIGS } from '../config/platforms.js';
+import { getEcomPlatformCatalog, runEcomCollectTask } from '../ecom-collect/ecomCollectService.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WEB_DIR = process.env.FRONTEND_DIST
@@ -428,6 +429,10 @@ class ApiServer {
                     await this.handleCrawlUrl(req, res);
                 } else if (reqPath === '/api/crawler/run' && method === 'POST') {
                     await this.handleCrawlerRun(req, res);
+                } else if (reqPath === '/api/ecom-collect/platforms' && method === 'GET') {
+                    await this.handleEcomCollectPlatforms(req, res);
+                } else if (reqPath === '/api/ecom-collect/run' && method === 'POST') {
+                    await this.handleEcomCollectRun(req, res);
                 } else {
                     this.sendResponse(res, 404, { success: false, error: 'Not Found' });
                 }
@@ -483,7 +488,9 @@ class ApiServer {
                 { method: 'GET', path: '/api/crawler/health', description: '爬虫服务健康检查' },
                 { method: 'GET', path: '/api/crawler/sites', description: '获取可用爬虫站点列表' },
                 { method: 'POST', path: '/api/crawler/url', description: '按 URL 通用抓取（可传规则）' },
-                { method: 'POST', path: '/api/crawler/run', description: '执行指定 site 的爬虫任务' }
+                { method: 'POST', path: '/api/crawler/run', description: '执行指定 site 的爬虫任务' },
+                { method: 'GET', path: '/api/ecom-collect/platforms', description: '获取电商采集平台与场景目录' },
+                { method: 'POST', path: '/api/ecom-collect/run', description: '执行一次电商平台数据采集' }
             ]
         });
     }
@@ -507,7 +514,8 @@ class ApiServer {
                 { name: 'Browser', description: '浏览器连接与状态' },
                 { name: 'Upload', description: '文件上传' },
                 { name: 'Auth', description: '平台登录状态' },
-                { name: 'Crawler', description: '爬虫接口' }
+                { name: 'Crawler', description: '爬虫接口' },
+                { name: 'EcomCollect', description: '电商平台数据采集' }
             ],
             paths: {
                 '/api': {
@@ -983,6 +991,49 @@ class ApiServer {
                             }
                         },
                         responses: { 200: { description: '爬虫任务结果，包含提取的图片或内容' } }
+                    }
+                },
+                '/api/ecom-collect/platforms': {
+                    get: {
+                        tags: ['EcomCollect'],
+                        summary: '获取电商采集平台与场景目录',
+                        responses: { 200: { description: '平台、场景与能力目录' } }
+                    }
+                },
+                '/api/ecom-collect/run': {
+                    post: {
+                        tags: ['EcomCollect'],
+                        summary: '执行一次电商平台数据采集',
+                        requestBody: {
+                            required: true,
+                            content: {
+                                'application/json': {
+                                    schema: {
+                                        type: 'object',
+                                        required: ['platform', 'collectScene'],
+                                        properties: {
+                                            runId: { type: 'string', description: '运行 ID（由上游传入）' },
+                                            taskId: { type: 'string', description: '任务 ID（由上游传入）' },
+                                            platform: { type: 'string', description: '平台标识，如 amazon、temu、aliexpress' },
+                                            collectScene: { type: 'string', enum: ['search', 'product_detail', 'shop_hot_products'] },
+                                            timeoutMs: { type: 'number', description: '单次运行超时时间，毫秒' },
+                                            configData: {
+                                                type: 'object',
+                                                description: '采集配置',
+                                                properties: {
+                                                    keyword: { type: 'string' },
+                                                    keywords: { type: 'array', items: { type: 'string' } },
+                                                    targetUrl: { type: 'string' },
+                                                    maxPages: { type: 'number' },
+                                                    maxItems: { type: 'number' }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        responses: { 200: { description: '采集执行结果' } }
                     }
                 }
             }
@@ -2327,6 +2378,40 @@ class ApiServer {
             this.sendResponse(res, isBadRequest ? 400 : 500, {
                 success: false,
                 message: error.message || '执行爬虫任务失败'
+            });
+        }
+    }
+
+    /**
+     * 获取电商采集平台目录
+     */
+    async handleEcomCollectPlatforms(req, res) {
+        try {
+            const result = await getEcomPlatformCatalog();
+            this.sendResponse(res, 200, {
+                success: true,
+                data: result,
+            });
+        } catch (error) {
+            this.sendResponse(res, 500, {
+                success: false,
+                message: error.message || '获取电商采集目录失败'
+            });
+        }
+    }
+
+    /**
+     * 执行一次电商采集
+     */
+    async handleEcomCollectRun(req, res) {
+        try {
+            const body = await this.parseBody(req);
+            const result = await runEcomCollectTask(body || {});
+            this.sendResponse(res, 200, result);
+        } catch (error) {
+            this.sendResponse(res, 500, {
+                success: false,
+                message: error.message || '执行电商采集失败'
             });
         }
     }
