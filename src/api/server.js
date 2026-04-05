@@ -1030,7 +1030,11 @@ class ApiServer {
                                             runId: { type: 'string', description: '运行 ID（由上游传入）' },
                                             taskId: { type: 'string', description: '任务 ID（由上游传入）' },
                                             platform: { type: 'string', description: '平台标识，如 amazon、temu、aliexpress' },
-                                            collectScene: { type: 'string', enum: ['search', 'product_detail', 'shop_hot_products'] },
+                                            collectScene: {
+                                                type: 'string',
+                                                description: '采集场景标识，实际可选值以 /api/ecom-collect/capabilities 返回的场景 schema 为准',
+                                            },
+                                            workspaceDir: { type: 'string', description: '客户端工作目录，截图会优先落在该目录下' },
                                             timeoutMs: { type: 'number', description: '单次运行超时时间，毫秒' },
                                             configData: {
                                                 type: 'object',
@@ -1040,7 +1044,13 @@ class ApiServer {
                                                     keywords: { type: 'array', items: { type: 'string' } },
                                                     targetUrl: { type: 'string' },
                                                     maxPages: { type: 'number' },
-                                                    maxItems: { type: 'number' }
+                                                    maxItems: { type: 'number' },
+                                                    marketplace: { type: 'string', description: '部分平台的站点/市场标识，如 Amazon 的 US、JP' },
+                                                    geo: { type: 'string', description: '趋势平台的地区代码，如 Google Trends 的 US、JP' },
+                                                    captureSnapshots: {
+                                                        type: 'boolean',
+                                                        description: '是否执行截图；默认 false，开启后会额外保存列表页、详情页或异常页截图'
+                                                    }
                                                 }
                                             }
                                         }
@@ -1055,7 +1065,8 @@ class ApiServer {
                                                     keyword: 'wireless earbuds',
                                                     keywords: ['wireless earbuds', 'bluetooth headphones'],
                                                     maxPages: 2,
-                                                    maxItems: 60
+                                                    maxItems: 60,
+                                                    captureSnapshots: false
                                                 }
                                             }
                                         },
@@ -1065,7 +1076,33 @@ class ApiServer {
                                                 platform: 'amazon',
                                                 collectScene: 'product_detail',
                                                 configData: {
-                                                    targetUrl: 'https://www.amazon.com/dp/B0C1234567'
+                                                    targetUrl: 'https://www.amazon.com/dp/B0C1234567',
+                                                    captureSnapshots: false
+                                                }
+                                            }
+                                        },
+                                        amazonSuggestions: {
+                                            summary: 'Amazon 搜索联想词采集',
+                                            value: {
+                                                platform: 'amazon',
+                                                collectScene: 'search_suggestions',
+                                                configData: {
+                                                    marketplace: 'US',
+                                                    keyword: 'wireless earbuds',
+                                                    maxItems: 20,
+                                                    captureSnapshots: false
+                                                }
+                                            }
+                                        },
+                                        googleTrends: {
+                                            summary: 'Google Trends 趋势热词采集',
+                                            value: {
+                                                platform: 'google_trends',
+                                                collectScene: 'trend_keywords',
+                                                configData: {
+                                                    geo: 'US',
+                                                    maxItems: 20,
+                                                    captureSnapshots: false
                                                 }
                                             }
                                         },
@@ -1076,7 +1113,8 @@ class ApiServer {
                                                 collectScene: 'shop_hot_products',
                                                 configData: {
                                                     targetUrl: 'https://www.temu.com/store.html?store_id=1000000000',
-                                                    maxItems: 60
+                                                    maxItems: 60,
+                                                    captureSnapshots: false
                                                 }
                                             }
                                         }

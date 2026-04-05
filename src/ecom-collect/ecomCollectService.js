@@ -16,7 +16,7 @@ import {
     prepareCollectionPage,
 } from './common/navigation.js';
 import {
-    ensureTempDir,
+    ensureSnapshotDir,
     normalizePriceText,
     normalizeRecordKey,
     normalizeSourceUrlForStorage,
@@ -55,12 +55,62 @@ function buildBlockedResult(risk, summary = {}) {
     };
 }
 
+function shouldCaptureSnapshots(taskConfig = {}) {
+    const value = taskConfig?.configData?.captureSnapshots;
+
+    if (typeof value === 'boolean') {
+        return value;
+    }
+
+    if (typeof value === 'number') {
+        return value !== 0;
+    }
+
+    const normalized = String(value || '').trim().toLowerCase();
+    return ['1', 'true', 'yes', 'on'].includes(normalized);
+}
+
 async function runPlatformHook(platformConfig, hookName, context) {
     const hook = platformConfig?.hooks?.[hookName];
     if (typeof hook !== 'function') {
         return null;
     }
     return hook(context);
+}
+
+function buildCustomSceneExecutorContext({
+    page,
+    platform,
+    collectScene,
+    taskConfig,
+    runtime,
+    platformConfig,
+    platformCapability,
+    sceneCapability,
+}) {
+    return {
+        page,
+        platform,
+        collectScene,
+        taskConfig,
+        runtime,
+        platformConfig,
+        platformCapability,
+        sceneCapability,
+        helpers: {
+            captureScreenshot,
+            prepareCollectionPage,
+            runPlatformHook: (hookName, context) => runPlatformHook(platformConfig, hookName, context),
+            buildBlockedResult,
+            shouldCaptureSnapshots,
+            normalizePriceText,
+            normalizeRecordKey,
+            normalizeSourceUrlForStorage,
+            sanitizeText,
+            sanitizeUrl,
+            nowIso,
+        },
+    };
 }
 
 async function normalizeRecordsByPlatform(records, platformConfig, contextFactory) {
@@ -190,7 +240,13 @@ async function collectSearchScene(page, platformConfig, taskConfig, runtime) {
         }
     }
 
-    await captureScreenshot(page, runtime.tempDir, 'search-finished', runtime.snapshots);
+    await captureScreenshot(
+        page,
+        runtime.snapshotDir,
+        'search-finished',
+        runtime.snapshots,
+        runtime.captureSnapshots === true,
+    );
 
     return {
         status: allRecords.length > 0 ? 'success' : 'failed',
@@ -236,7 +292,13 @@ async function collectListPageScene(page, sceneConfig, taskConfig, runtime, scen
         maxItems,
     });
 
-    await captureScreenshot(page, runtime.tempDir, `${sceneLabel}-finished`, runtime.snapshots);
+    await captureScreenshot(
+        page,
+        runtime.snapshotDir,
+        `${sceneLabel}-finished`,
+        runtime.snapshots,
+        runtime.captureSnapshots === true,
+    );
 
     const normalizedRecords = pageResult.records.map((item) => {
         const rawSourceUrl = sanitizeUrl(item.sourceUrl, page.url());
@@ -313,7 +375,13 @@ async function collectDetailScene(page, sceneConfig, taskConfig, runtime, sceneL
     }
 
     const result = await extractDetailRecord(page, runtimeSceneConfig);
-    await captureScreenshot(page, runtime.tempDir, `${sceneLabel}-finished`, runtime.snapshots);
+    await captureScreenshot(
+        page,
+        runtime.snapshotDir,
+        `${sceneLabel}-finished`,
+        runtime.snapshots,
+        runtime.captureSnapshots === true,
+    );
 
     const normalizedRecords = result.records.map((item) => {
         const rawSourceUrl = sanitizeUrl(item.sourceUrl, page.url());
@@ -395,12 +463,22 @@ export async function runEcomCollectTask(taskConfig = {}) {
     }
 
     const timeoutMs = Math.max(30_000, Number(taskConfig.timeoutMs) || DEFAULT_TIMEOUT_MS);
-    const tempDir = ensureTempDir(taskConfig.runId || `${platform}-${Date.now()}`);
+    const captureSnapshots = shouldCaptureSnapshots(taskConfig);
+    const snapshotDir = captureSnapshots
+        ? ensureSnapshotDir({
+            workspaceDir: taskConfig.workspaceDir,
+            runId: taskConfig.runId || `${platform}-${Date.now()}`,
+            platform,
+            collectScene,
+        })
+        : '';
     const runtime = {
-        tempDir,
+        snapshotDir,
         snapshots: [],
         visitedUrls: [],
         startedAt: nowIso(),
+        cleanupPages: [],
+        captureSnapshots,
     };
 
     const browserOrContext = await getOrCreateBrowser();
@@ -446,7 +524,23 @@ export async function runEcomCollectTask(taskConfig = {}) {
                 ),
         };
 
-        const sceneExecutor = sceneExecutors[collectScene];
+        const customSceneExecutor = platformConfig?.customSceneExecutors?.[collectScene];
+        const sceneExecutor =
+            typeof customSceneExecutor === 'function'
+                ? () =>
+                    customSceneExecutor(
+                        buildCustomSceneExecutorContext({
+                            page,
+                            platform,
+                            collectScene,
+                            taskConfig,
+                            runtime,
+                            platformConfig,
+                            platformCapability,
+                            sceneCapability,
+                        }),
+                    )
+                : sceneExecutors[collectScene];
         if (!sceneExecutor) {
             throw new Error(`暂不支持的采集场景: ${collectScene}`);
         }
@@ -481,12 +575,22 @@ export async function runEcomCollectTask(taskConfig = {}) {
                     selectorStrategy: 'platform-module + multi-candidate selectors + risk detection',
                 },
                 debugMeta: {
-                    tempDir,
+                    snapshotDir,
+                    tempDir: snapshotDir,
+                    workspaceDir: typeof taskConfig.workspaceDir === 'string' && taskConfig.workspaceDir.trim()
+                        ? taskConfig.workspaceDir.trim()
+                        : null,
                 },
             },
         };
     } catch (error) {
-        await captureScreenshot(page, runtime.tempDir, 'failed', runtime.snapshots);
+        await captureScreenshot(
+            page,
+            runtime.snapshotDir,
+            'failed',
+            runtime.snapshots,
+            runtime.captureSnapshots === true,
+        );
         const errorMessage = error?.message || '采集执行失败';
         const riskKind = detectRiskKind(errorMessage);
         const normalizedRisk = riskKind
@@ -521,12 +625,23 @@ export async function runEcomCollectTask(taskConfig = {}) {
                     ...(normalizedRisk ? { risk: normalizedRisk } : {}),
                 },
                 debugMeta: {
-                    tempDir,
+                    snapshotDir,
+                    tempDir: snapshotDir,
+                    workspaceDir: typeof taskConfig.workspaceDir === 'string' && taskConfig.workspaceDir.trim()
+                        ? taskConfig.workspaceDir.trim()
+                        : null,
                     error: errorMessage,
                 },
             },
         };
     } finally {
+        const cleanupPages = Array.isArray(runtime.cleanupPages) ? runtime.cleanupPages : [];
+        for (const extraPage of cleanupPages) {
+            if (!extraPage || extraPage === page) {
+                continue;
+            }
+            await extraPage.close().catch(() => {});
+        }
         await page.close().catch(() => {});
     }
 }

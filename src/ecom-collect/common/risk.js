@@ -72,6 +72,8 @@ export function detectRiskKind(text) {
 
     if (
         normalized.includes('unusual traffic') ||
+        normalized.includes('error 429') ||
+        normalized.includes('too many requests') ||
         normalized.includes('访问受限') ||
         normalized.includes('forbidden') ||
         normalized.includes('access denied') ||

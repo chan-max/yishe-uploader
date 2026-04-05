@@ -47,6 +47,16 @@ const SCENE_MAP = {
         label: '店铺热门商品',
         description: '打开店铺或榜单类页面，提取热门商品卡片原始数据。',
     },
+    search_suggestions: {
+        value: 'search_suggestions',
+        label: '搜索联想词',
+        description: '根据输入关键词抓取平台公开联想词、热搜词或补全建议。',
+    },
+    trend_keywords: {
+        value: 'trend_keywords',
+        label: '趋势热词',
+        description: '抓取平台公开趋势榜、热搜榜或趋势关键词原始数据。',
+    },
 };
 
 function cloneValue(input) {
@@ -171,6 +181,14 @@ export function buildSwitchField(key, label, overrides = {}) {
     });
 }
 
+export function buildCaptureSnapshotsField(overrides = {}) {
+    return buildSwitchField('captureSnapshots', '执行截图', {
+        description: '是否在采集过程中保存执行截图；默认关闭，开启后会额外保存列表页、详情页或异常页截图。',
+        defaultValue: false,
+        ...overrides,
+    });
+}
+
 function normalizeExamplePayloads(examples = [], sceneValue = '') {
     return mergeArray(examples).map((item, index) => {
         if (item && typeof item === 'object' && !Array.isArray(item)) {
@@ -268,6 +286,7 @@ export function buildSearchSceneCapability(overrides = {}) {
                         ? overrides.defaultMaxItems
                         : 60,
             }),
+            buildCaptureSnapshotsField(),
             ...(Array.isArray(overrides.extraFields) ? overrides.extraFields : []),
         ],
         ...overrides,
@@ -280,6 +299,7 @@ export function buildProductDetailSceneCapability(overrides = {}) {
             buildTargetUrlField({
                 placeholder: overrides.targetUrlPlaceholder || '填写商品详情页链接',
             }),
+            buildCaptureSnapshotsField(),
             ...(Array.isArray(overrides.extraFields) ? overrides.extraFields : []),
         ],
         ...overrides,
@@ -298,6 +318,46 @@ export function buildShopHotProductsSceneCapability(overrides = {}) {
                         ? overrides.defaultMaxItems
                         : 60,
             }),
+            buildCaptureSnapshotsField(),
+            ...(Array.isArray(overrides.extraFields) ? overrides.extraFields : []),
+        ],
+        ...overrides,
+    });
+}
+
+export function buildSearchSuggestionsSceneCapability(overrides = {}) {
+    return buildSceneCapability(SCENE_MAP.search_suggestions, {
+        fields: [
+            buildKeywordField({
+                required: true,
+                placeholder: overrides.keywordPlaceholder || '例如：wireless earbuds',
+            }),
+            buildKeywordsField({
+                placeholder: overrides.keywordsPlaceholder || '一行一个关键词，也支持逗号分隔',
+            }),
+            buildMaxItemsField({
+                defaultValue:
+                    overrides.defaultMaxItems !== undefined
+                        ? overrides.defaultMaxItems
+                        : 20,
+            }),
+            buildCaptureSnapshotsField(),
+            ...(Array.isArray(overrides.extraFields) ? overrides.extraFields : []),
+        ],
+        ...overrides,
+    });
+}
+
+export function buildTrendKeywordsSceneCapability(overrides = {}) {
+    return buildSceneCapability(SCENE_MAP.trend_keywords, {
+        fields: [
+            buildMaxItemsField({
+                defaultValue:
+                    overrides.defaultMaxItems !== undefined
+                        ? overrides.defaultMaxItems
+                        : 20,
+            }),
+            buildCaptureSnapshotsField(),
             ...(Array.isArray(overrides.extraFields) ? overrides.extraFields : []),
         ],
         ...overrides,

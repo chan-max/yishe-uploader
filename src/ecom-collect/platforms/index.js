@@ -1,20 +1,30 @@
 import aliexpressPlatform from './aliexpress/index.js';
+import alibaba1688Platform from './alibaba_1688/index.js';
 import amazonPlatform from './amazon/index.js';
 import douyinShopPlatform from './douyin_shop/index.js';
+import ebayPlatform from './ebay/index.js';
+import googleTrendsPlatform from './google_trends/index.js';
 import jdPlatform from './jd/index.js';
 import mercadolibrePlatform from './mercadolibre/index.js';
+import neweggPlatform from './newegg/index.js';
 import ozonPlatform from './ozon/index.js';
 import sheinPlatform from './shein/index.js';
 import taobaoPlatform from './taobao/index.js';
 import temuPlatform from './temu/index.js';
 import tiktokShopPlatform from './tiktok_shop/index.js';
+import walmartPlatform from './walmart/index.js';
 import {
     buildPlatformCapability,
     ECOM_CAPABILITY_STATUS_META,
 } from './shared.js';
 
 const PLATFORM_LIST = [
+    alibaba1688Platform,
     amazonPlatform,
+    googleTrendsPlatform,
+    ebayPlatform,
+    neweggPlatform,
+    walmartPlatform,
     aliexpressPlatform,
     temuPlatform,
     tiktokShopPlatform,

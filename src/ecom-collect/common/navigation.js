@@ -4,9 +4,13 @@ import { DEFAULT_PAGE_TIMEOUT_MS } from './constants.js';
 import { inspectRisk } from './risk.js';
 import { nowIso, sleep } from './runtime.js';
 
-export async function captureScreenshot(page, tempDir, stage, snapshots) {
+export async function captureScreenshot(page, snapshotDir, stage, snapshots, enabled = true) {
+    if (!enabled || !snapshotDir) {
+        return null;
+    }
+
     const filename = `${Date.now()}-${String(stage || 'snapshot').replace(/[^a-zA-Z0-9_-]/g, '-')}.png`;
-    const filePath = path.join(tempDir, filename);
+    const filePath = path.join(snapshotDir, filename);
 
     try {
         await page.screenshot({
@@ -89,7 +93,13 @@ export async function prepareCollectionPage(page, runtime, options = {}) {
             return null;
         }
 
-        await captureScreenshot(page, runtime.tempDir, blockedStage, runtime.snapshots);
+        await captureScreenshot(
+            page,
+            runtime.snapshotDir,
+            blockedStage,
+            runtime.snapshots,
+            runtime.captureSnapshots === true,
+        );
         return risk;
     };
 

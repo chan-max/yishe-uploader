@@ -60,6 +60,13 @@
   - 对单条记录做平台级修正。
   - 适合清洗特殊链接、补充平台自己的字段。
 
+如果某个平台存在“趋势榜、联想词、RSS、公开接口”等不适合套通用 DOM 列表流的场景，可以在平台 `index.js` 里额外导出：
+
+- `customSceneExecutors`
+  - key 为场景标识，value 为自定义执行函数。
+  - 适合趋势热词、搜索联想词、公开 feed/API 混合采集等场景。
+  - 仍然复用统一的运行时、截图目录和返回结构，不要把结果格式做成平台私有协议。
+
 ## 能力 schema 约定
 
 平台 `index.js` 里的 `capability` 是当前电商采集模块的唯一平台定义来源，用来给：
@@ -99,3 +106,23 @@
 6. 如果导航阶段就失败：
    - 先看是否已经被识别成 `network_error / not_found / login_required / captcha`
    - 再决定是继续修入口、补交互，还是先记录为当前环境阻塞
+
+## 推荐冒烟方式
+
+建议优先跑公开、无登录依赖的信号源场景，持续验证当前环境是否可用：
+
+```bash
+npm run ecom:smoke
+```
+
+特性：
+
+- 默认顺序验证 `google_trends / trend_keywords`、`amazon / search_suggestions`、`ebay / search_suggestions`
+- 遇到 `login_required / captcha / risk_control` 会记为 `skipped`，继续跑后续场景
+- 可以通过 `--snapshots --workspace-dir <dir>` 把截图落到指定工作目录，便于人工回看
+
+示例：
+
+```bash
+npm run ecom:smoke -- --snapshots --workspace-dir /path/to/workspace
+```

@@ -1,6 +1,6 @@
 {
     "name": "yishe-auto-browser",
-    "version": "2.0.188",
+    "version": "2.0.189",
     "description": "Yishe Auto Browser - Browser automation API for auto-publish and related operations",
     "main": "src/index.js",
     "type": "module",
@@ -8,6 +8,7 @@
         "dev": "npm run web:build && node --watch src/api/server.js",
         "dev:no-watch": "npm run web:build && node src/api/server.js",
         "web:build": "vite build --config web/vite.config.js",
+        "ecom:smoke": "node scripts/ecom-smoke.js",
         "build:exe": "node scripts/build-exe.js"
     },
     "keywords": [

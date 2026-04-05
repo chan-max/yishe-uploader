@@ -39,6 +39,7 @@ function extractStructuredRecordKey(value) {
 
     const patterns = [
         { pattern: /\/dp\/([A-Z0-9]{10})/i, prefix: 'dp' },
+        { pattern: /\/itm(?:\/[^/?#]+)?\/(\d+)(?:[/?#]|$)/i, prefix: 'itm' },
         { pattern: /\/item\/(\d+)\.html/i, prefix: 'item' },
         { pattern: /\/product\/([^/?#]+)/i, prefix: 'product' },
         { pattern: /[?&]sku=([^&#]+)/i, prefix: 'sku' },
@@ -119,8 +120,31 @@ export function normalizeSourceUrlForStorage(value, maxLength = 500) {
     }
 }
 
-export function ensureTempDir(runId) {
-    const dir = path.join(os.tmpdir(), 'yishe-ecom-collect', String(runId || 'runtime'));
+function sanitizePathSegment(value, fallback = 'runtime') {
+    const sanitized = String(value || '')
+        .trim()
+        .replace(/[^a-zA-Z0-9._-]/g, '_')
+        .slice(0, 120);
+
+    return sanitized || fallback;
+}
+
+export function ensureSnapshotDir(options = {}) {
+    const workspaceDir =
+        options && typeof options === 'object' && typeof options.workspaceDir === 'string'
+            ? options.workspaceDir.trim()
+            : '';
+    const runFolder = sanitizePathSegment(
+        options && typeof options === 'object'
+            ? options.runId || `${options.platform || 'runtime'}-${options.collectScene || 'scene'}-${Date.now()}`
+            : options,
+        'runtime',
+    );
+
+    const dir = workspaceDir
+        ? path.resolve(workspaceDir, 'browser-automation', 'ecom-collect', 'screenshots', runFolder)
+        : path.join(os.tmpdir(), 'yishe-ecom-collect', runFolder);
+
     fs.mkdirSync(dir, { recursive: true });
     return dir;
 }
