@@ -10,7 +10,7 @@
 - `platforms/`
   - 一个平台一个目录。
   - `selectors.js` 负责维护该平台的 URL 规则、选择器，以及必要时的场景交互逻辑。
-  - `index.js` 负责导出平台配置和可选 hook。
+  - `index.js` 负责导出平台配置、`capability` 能力说明和可选 hook。
   - `README.md` 负责说明定位思路、风险点和维护方式。
 - `ecomCollectService.js`
   - 采集运行入口。
@@ -59,6 +59,29 @@
 - `normalizeRecord`
   - 对单条记录做平台级修正。
   - 适合清洗特殊链接、补充平台自己的字段。
+
+## 能力 schema 约定
+
+平台 `index.js` 里的 `capability` 是当前电商采集模块的唯一平台定义来源，用来给：
+
+- `/api/ecom-collect/capabilities`
+  - 提供完整平台能力 schema。
+  - 包含字段定义、参数示例、可用性状态、维护路径。
+- admin 端动态渲染任务表单
+  - 不再在 admin 或服务端手写平台字段。
+- 服务端校验与调度
+  - 只允许把任务分发给声明支持对应平台/场景的客户端。
+
+`capability` 里建议至少维护：
+
+- `status`
+  - 当前平台整体可用性，例如 `available / heuristic / blocked / unsupported`
+- `docs`
+  - 平台概述和补充说明
+- `maintenance`
+  - 模块目录、选择器文件、README 路径
+- `scenes`
+  - 每个场景自己的字段、说明、示例、可用性和验证状态
 
 ## 维护约定
 

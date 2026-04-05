@@ -15,7 +15,6 @@ import {
     captureScreenshot,
     prepareCollectionPage,
 } from './common/navigation.js';
-import { ECOM_SCENE_CATALOG } from './common/sceneCatalog.js';
 import {
     ensureTempDir,
     normalizePriceText,
@@ -26,7 +25,12 @@ import {
     sanitizeUrl,
 } from './common/runtime.js';
 import { detectRiskKind } from './common/risk.js';
-import { getPlatformCatalog, getPlatformConfig } from './platforms/index.js';
+import {
+    getPlatformCapabilities,
+    getPlatformCapability,
+    getPlatformCatalog,
+    getPlatformConfig,
+} from './platforms/index.js';
 
 function mapBlockedRiskToStatus(riskKind) {
     return ['login_required', 'captcha', 'risk_control'].includes(String(riskKind || '').trim())
@@ -356,7 +360,15 @@ async function collectDetailScene(page, sceneConfig, taskConfig, runtime, sceneL
 export async function getEcomPlatformCatalog() {
     return {
         platforms: getPlatformCatalog(),
-        scenes: ECOM_SCENE_CATALOG,
+        schemaVersion: 1,
+    };
+}
+
+export async function getEcomCollectCapabilities() {
+    return {
+        schemaVersion: 1,
+        generatedAt: nowIso(),
+        platforms: getPlatformCapabilities(),
     };
 }
 
@@ -364,9 +376,22 @@ export async function runEcomCollectTask(taskConfig = {}) {
     const platform = String(taskConfig.platform || '').trim();
     const collectScene = String(taskConfig.collectScene || '').trim();
     const platformConfig = getPlatformConfig(platform);
+    const platformCapability = getPlatformCapability(platform);
+    const sceneCapability = Array.isArray(platformCapability?.scenes)
+        ? platformCapability.scenes.find((item) => item?.value === collectScene) || null
+        : null;
 
     if (!platformConfig) {
         throw new Error(`暂不支持的平台: ${platform}`);
+    }
+    if (!sceneCapability) {
+        throw new Error(`暂不支持的采集场景: ${collectScene}`);
+    }
+    if (sceneCapability.runnable === false) {
+        throw new Error(
+            sceneCapability.reason ||
+                `${platformCapability?.label || platform} 当前场景暂不可执行`,
+        );
     }
 
     const timeoutMs = Math.max(30_000, Number(taskConfig.timeoutMs) || DEFAULT_TIMEOUT_MS);

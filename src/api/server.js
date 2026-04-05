@@ -16,7 +16,11 @@ import { PublishService } from '../services/PublishService.js';
 import taskManager from '../services/TaskManager.js';
 import { logger } from '../utils/logger.js';
 import { PLATFORM_CONFIGS } from '../config/platforms.js';
-import { getEcomPlatformCatalog, runEcomCollectTask } from '../ecom-collect/ecomCollectService.js';
+import {
+    getEcomCollectCapabilities,
+    getEcomPlatformCatalog,
+    runEcomCollectTask,
+} from '../ecom-collect/ecomCollectService.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WEB_DIR = process.env.FRONTEND_DIST
@@ -431,6 +435,8 @@ class ApiServer {
                     await this.handleCrawlerRun(req, res);
                 } else if (reqPath === '/api/ecom-collect/platforms' && method === 'GET') {
                     await this.handleEcomCollectPlatforms(req, res);
+                } else if (reqPath === '/api/ecom-collect/capabilities' && method === 'GET') {
+                    await this.handleEcomCollectCapabilities(req, res);
                 } else if (reqPath === '/api/ecom-collect/run' && method === 'POST') {
                     await this.handleEcomCollectRun(req, res);
                 } else {
@@ -490,6 +496,7 @@ class ApiServer {
                 { method: 'POST', path: '/api/crawler/url', description: '按 URL 通用抓取（可传规则）' },
                 { method: 'POST', path: '/api/crawler/run', description: '执行指定 site 的爬虫任务' },
                 { method: 'GET', path: '/api/ecom-collect/platforms', description: '获取电商采集平台与场景目录' },
+                { method: 'GET', path: '/api/ecom-collect/capabilities', description: '获取电商采集平台完整能力 schema（字段、示例、可用性、维护说明）' },
                 { method: 'POST', path: '/api/ecom-collect/run', description: '执行一次电商平台数据采集' }
             ]
         });
@@ -1000,6 +1007,14 @@ class ApiServer {
                         responses: { 200: { description: '平台、场景与能力目录' } }
                     }
                 },
+                '/api/ecom-collect/capabilities': {
+                    get: {
+                        tags: ['EcomCollect'],
+                        summary: '获取电商采集完整能力 schema',
+                        description: '返回平台、场景、字段、参数示例、可用性、维护路径等信息，建议 admin 端直接以此渲染表单。',
+                        responses: { 200: { description: '完整能力 schema' } }
+                    }
+                },
                 '/api/ecom-collect/run': {
                     post: {
                         tags: ['EcomCollect'],
@@ -1026,6 +1041,42 @@ class ApiServer {
                                                     targetUrl: { type: 'string' },
                                                     maxPages: { type: 'number' },
                                                     maxItems: { type: 'number' }
+                                                }
+                                            }
+                                        }
+                                    },
+                                    examples: {
+                                        amazonSearch: {
+                                            summary: 'Amazon 搜索采集',
+                                            value: {
+                                                platform: 'amazon',
+                                                collectScene: 'search',
+                                                configData: {
+                                                    keyword: 'wireless earbuds',
+                                                    keywords: ['wireless earbuds', 'bluetooth headphones'],
+                                                    maxPages: 2,
+                                                    maxItems: 60
+                                                }
+                                            }
+                                        },
+                                        amazonDetail: {
+                                            summary: 'Amazon 商品详情采集',
+                                            value: {
+                                                platform: 'amazon',
+                                                collectScene: 'product_detail',
+                                                configData: {
+                                                    targetUrl: 'https://www.amazon.com/dp/B0C1234567'
+                                                }
+                                            }
+                                        },
+                                        temuShop: {
+                                            summary: 'Temu 店铺热门商品采集',
+                                            value: {
+                                                platform: 'temu',
+                                                collectScene: 'shop_hot_products',
+                                                configData: {
+                                                    targetUrl: 'https://www.temu.com/store.html?store_id=1000000000',
+                                                    maxItems: 60
                                                 }
                                             }
                                         }
@@ -2396,6 +2447,24 @@ class ApiServer {
             this.sendResponse(res, 500, {
                 success: false,
                 message: error.message || '获取电商采集目录失败'
+            });
+        }
+    }
+
+    /**
+     * 获取电商采集完整能力 schema
+     */
+    async handleEcomCollectCapabilities(req, res) {
+        try {
+            const result = await getEcomCollectCapabilities();
+            this.sendResponse(res, 200, {
+                success: true,
+                data: result,
+            });
+        } catch (error) {
+            this.sendResponse(res, 500, {
+                success: false,
+                message: error.message || '获取电商采集能力失败'
             });
         }
     }
