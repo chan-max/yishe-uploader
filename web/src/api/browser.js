@@ -8,8 +8,12 @@ export function connectBrowser(data) {
   return request({ url: '/browser/connect', method: 'post', data })
 }
 
-export function closeBrowser() {
-  return request({ url: '/browser/close', method: 'post' })
+export function closeBrowser(profileId) {
+  return request({
+    url: '/browser/close',
+    method: 'post',
+    data: profileId ? { profileId } : {}
+  })
 }
 
 export function launchWithDebug(data) {
@@ -42,4 +46,32 @@ export function getBrowserPages() {
 
 export function executeBrowserDebug(data) {
   return request({ url: '/browser/debug', method: 'post', data })
+}
+
+export function listBrowserProfiles() {
+  return request({ url: '/browser/profiles', method: 'get' })
+}
+
+export function createBrowserProfile(data) {
+  return request({ url: '/browser/profiles', method: 'post', data })
+}
+
+export function updateBrowserProfile(profileId, data) {
+  return request({ url: `/browser/profiles/${encodeURIComponent(profileId)}`, method: 'put', data })
+}
+
+export function deleteBrowserProfile(profileId) {
+  return request({ url: `/browser/profiles/${encodeURIComponent(profileId)}`, method: 'delete' })
+}
+
+export function switchBrowserProfile(profileId) {
+  return request({ url: `/browser/profiles/${encodeURIComponent(profileId)}/switch`, method: 'post', data: {} })
+}
+
+export function openBrowserUserDataDir(dirPath, ensureExists = true) {
+  return request({
+    url: '/browser/open-user-data-dir',
+    method: 'post',
+    data: { dirPath, ensureExists }
+  })
 }

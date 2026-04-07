@@ -65,7 +65,7 @@ const headerIcon = computed(() => {
   }
   return pathToIcon[route.path] || 'home'
 })
-const isWidePage = computed(() => ['/browser-debug', '/tasks'].includes(route.path))
+const isWidePage = computed(() => ['/browser', '/browser-debug', '/tasks'].includes(route.path))
 
 </script>
 

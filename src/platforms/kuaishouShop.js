@@ -978,7 +978,7 @@ export async function publishToKuaishouShop(publishInfo = {}) {
         logger.info(`开始执行${PLATFORM_NAME}发布流程`);
         logger.info(`${PLATFORM_NAME}目标发布页: ${targetUploadUrl}`);
 
-        const browser = await getOrCreateBrowser();
+        const browser = await getOrCreateBrowser({ profileId: publishInfo?.profileId });
         page = await browser.newPage();
         await pageOperator.setupAntiDetection(page);
 

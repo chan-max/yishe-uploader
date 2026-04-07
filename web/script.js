@@ -7,9 +7,10 @@ createApp({
         const browserConnecting = ref(false);
         const portChecking = ref(false);
         const defaultUserDataDir = (() => {
-            // Windows: 给一个“可直接用”的默认目录，避免默认 Profile 导致端口起不来
             const isWin = navigator.userAgent?.toLowerCase?.().includes('windows');
-            return isWin ? 'C:\\temp\\yishe-uploader-cdp-1s' : '/tmp/yishe-uploader-cdp-1s';
+            return isWin
+                ? 'C:\\temp\\yishe-auto-browser-workspace\\cdp-user-data'
+                : '/tmp/yishe-auto-browser-workspace/cdp-user-data';
         })();
         const state = reactive({
             status: { message: '', type: 'info' },

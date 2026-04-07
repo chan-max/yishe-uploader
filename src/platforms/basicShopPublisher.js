@@ -42,7 +42,7 @@ export class BasicShopPublisher {
             logger.info(`开始执行${this.platformName}基础发布流程`);
             logger.info(`${this.platformName}目标发布页: ${targetUploadUrl}`);
 
-            const browser = await getOrCreateBrowser();
+            const browser = await getOrCreateBrowser({ profileId: publishInfo?.profileId });
             page = await browser.newPage();
             await this.pageOperator.setupAntiDetection(page);
 

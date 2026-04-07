@@ -8,14 +8,34 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import util from 'util';
+import { spawn } from 'child_process';
 import { URL, fileURLToPath } from 'url';
 import publishService from './publishService.js';
 import crawlerService from './crawlerService.js';
-import { getBrowserStatus, getOrCreateBrowser, closeBrowser, launchWithDebugPort, checkAndReconnectBrowser, exportUserData, forceCloseBrowserByPort, listBrowserPages, getBrowserPage, createBrowserPage } from '../services/BrowserService.js';
+import {
+    getBrowserStatus,
+    getOrCreateBrowser,
+    closeBrowser,
+    focusBrowser,
+    launchWithDebugPort,
+    checkAndReconnectBrowser,
+    exportUserData,
+    forceCloseBrowserByPort,
+    listBrowserPages,
+    getBrowserPage,
+    createBrowserPage,
+    listManagedBrowserProfiles,
+    getManagedBrowserProfile,
+    createManagedBrowserProfile,
+    updateManagedBrowserProfile,
+    deleteManagedBrowserProfile,
+    switchManagedBrowserProfile
+} from '../services/BrowserService.js';
 import { PublishService } from '../services/PublishService.js';
 import taskManager from '../services/TaskManager.js';
 import { logger } from '../utils/logger.js';
 import { PLATFORM_CONFIGS } from '../config/platforms.js';
+import { getBrowserProfilesWorkspaceDir } from '../services/BrowserProfileService.js';
 import {
     getEcomCollectCapabilities,
     getEcomPlatformCatalog,
@@ -100,16 +120,7 @@ function getDefaultCdpUserDataDir() {
         return envDir;
     }
 
-    if (process.platform === 'win32') {
-        return 'C:\\temp\\yishe-auto-browser-cdp-1s';
-    }
-
-    const homeDir = os.homedir();
-    const safeBase = homeDir && typeof homeDir === 'string'
-        ? homeDir
-        : process.cwd();
-
-    return path.resolve(safeBase, '.yishe-auto-browser', 'cdp-1s');
+    return path.resolve(getBrowserProfilesWorkspaceDir(), 'cdp-user-data');
 }
 
 function sleep(ms) {
@@ -403,6 +414,8 @@ class ApiServer {
                     await this.handleBrowserConnect(req, res);
                 } else if (reqPath === '/api/browser/close' && method === 'POST') {
                     await this.handleBrowserClose(req, res);
+                } else if (reqPath === '/api/browser/focus' && method === 'POST') {
+                    await this.handleBrowserFocus(req, res);
                 } else if (reqPath === '/api/browser/force-close' && method === 'POST') {
                     await this.handleBrowserForceClose(req, res);
                 } else if (reqPath === '/api/browser/launch-with-debug' && method === 'POST') {
@@ -413,10 +426,24 @@ class ApiServer {
                     await this.handleBrowserOpenPlatform(req, res);
                 } else if (reqPath === '/api/browser/open-link' && method === 'POST') {
                     await this.handleBrowserOpenLink(req, res);
+                } else if (reqPath === '/api/browser/open-user-data-dir' && method === 'POST') {
+                    await this.handleBrowserOpenUserDataDir(req, res);
                 } else if (reqPath === '/api/browser/pages' && method === 'GET') {
                     await this.handleBrowserPages(req, res);
                 } else if (reqPath === '/api/browser/debug' && method === 'POST') {
                     await this.handleBrowserDebug(req, res);
+                } else if (reqPath === '/api/browser/profiles' && method === 'GET') {
+                    await this.handleBrowserProfilesList(req, res);
+                } else if (reqPath === '/api/browser/profiles' && method === 'POST') {
+                    await this.handleBrowserProfilesCreate(req, res);
+                } else if (reqPath.startsWith('/api/browser/profiles/') && reqPath.endsWith('/switch') && method === 'POST') {
+                    await this.handleBrowserProfileSwitch(req, res, reqPath);
+                } else if (reqPath.startsWith('/api/browser/profiles/') && method === 'GET') {
+                    await this.handleBrowserProfileDetail(req, res, reqPath);
+                } else if (reqPath.startsWith('/api/browser/profiles/') && method === 'PUT') {
+                    await this.handleBrowserProfileUpdate(req, res, reqPath);
+                } else if (reqPath.startsWith('/api/browser/profiles/') && method === 'DELETE') {
+                    await this.handleBrowserProfileDelete(req, res, reqPath);
                 } else if ((reqPath === '/api/browser/check-and-reconnect' || reqPath === '/api/browser/check') && (method === 'POST' || method === 'GET')) {
                     await this.handleBrowserCheckAndReconnect(req, res);
                 } else if (reqPath === '/api/upload' && method === 'POST') {
@@ -481,11 +508,13 @@ class ApiServer {
                 { method: 'GET', path: '/api/browser/status', description: '浏览器连接状态' },
                 { method: 'POST', path: '/api/browser/connect', description: '连接浏览器' },
                 { method: 'POST', path: '/api/browser/close', description: '关闭浏览器' },
+                { method: 'POST', path: '/api/browser/focus', description: '聚焦浏览器窗口并恢复最小化状态' },
                 { method: 'POST', path: '/api/browser/force-close', description: '强制关闭指定端口浏览器（默认 9222）' },
                 { method: 'POST', path: '/api/browser/launch-with-debug', description: '启动带调试端口的 Chrome' },
                 { method: 'POST', path: '/api/browser/check-port', description: '检测 CDP 端口' },
                 { method: 'POST', path: '/api/browser/open-platform', description: '在已连接浏览器中打开指定平台创作页' },
                 { method: 'POST', path: '/api/browser/open-link', description: '在已连接浏览器中打开指定链接' },
+                { method: 'POST', path: '/api/browser/open-user-data-dir', description: '在本机文件管理器中打开指定用户数据目录' },
                 { method: 'GET', path: '/api/browser/pages', description: '获取当前浏览器标签页列表' },
                 { method: 'POST', path: '/api/browser/debug', description: '对当前浏览器页面执行调试动作（goto/click/fill/text/eval 等）' },
                 { method: 'POST', path: '/api/browser/check-and-reconnect', description: '检测浏览器实例并可选重连（body: { reconnect?: boolean }）' },
@@ -668,11 +697,11 @@ class ApiServer {
                                     schema: {
                                         type: 'object',
                                         properties: {
-                                            mode: { type: 'string', enum: ['cdp'], description: '可选，指定 cdp 连接模式' },
+                                            mode: { type: 'string', enum: ['bundled', 'persistent', 'cdp'], description: '浏览器来源。bundled=程序内置 Chromium（默认），persistent=系统 Chrome，cdp=连接现有调试端口 Chrome' },
                                             cdpEndpoint: { type: 'string', description: '如 http://127.0.0.1:9222' },
-                                            port: { type: 'number', description: '调试端口，默认 9222' },
-                                            cdpUserDataDir: { type: 'string', description: 'CDP User Data 目录' },
-                                            userDataDir: { type: 'string', description: '兼容字段，等同 cdpUserDataDir' },
+                                            port: { type: 'number', description: 'CDP 调试端口，默认 9222（仅 cdp 模式需要）' },
+                                            cdpUserDataDir: { type: 'string', description: '兼容字段：浏览器 User Data 目录' },
+                                            userDataDir: { type: 'string', description: '浏览器 User Data 目录；bundled 模式下会复用该目录保存登录态' },
                                             headless: { type: 'boolean', description: '是否无头模式，默认false（可通过HEADLESS环境变量设置）' }
                                         }
                                     }
@@ -687,6 +716,13 @@ class ApiServer {
                         tags: ['Browser'],
                         summary: '关闭浏览器连接',
                         responses: { 200: { description: '关闭结果' } }
+                    }
+                },
+                '/api/browser/focus': {
+                    post: {
+                        tags: ['Browser'],
+                        summary: '聚焦浏览器窗口并恢复最小化状态',
+                        responses: { 200: { description: '聚焦结果' } }
                     }
                 },
                 '/api/browser/force-close': {
@@ -785,6 +821,28 @@ class ApiServer {
                                         required: ['url'],
                                         properties: {
                                             url: { type: 'string', description: 'http/https 链接' }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        responses: { 200: { description: '打开结果' } }
+                    }
+                },
+                '/api/browser/open-user-data-dir': {
+                    post: {
+                        tags: ['Browser'],
+                        summary: '在本机文件管理器中打开指定用户数据目录',
+                        requestBody: {
+                            required: true,
+                            content: {
+                                'application/json': {
+                                    schema: {
+                                        type: 'object',
+                                        required: ['dirPath'],
+                                        properties: {
+                                            dirPath: { type: 'string', description: '要打开的目录路径' },
+                                            ensureExists: { type: 'boolean', description: '目录不存在时是否自动创建', default: true }
                                         }
                                     }
                                 }
@@ -1653,8 +1711,10 @@ class ApiServer {
      */
     async handleBrowserStatus(req, res) {
         try {
-            await checkAndReconnectBrowser({ reconnect: false });
-            const status = await getBrowserStatus();
+            const url = new URL(req.url, `http://${req.headers.host}`);
+            const profileId = (url.searchParams.get('profileId') || '').trim() || undefined;
+            await checkAndReconnectBrowser({ reconnect: false, profileId });
+            const status = await getBrowserStatus({ profileId });
             this.sendResponse(res, 200, { success: true, data: status });
         } catch (error) {
             this.sendResponse(res, 500, { success: false, message: error.message });
@@ -1663,37 +1723,57 @@ class ApiServer {
 
     /**
      * 连接浏览器
-     * 若未传 mode: 'cdp'，则与前端一致：先 launch-with-debug（独立 user-data-dir）再 CDP 连接，避免占用系统 Chrome profile
+     * 默认使用程序内置的 Playwright Chromium（bundled 模式），bundled 模式只使用受管环境目录
      */
     async handleBrowserConnect(req, res) {
         try {
             const body = await this.parseBody(req).catch(() => ({})) || {};
-            await checkAndReconnectBrowser({ reconnect: false });
-            const statusBefore = await getBrowserStatus();
-            if (statusBefore.hasInstance && statusBefore.isConnected) {
+            const requestedMode = String(body?.mode || '').trim().toLowerCase();
+            const mode = requestedMode || 'bundled';
+            const headless = body.headless === true ? true : (body.headless === false ? false : undefined);
+            const profileId = String(body?.profileId || '').trim() || undefined;
+            await checkAndReconnectBrowser({ reconnect: false, profileId });
+            const statusBefore = await getBrowserStatus({ profileId });
+            if (statusBefore.hasInstance && statusBefore.isConnected && Object.keys(body).length === 0) {
                 this.sendResponse(res, 200, { success: true, data: statusBefore });
                 return;
             }
-            const explicitCdp = body && body.mode === 'cdp' && body.cdpEndpoint;
-            if (explicitCdp) {
-                await getOrCreateBrowser(body);
-            } else {
-                const port = Number(body.port) || 9222;
-                const userDataDir = (body.cdpUserDataDir || body.userDataDir || getDefaultCdpUserDataDir()).trim();
-                // 正确处理 headless 参数：明确传递布尔值
-                const headless = body.headless === true ? true : (body.headless === false ? false : undefined);
-                const cdpEndpoint = `http://127.0.0.1:${port}`;
-                const existingCdp = await checkCdpEndpointAvailable(cdpEndpoint);
 
-                if (existingCdp.ok) {
-                    logger.info(`API connect 检测到现有 CDP 浏览器，直接复用: ${cdpEndpoint}`);
-                    await getOrCreateBrowser({ mode: 'cdp', cdpEndpoint, headless });
+            if (mode === 'cdp') {
+                const explicitCdp = body && body.cdpEndpoint;
+                if (explicitCdp) {
+                    await getOrCreateBrowser({ ...body, mode: 'cdp', headless });
                 } else {
-                    logger.info('API connect 未检测到可复用 CDP 浏览器，启动新浏览器再连接, headless:', headless);
-                    launchWithDebugPort({ port, userDataDir, headless });
-                    await sleep(3500);
-                    await getOrCreateBrowser({ mode: 'cdp', cdpEndpoint, headless });
+                    const port = Number(body.port) || 9222;
+                    const userDataDir = (body.cdpUserDataDir || body.userDataDir || getDefaultCdpUserDataDir()).trim();
+                    const cdpEndpoint = `http://127.0.0.1:${port}`;
+                    const existingCdp = await checkCdpEndpointAvailable(cdpEndpoint);
+
+                    if (existingCdp.ok) {
+                        logger.info(`API connect 检测到现有 CDP 浏览器，直接复用: ${cdpEndpoint}`);
+                        await getOrCreateBrowser({ mode: 'cdp', cdpEndpoint, headless });
+                    } else {
+                        logger.info('API connect 未检测到可复用 CDP 浏览器，启动新浏览器再连接, headless:', headless);
+                        launchWithDebugPort({ port, userDataDir, headless });
+                        await sleep(3500);
+                        await getOrCreateBrowser({ mode: 'cdp', cdpEndpoint, headless });
+                    }
                 }
+            } else if (mode === 'persistent') {
+                const userDataDir = (body.cdpUserDataDir || body.userDataDir || getDefaultCdpUserDataDir()).trim();
+                await getOrCreateBrowser({
+                    mode: 'persistent',
+                    chromeUserDataDir: userDataDir,
+                    headless,
+                    chromeExecutablePath: body.chromeExecutablePath,
+                    chromeProfileDir: body.chromeProfileDir,
+                });
+            } else {
+                await getOrCreateBrowser({
+                    mode: 'bundled',
+                    profileId,
+                    headless,
+                });
             }
             const status = await getBrowserStatus();
             this.sendResponse(res, 200, { success: true, data: status });
@@ -1702,16 +1782,215 @@ class ApiServer {
         }
     }
 
+    extractProfileIdFromPath(reqPath, suffix = '') {
+        const prefix = '/api/browser/profiles/';
+        if (!reqPath.startsWith(prefix)) {
+            return '';
+        }
+
+        const remainder = reqPath.slice(prefix.length);
+        const normalized = suffix && remainder.endsWith(suffix)
+            ? remainder.slice(0, -suffix.length)
+            : remainder;
+        return decodeURIComponent(String(normalized || '').replace(/\/+$/g, '').trim());
+    }
+
+    async handleBrowserProfilesList(req, res) {
+        try {
+            this.sendResponse(res, 200, {
+                success: true,
+                data: listManagedBrowserProfiles(),
+            });
+        } catch (error) {
+            this.sendResponse(res, 500, { success: false, message: error.message || '获取环境列表失败' });
+        }
+    }
+
+    async handleBrowserProfilesCreate(req, res) {
+        try {
+            const body = await this.parseBody(req).catch(() => ({})) || {};
+            const created = createManagedBrowserProfile(body);
+            this.sendResponse(res, 200, {
+                success: true,
+                data: created,
+                message: '环境已创建',
+            });
+        } catch (error) {
+            this.sendResponse(res, 500, { success: false, message: error.message || '创建环境失败' });
+        }
+    }
+
+    async handleBrowserProfileDetail(req, res, reqPath) {
+        try {
+            const profileId = this.extractProfileIdFromPath(reqPath);
+            const profile = getManagedBrowserProfile(profileId);
+            if (!profile) {
+                this.sendResponse(res, 404, { success: false, message: '环境不存在' });
+                return;
+            }
+
+            this.sendResponse(res, 200, {
+                success: true,
+                data: profile,
+            });
+        } catch (error) {
+            this.sendResponse(res, 500, { success: false, message: error.message || '获取环境详情失败' });
+        }
+    }
+
+    async handleBrowserProfileUpdate(req, res, reqPath) {
+        try {
+            const profileId = this.extractProfileIdFromPath(reqPath);
+            const body = await this.parseBody(req).catch(() => ({})) || {};
+            const profile = updateManagedBrowserProfile(profileId, body);
+            this.sendResponse(res, 200, {
+                success: true,
+                data: profile,
+                message: '环境已更新',
+            });
+        } catch (error) {
+            this.sendResponse(res, 500, { success: false, message: error.message || '更新环境失败' });
+        }
+    }
+
+    async handleBrowserProfileDelete(req, res, reqPath) {
+        try {
+            const profileId = this.extractProfileIdFromPath(reqPath);
+            const result = deleteManagedBrowserProfile(profileId);
+            this.sendResponse(res, 200, {
+                success: true,
+                data: result,
+                message: '环境已删除',
+            });
+        } catch (error) {
+            this.sendResponse(res, 500, { success: false, message: error.message || '删除环境失败' });
+        }
+    }
+
+    async handleBrowserProfileSwitch(req, res, reqPath) {
+        try {
+            const profileId = this.extractProfileIdFromPath(reqPath, '/switch');
+            const profile = switchManagedBrowserProfile(profileId);
+            this.sendResponse(res, 200, {
+                success: true,
+                data: profile,
+                message: '环境已切换',
+            });
+        } catch (error) {
+            this.sendResponse(res, 500, { success: false, message: error.message || '切换环境失败' });
+        }
+    }
+
+    async handleBrowserOpenUserDataDir(req, res) {
+        try {
+            const body = await this.parseBody(req).catch(() => ({})) || {};
+            const rawDirPath = String(body?.dirPath || '').trim();
+            const ensureExists = body?.ensureExists !== false;
+
+            if (!rawDirPath) {
+                this.sendResponse(res, 400, { success: false, message: '缺少 dirPath' });
+                return;
+            }
+
+            const dirPath = path.resolve(rawDirPath);
+
+            if (ensureExists && !fs.existsSync(dirPath)) {
+                fs.mkdirSync(dirPath, { recursive: true });
+            }
+
+            if (!fs.existsSync(dirPath)) {
+                this.sendResponse(res, 404, { success: false, message: '目录不存在' });
+                return;
+            }
+
+            const openResult = await this.openDirectoryInFileManager(dirPath);
+            if (!openResult.success) {
+                this.sendResponse(res, 500, { success: false, message: openResult.message || '打开目录失败' });
+                return;
+            }
+
+            this.sendResponse(res, 200, {
+                success: true,
+                message: '目录已打开',
+                data: {
+                    dirPath,
+                },
+            });
+        } catch (error) {
+            this.sendResponse(res, 500, { success: false, message: error.message || '打开目录失败' });
+        }
+    }
+
+    async openDirectoryInFileManager(dirPath) {
+        const commandInfo = (() => {
+            if (process.platform === 'win32') {
+                return { command: 'explorer.exe', args: [dirPath] };
+            }
+            if (process.platform === 'darwin') {
+                return { command: 'open', args: [dirPath] };
+            }
+            return { command: 'xdg-open', args: [dirPath] };
+        })();
+
+        return await new Promise((resolve) => {
+            try {
+                const child = spawn(commandInfo.command, commandInfo.args, {
+                    detached: true,
+                    stdio: 'ignore',
+                });
+
+                child.on('error', (error) => {
+                    resolve({
+                        success: false,
+                        message: error?.message || '系统文件管理器打开失败',
+                    });
+                });
+
+                child.unref();
+                resolve({ success: true });
+            } catch (error) {
+                resolve({
+                    success: false,
+                    message: error?.message || '系统文件管理器打开失败',
+                });
+            }
+        });
+    }
+
     /**
      * 关闭浏览器
      */
     async handleBrowserClose(req, res) {
         try {
-            await closeBrowser();
+            const body = await this.parseBody(req).catch(() => ({})) || {};
+            const profileId = String(body?.profileId || '').trim() || undefined;
+            await closeBrowser({ profileId });
             const status = await getBrowserStatus();
             this.sendResponse(res, 200, { success: true, data: status });
         } catch (error) {
             this.sendResponse(res, 500, { success: false, message: error.message });
+        }
+    }
+
+    /**
+     * 聚焦浏览器窗口
+     */
+    async handleBrowserFocus(req, res) {
+        try {
+            const body = await this.parseBody(req).catch(() => ({})) || {};
+            const profileId = String(body?.profileId || '').trim() || undefined;
+            const result = await focusBrowser({ profileId });
+            const status = await getBrowserStatus({ profileId });
+            this.sendResponse(res, 200, {
+                success: true,
+                message: '浏览器窗口已聚焦',
+                data: {
+                    ...(result || {}),
+                    status,
+                },
+            });
+        } catch (error) {
+            this.sendResponse(res, 500, { success: false, message: error.message || '聚焦浏览器失败' });
         }
     }
 
@@ -1780,6 +2059,7 @@ class ApiServer {
         try {
             const body = await this.parseBody(req);
             const { platform } = body;
+            const profileId = String(body?.profileId || '').trim() || undefined;
             if (!platform || typeof platform !== 'string') {
                 this.sendResponse(res, 400, { success: false, message: '请传 platform（如 douyin、xiaohongshu、weibo、kuaishou、doudian、kuaishou_shop）' });
                 return;
@@ -1790,7 +2070,7 @@ class ApiServer {
                 return;
             }
 
-            const browserStatus = await getBrowserStatus();
+            const browserStatus = await getBrowserStatus({ profileId });
             if (!browserStatus?.hasInstance || !browserStatus?.isConnected) {
                 this.sendResponse(res, 400, {
                     success: false,
@@ -1799,7 +2079,7 @@ class ApiServer {
                 return;
             }
 
-            const browser = await getOrCreateBrowser();
+            const browser = await getOrCreateBrowser({ profileId });
             const page = await browser.newPage();
             await page.goto(config.uploadUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
             this.sendResponse(res, 200, { success: true, data: { platform, name: config.name, url: config.uploadUrl } });
@@ -1815,6 +2095,7 @@ class ApiServer {
         try {
             const body = await this.parseBody(req);
             const { url } = body;
+            const profileId = String(body?.profileId || '').trim() || undefined;
 
             if (!url || typeof url !== 'string') {
                 this.sendResponse(res, 400, { success: false, message: '请传 url' });
@@ -1835,7 +2116,7 @@ class ApiServer {
                 return;
             }
 
-            const browserStatus = await getBrowserStatus();
+            const browserStatus = await getBrowserStatus({ profileId });
             if (!browserStatus?.hasInstance || !browserStatus?.isConnected) {
                 this.sendResponse(res, 400, {
                     success: false,
@@ -1844,7 +2125,7 @@ class ApiServer {
                 return;
             }
 
-            const browser = await getOrCreateBrowser();
+            const browser = await getOrCreateBrowser({ profileId });
             const page = await browser.newPage();
             await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
@@ -1862,7 +2143,9 @@ class ApiServer {
 
     async handleBrowserPages(req, res) {
         try {
-            const browserStatus = await getBrowserStatus();
+            const url = new URL(req.url, `http://${req.headers.host}`);
+            const profileId = (url.searchParams.get('profileId') || '').trim() || undefined;
+            const browserStatus = await getBrowserStatus({ profileId });
             if (!browserStatus?.hasInstance || !browserStatus?.isConnected) {
                 this.sendResponse(res, 400, {
                     success: false,
@@ -1871,7 +2154,7 @@ class ApiServer {
                 return;
             }
 
-            const pages = await listBrowserPages();
+            const pages = await listBrowserPages({ profileId });
             this.sendResponse(res, 200, { success: true, data: pages });
         } catch (error) {
             this.sendResponse(res, 500, { success: false, message: error.message || '获取页面列表失败' });
@@ -1880,7 +2163,10 @@ class ApiServer {
 
     async handleBrowserDebug(req, res) {
         try {
-            const browserStatus = await getBrowserStatus();
+            const body = await this.parseBody(req);
+            const action = String(body?.action || '').trim();
+            const profileId = String(body?.profileId || '').trim() || undefined;
+            const browserStatus = await getBrowserStatus({ profileId });
             if (!browserStatus?.hasInstance || !browserStatus?.isConnected) {
                 this.sendResponse(res, 400, {
                     success: false,
@@ -1888,9 +2174,6 @@ class ApiServer {
                 });
                 return;
             }
-
-            const body = await this.parseBody(req);
-            const action = String(body?.action || '').trim();
             const pageIndexValue = body?.pageIndex;
             const pageIndex = pageIndexValue === '' || pageIndexValue === undefined || pageIndexValue === null
                 ? undefined
@@ -1903,12 +2186,12 @@ class ApiServer {
 
             const resolvePage = async () => {
                 if (action === 'newPage') {
-                    return await createBrowserPage();
+                    return await createBrowserPage({ profileId });
                 }
                 if (pageIndex !== undefined && !Number.isNaN(pageIndex)) {
-                    return await getBrowserPage(pageIndex);
+                    return await getBrowserPage(pageIndex, { profileId });
                 }
-                return await getBrowserPage(0);
+                return await getBrowserPage(0, { profileId });
             };
 
             const page = await resolvePage();
@@ -1936,7 +2219,7 @@ class ApiServer {
                     break;
                 case 'closePage': {
                     await page.close({ runBeforeUnload: true });
-                    const pagesAfterClose = await listBrowserPages();
+                    const pagesAfterClose = await listBrowserPages({ profileId });
                     this.sendResponse(res, 200, {
                         success: true,
                         data: {
@@ -2031,7 +2314,7 @@ class ApiServer {
 
             const currentUrl = page.url();
             const currentTitle = await page.title().catch(() => '');
-            const pages = await listBrowserPages();
+            const pages = await listBrowserPages({ profileId });
             this.sendResponse(res, 200, {
                 success: true,
                 data: {
@@ -2058,11 +2341,16 @@ class ApiServer {
     async handleBrowserCheckAndReconnect(req, res) {
         try {
             let reconnect = false;
+            let profileId = undefined;
             if (req.method === 'POST') {
                 const body = await this.parseBody(req).catch(() => ({}));
                 reconnect = !!body.reconnect;
+                profileId = String(body?.profileId || '').trim() || undefined;
+            } else {
+                const url = new URL(req.url, `http://${req.headers.host}`);
+                profileId = (url.searchParams.get('profileId') || '').trim() || undefined;
             }
-            const result = await checkAndReconnectBrowser({ reconnect });
+            const result = await checkAndReconnectBrowser({ reconnect, profileId });
             this.sendResponse(res, 200, {
                 success: true,
                 available: result.available,
@@ -2405,7 +2693,17 @@ class ApiServer {
         try {
             const url = new URL(req.url, `http://${req.headers.host}`);
             const forceRefresh = url.searchParams.get('refresh') === '1';
-            const loginStatus = await PublishService.checkSocialMediaLoginStatus(forceRefresh);
+            const profileId = String(url.searchParams.get('profileId') || '').trim() || undefined;
+            const loginStatus = await PublishService.checkSocialMediaLoginStatus(forceRefresh, { profileId });
+            if (profileId) {
+                try {
+                    updateManagedBrowserProfile(profileId, {
+                        loginSummary: loginStatus,
+                    });
+                } catch {
+                    // ignore profile cache update errors
+                }
+            }
             this.sendResponse(res, 200, { success: true, data: loginStatus });
         } catch (error) {
             logger.error('获取登录状态失败:', error);

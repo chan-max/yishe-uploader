@@ -54,6 +54,7 @@ export class PublishService {
     // 登录状态缓存
     static loginStatusCache = null;
     static cacheTimestamp = 0;
+    static cacheProfileKey = null;
     static CACHE_CONFIG = {
         enabled: true,
         duration: 5 * 60 * 1000 // 5分钟缓存
@@ -62,13 +63,17 @@ export class PublishService {
     /**
      * 检查缓存是否有效
      */
-    static isCacheValid() {
+    static isCacheValid(profileKey = 'default') {
         if (!this.CACHE_CONFIG.enabled) {
             logger.debug('[缓存] 未启用');
             return false;
         }
         if (!this.loginStatusCache) {
             logger.debug('[缓存] 无缓存数据');
+            return false;
+        }
+        if (this.cacheProfileKey !== profileKey) {
+            logger.debug('[缓存] 环境已切换，忽略旧缓存');
             return false;
         }
         const now = Date.now();
@@ -83,6 +88,7 @@ export class PublishService {
     static clearLoginStatusCache() {
         this.loginStatusCache = null;
         this.cacheTimestamp = 0;
+        this.cacheProfileKey = null;
         logger.info('登录状态缓存已清除');
     }
 
@@ -104,7 +110,8 @@ export class PublishService {
         return {
             hasCache: !!this.loginStatusCache,
             cacheAge,
-            isValid: this.isCacheValid(),
+            cacheProfileKey: this.cacheProfileKey,
+            isValid: this.isCacheValid(this.cacheProfileKey || 'default'),
             config: {
                 ...this.CACHE_CONFIG
             }
@@ -157,6 +164,9 @@ export class PublishService {
     static async publishSingle(publishInfo) {
         const platformName = publishInfo.platform;
         try {
+            if (publishInfo?.profileId) {
+                await getOrCreateBrowser({ profileId: publishInfo.profileId });
+            }
             let result;
             switch (platformName) {
                 case 'douyin':
@@ -216,13 +226,14 @@ export class PublishService {
     /**
      * 检查社交媒体登录状态
      */
-    static async checkSocialMediaLoginStatus(forceRefresh = false) {
-        logger.info('[登录状态] checkSocialMediaLoginStatus called, forceRefresh:', forceRefresh);
+    static async checkSocialMediaLoginStatus(forceRefresh = false, options = {}) {
+        const profileKey = String(options?.profileId || 'default').trim() || 'default';
+        logger.info('[登录状态] checkSocialMediaLoginStatus called, forceRefresh:', forceRefresh, 'profileKey:', profileKey);
         let loginStatus = {};
 
         try {
             // 检查缓存是否有效
-            if (!forceRefresh && this.isCacheValid()) {
+            if (!forceRefresh && this.isCacheValid(profileKey)) {
                 logger.info('[登录状态] 使用缓存的登录状态数据', this.loginStatusCache, '缓存时间戳:', this.cacheTimestamp);
                 return this.loginStatusCache;
             }
@@ -295,10 +306,10 @@ export class PublishService {
                 const isAvailable = await isBrowserAvailable();
                 if (isAvailable) {
                     logger.info('检测到现有浏览器实例，将复用');
-                    browser = await getOrCreateBrowser();
+                    browser = await getOrCreateBrowser({ profileId: options?.profileId });
                 } else {
                     logger.info('未检测到现有浏览器实例，将创建新的');
-                    browser = await getOrCreateBrowser();
+                    browser = await getOrCreateBrowser({ profileId: options?.profileId });
                 }
 
                 // 更新浏览器活动状态
@@ -318,6 +329,7 @@ export class PublishService {
                 // 赋值缓存
                 this.loginStatusCache = loginStatus;
                 this.cacheTimestamp = Date.now();
+                this.cacheProfileKey = profileKey;
                 logger.info('[缓存] 浏览器获取失败已更新', this.loginStatusCache, '时间戳:', this.cacheTimestamp);
                 return loginStatus;
             }
@@ -426,6 +438,7 @@ export class PublishService {
             // 更新缓存
             this.loginStatusCache = loginStatus;
             this.cacheTimestamp = Date.now();
+            this.cacheProfileKey = profileKey;
             logger.info('[缓存] 已更新', this.loginStatusCache, '时间戳:', this.cacheTimestamp);
             return loginStatus;
 
@@ -445,6 +458,7 @@ export class PublishService {
             // catch分支也赋值缓存
             this.loginStatusCache = errorLoginStatus;
             this.cacheTimestamp = Date.now();
+            this.cacheProfileKey = profileKey;
             logger.info('[缓存] catch分支已更新', this.loginStatusCache, '时间戳:', this.cacheTimestamp);
             return errorLoginStatus;
         }

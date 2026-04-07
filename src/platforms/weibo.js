@@ -113,7 +113,7 @@ class WeiboPublisher {
             }
 
             // 1. 获取浏览器和页面
-            const browser = await getOrCreateBrowser();
+            const browser = await getOrCreateBrowser({ profileId: publishInfo?.profileId });
             page = await browser.newPage();
             logger.info('新页面创建成功');
 

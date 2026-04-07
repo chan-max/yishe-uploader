@@ -61,7 +61,7 @@ npm run build:exe
 可以通过环境变量自定义配置：
 
 - `FRONTEND_DIST`: 指定前端静态文件目录（默认为 `./web/dist`）
-- `YISHE_AUTO_BROWSER_CDP_USER_DATA_DIR` 或 `UPLOADER_CDP_USER_DATA_DIR`: 指定 Chrome CDP 用户数据目录
+- `YISHE_AUTO_BROWSER_CDP_USER_DATA_DIR` 或 `UPLOADER_CDP_USER_DATA_DIR`: 指定 Chrome CDP 用户数据目录；默认已统一到工作目录下的 `cdp-user-data`
 
 ## 发布部署
 

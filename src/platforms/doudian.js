@@ -240,7 +240,7 @@ export async function publishToDoudian(publishInfo = {}) {
             materialHoverMode: hoverMode
         });
 
-        const browser = await getOrCreateBrowser();
+        const browser = await getOrCreateBrowser({ profileId: publishInfo?.profileId });
         logger.info('抖店已获取浏览器实例，准备创建新页面');
         page = await browser.newPage();
         logger.info('抖店新页面创建成功');
