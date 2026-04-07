@@ -5,7 +5,7 @@
 ## 项目定位
 
 - 提供**浏览器自动化**相关的 HTTP API 接口
-- 支持浏览器连接与管理（内置 Playwright Chromium、CDP 模式、系统浏览器持久化模式）
+- 支持浏览器连接与管理（本地 Chrome 持久化模式、CDP 模式、内置 Playwright Chromium 兼容模式）
 - 支持多平台内容发布（抖音、快手、小红书、微博等）
 - 面向需要自动化操作的场景，可与其他系统集成
 
@@ -94,8 +94,8 @@ npm run build:dist
 
 1. **浏览器连接**
    - 进入「浏览器」页面
-   - 配置 CDP User Data Dir（留空使用推荐目录）
-   - 点击「连接」启动并连接 Chrome
+   - 选择要绑定的环境
+   - 点击「连接」启动并连接本地 Chrome（默认优先使用该环境自己的用户数据目录）
 
 2. **内容发布**
    - 进入「内容发布」页面
@@ -166,17 +166,17 @@ yishe-auto-browser/
 
 系统支持三种浏览器连接模式：
 
-1. **内置浏览器模式（默认）**: 使用程序内置的 Playwright Chromium，并通过独立的用户数据目录复用登录状态
-   ```bash
-   BROWSER_MODE=bundled
-   BUNDLED_USER_DATA_DIR=/path/to/browser/user/data
-   ```
-
-2. **持久化模式（兼容）**: 使用本地 Chrome 的用户数据目录，自动继承登录状态
+1. **持久化模式（默认）**: 使用本地 Chrome；传入 `profileId` 时，会优先绑定到多环境里该环境自己的用户数据目录
    ```bash
    BROWSER_MODE=persistent
    CHROME_USER_DATA_DIR=/path/to/chrome/user/data
    CHROME_PROFILE_DIR=Default
+   ```
+
+2. **内置浏览器模式（兼容）**: 使用程序内置的 Playwright Chromium，并通过独立的用户数据目录复用登录状态
+   ```bash
+   BROWSER_MODE=bundled
+   BUNDLED_USER_DATA_DIR=/path/to/browser/user/data
    ```
 
 3. **CDP 模式**: 连接已启动的 Chrome 实例
@@ -185,7 +185,7 @@ yishe-auto-browser/
    CDP_ENDPOINT=http://127.0.0.1:9222
    ```
 
-默认内置浏览器与 CDP 独立目录都会统一收敛到工作目录 `C:\temp\yishe-auto-browser-workspace`（非 Windows 为 `~/.yishe-auto-browser/workspace`）。如需覆盖 CDP 目录，仍可通过 `YISHE_AUTO_BROWSER_CDP_USER_DATA_DIR` 或 `UPLOADER_CDP_USER_DATA_DIR` 指定。
+默认持久化模式在传入 `profileId` 时会直接使用对应环境自己的用户数据目录；CDP 独立目录默认统一收敛到工作目录 `C:\temp\yishe-auto-browser-workspace`（非 Windows 为 `~/.yishe-auto-browser/workspace`）。如需覆盖 CDP 目录，仍可通过 `YISHE_AUTO_BROWSER_CDP_USER_DATA_DIR` 或 `UPLOADER_CDP_USER_DATA_DIR` 指定。
 
 ## 📄 许可证
 

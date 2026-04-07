@@ -15,7 +15,7 @@
             环境根目录：{{ profilesState?.profilesRootDir || '-' }}
           </div>
           <div class="ui tiny text muted-text">
-            全局状态：{{ browserStatus?.hasInstance ? '已有浏览器实例' : '未连接' }}，默认使用内置 <code>Playwright Chromium</code>
+            全局状态：{{ browserStatus?.hasInstance ? '已有浏览器实例' : '未连接' }}，默认使用本地 <code>Chrome</code> 并优先绑定当前环境目录
           </div>
         </div>
         <div class="segment-actions">
@@ -395,10 +395,10 @@ async function launchAndConnect(profileId = browserConfig.profileId) {
   if (normalizedProfileId) {
     browserConfig.profileId = normalizedProfileId
   }
-  setStatus('正在启动内置浏览器并连接...', 'info')
+  setStatus('正在启动本地 Chrome 并连接...', 'info')
   try {
     const data = await connectBrowser({
-      mode: 'bundled',
+      mode: 'persistent',
       profileId: normalizedProfileId || undefined,
       headless: browserConfig.headless
     })
@@ -408,7 +408,7 @@ async function launchAndConnect(profileId = browserConfig.profileId) {
     browserStatus.value = data.data || null
     await refreshProfiles()
     setStatus(
-      `内置浏览器已连接${browserConfig.headless ? '（无头）' : ''}${normalizedProfileId ? `，环境 ${normalizedProfileId}` : ''}`,
+      `本地 Chrome 已连接${browserConfig.headless ? '（无头）' : ''}${normalizedProfileId ? `，环境 ${normalizedProfileId}` : ''}`,
       'success'
     )
   } catch (error) {

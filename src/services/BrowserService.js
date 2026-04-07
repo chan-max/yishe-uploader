@@ -1,11 +1,11 @@
 /**
  * 浏览器服务 - 管理 Playwright 浏览器实例
  *
- * 默认目标：使用程序内置的 Playwright Chromium，并通过持久化 user data 复用登录态
+ * 默认目标：使用本地 Chrome，并优先复用受管环境目录中的 user data 维持多环境登录态
  *
  * 支持两种模式（通过环境变量选择）：
- * - BROWSER_MODE=bundled (默认): launchPersistentContext 使用 Playwright 内置 Chromium + 独立 user data dir
- * - BROWSER_MODE=persistent: launchPersistentContext 使用系统 Chrome User Data（需要关闭正在运行的 Chrome，否则 profile 会被占用）
+ * - BROWSER_MODE=persistent (默认): launchPersistentContext 使用系统 Chrome，可绑定受管环境目录
+ * - BROWSER_MODE=bundled: launchPersistentContext 使用 Playwright 内置 Chromium + 独立 user data dir
  * - BROWSER_MODE=cdp: connectOverCDP 连接已开启远程调试端口的 Chrome（需你用 --remote-debugging-port 启动）
  */
 
@@ -185,11 +185,11 @@ function getCdpDefaultUserDataDir() {
 }
 
 function getBrowserMode() {
-    return (process.env.BROWSER_MODE || 'bundled').toLowerCase();
+    return (process.env.BROWSER_MODE || 'persistent').toLowerCase();
 }
 
 function shouldUseManagedProfilePool(options = {}) {
-    const mode = String(options?.mode || getBrowserMode()).trim().toLowerCase() || 'bundled';
+    const mode = String(options?.mode || getBrowserMode()).trim().toLowerCase() || 'persistent';
     return mode === 'bundled';
 }
 
@@ -247,8 +247,51 @@ function resolveBundledProfileSelection(options = {}) {
     };
 }
 
+function resolvePersistentProfileSelection(options = {}) {
+    const explicitProfileId = String(options.profileId || '').trim();
+    if (explicitProfileId) {
+        const profile = getBrowserProfile(explicitProfileId);
+        if (!profile) {
+            throw new Error(`指定环境不存在: ${explicitProfileId}`);
+        }
+        return {
+            profileId: profile.id,
+            userDataDir: profile.userDataDir,
+            profile,
+            source: 'profile',
+        };
+    }
+
+    const explicitUserDataDir = normalizePathLike(options.chromeUserDataDir || process.env.CHROME_USER_DATA_DIR);
+    if (explicitUserDataDir) {
+        return {
+            profileId: null,
+            userDataDir: explicitUserDataDir,
+            profile: null,
+            source: 'explicit-user-data',
+        };
+    }
+
+    const activeProfile = getActiveBrowserProfile() || ensureDefaultBrowserProfile();
+    if (activeProfile?.userDataDir) {
+        return {
+            profileId: activeProfile.id,
+            userDataDir: activeProfile.userDataDir,
+            profile: activeProfile,
+            source: 'active-profile',
+        };
+    }
+
+    return {
+        profileId: null,
+        userDataDir: getDefaultUserDataDir(),
+        profile: null,
+        source: 'system-default',
+    };
+}
+
 function resolveDesiredConnectionState(options = {}) {
-    const mode = String(options.mode || getBrowserMode()).trim().toLowerCase() || 'bundled';
+    const mode = String(options.mode || getBrowserMode()).trim().toLowerCase() || 'persistent';
     if (mode === 'cdp') {
         return {
             mode,
@@ -257,9 +300,11 @@ function resolveDesiredConnectionState(options = {}) {
     }
 
     if (mode === 'persistent') {
+        const persistentSelection = resolvePersistentProfileSelection(options);
         return {
             mode,
-            userDataDir: normalizePathLike(options.chromeUserDataDir || process.env.CHROME_USER_DATA_DIR || getDefaultUserDataDir()),
+            userDataDir: normalizePathLike(persistentSelection.userDataDir),
+            profileId: persistentSelection.profileId || null,
             profileDir: String(options.chromeProfileDir || process.env.CHROME_PROFILE_DIR || 'Default').trim() || 'Default',
             executablePath: normalizePathLike(options.chromeExecutablePath || process.env.CHROME_EXECUTABLE_PATH || getDefaultExecutablePath()),
         };
@@ -309,6 +354,7 @@ async function shouldReconnectForOptions(options = {}) {
 
     if (desired.mode === 'persistent') {
         return desired.userDataDir !== current.userDataDir
+            || (desired.profileId || null) !== (current.profileId || null)
             || desired.profileDir !== current.profileDir
             || desired.executablePath !== current.executablePath;
     }
@@ -718,7 +764,7 @@ export async function getOrCreateBrowser(options = {}) {
         return existingBrowser;
     }
 
-    const resolvedMode = String(options.mode || getBrowserMode()).trim().toLowerCase() || 'bundled';
+    const resolvedMode = String(options.mode || getBrowserMode()).trim().toLowerCase() || 'persistent';
 
     // 冷启动场景：仅在显式请求 CDP 模式时尝试接管现有 CDP 浏览器
     const requestedMode = String(options.mode || '').trim().toLowerCase();
@@ -866,7 +912,8 @@ export async function getOrCreateBrowser(options = {}) {
             }
 
             // persistent：复用系统 Chrome 的 user data（包含 cookie/session）
-            const chromeUserDataDir = options.chromeUserDataDir || process.env.CHROME_USER_DATA_DIR || getDefaultUserDataDir();
+            const persistentSelection = resolvePersistentProfileSelection(options);
+            const chromeUserDataDir = persistentSelection.userDataDir;
             const profileDir = options.chromeProfileDir || process.env.CHROME_PROFILE_DIR || 'Default';
             const executablePath = options.chromeExecutablePath || process.env.CHROME_EXECUTABLE_PATH || getDefaultExecutablePath();
 
@@ -875,12 +922,20 @@ export async function getOrCreateBrowser(options = {}) {
             currentProfileDir = profileDir;
             currentExecutablePath = executablePath;
             currentCdpEndpoint = null;
-            currentManagedProfileId = null;
+            currentManagedProfileId = persistentSelection.profileId || null;
+            if (currentManagedProfileId) {
+                switchBrowserProfile(currentManagedProfileId);
+            }
 
-            logger.info(`使用 persistent 模式启动 (复用本机 Chrome profile, ${modeStr})`);
+            logger.info(
+                `使用 persistent 模式启动 (${currentManagedProfileId ? '本机 Chrome + 受管环境目录' : '复用本机 Chrome profile'}, ${modeStr})`
+            );
             logger.info('user data dir:', chromeUserDataDir);
             logger.info('profile dir:', profileDir);
             logger.info('executable:', executablePath);
+            if (currentManagedProfileId) {
+                logger.info('profile id:', currentManagedProfileId);
+            }
 
             try {
                 contextInstance = await withTimeout(
@@ -907,6 +962,12 @@ export async function getOrCreateBrowser(options = {}) {
             browserStatus.lastActivity = Date.now();
             browserStatus.pageCount = (await getVisiblePagesDetailed()).length;
             currentBrowserVersion = resolveActiveBrowserVersion();
+            if (currentManagedProfileId) {
+                markBrowserProfileUsed(currentManagedProfileId, {
+                    browserVersion: currentBrowserVersion || '',
+                    lastUsedAt: new Date().toISOString(),
+                });
+            }
         })();
 
         try {

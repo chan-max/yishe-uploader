@@ -84,9 +84,9 @@ function injectProfileBadgeScript(payload) {
     ? payload.platforms.map((item) => normalizeText(item)).filter(Boolean)
     : [];
   const titleText = profileName;
-  const metaText = [`#${profileId}`, account, platforms.slice(0, 2).join(" / ")]
+  const metaText = [account, platforms.slice(0, 2).join(" / ")]
     .filter(Boolean)
-    .join("  ");
+    .join("  ·  ");
   const badgeState = (globalThis.__yisheBrowserAutomationProfileBadgeState =
     globalThis.__yisheBrowserAutomationProfileBadgeState || {});
 
@@ -101,6 +101,9 @@ function injectProfileBadgeScript(payload) {
   globalThis.__yisheBrowserAutomationProfile = badgeState.payload;
 
   const BADGE_ID = "__yishe_browser_automation_profile_badge";
+  const BADGE_VERSION = "4";
+  const BASE_SHADOW =
+    "0 8px 20px rgba(0, 0, 0, 0.16), inset 0 1px 0 rgba(255,255,255,0.08)";
 
   const ensureBadge = () => {
     if (!document?.documentElement) {
@@ -113,32 +116,41 @@ function injectProfileBadgeScript(payload) {
     }
 
     let badge = document.getElementById(BADGE_ID);
+    if (badge && badge.dataset.version !== BADGE_VERSION) {
+      badge.remove();
+      badge = null;
+    }
+
     if (!badge) {
       badge = document.createElement("div");
       badge.id = BADGE_ID;
+      badge.dataset.version = BADGE_VERSION;
       badge.setAttribute("data-yishe-browser-automation", "profile-badge");
       badge.setAttribute("aria-hidden", "true");
       badge.style.cssText = [
         "position:fixed",
-        "top:10px",
-        "left:10px",
+        "right:12px",
+        "bottom:12px",
         "z-index:2147483647",
         "pointer-events:none",
         "display:flex",
         "flex-direction:column",
-        "gap:6px",
-        "min-width:136px",
-        "max-width:min(48vw, 300px)",
-        "padding:9px 12px 10px 14px",
+        "gap:4px",
+        "min-width:132px",
+        "max-width:min(30vw, 200px)",
+        "padding:8px 10px 9px",
         "border-radius:10px",
-        "border:2px solid rgba(166, 244, 107, 0.88)",
-        "background:linear-gradient(180deg, rgba(14,14,14,0.96), rgba(6,6,6,0.94))",
-        "box-shadow:none",
+        "border:1px solid rgba(255,255,255,0.12)",
+        "background:rgba(15,15,15,0.88)",
+        `box-shadow:${BASE_SHADOW}`,
+        "backdrop-filter:blur(8px)",
+        "-webkit-backdrop-filter:blur(8px)",
         "overflow:hidden",
-        "font-family:Consolas, Monaco, 'Courier New', monospace",
-        "line-height:1.28",
+        "font-family:'SF Pro Text','Segoe UI',Arial,sans-serif",
+        "line-height:1.2",
         "color:#f8fafc",
         "white-space:normal",
+        "user-select:none",
       ].join(";");
 
       const accent = document.createElement("div");
@@ -147,9 +159,10 @@ function injectProfileBadgeScript(payload) {
         "position:absolute",
         "left:0",
         "top:0",
-        "bottom:0",
-        "width:4px",
-        "background:linear-gradient(180deg, #d9ff75, #3ddc84)",
+        "right:0",
+        "height:1px",
+        "background:rgba(255,255,255,0.08)",
+        "pointer-events:none",
       ].join(";");
 
       const header = document.createElement("div");
@@ -158,8 +171,20 @@ function injectProfileBadgeScript(payload) {
         "display:flex",
         "align-items:center",
         "justify-content:space-between",
-        "gap:8px",
+        "gap:6px",
         "min-width:0",
+        "position:relative",
+        "z-index:1",
+      ].join(";");
+
+      const chips = document.createElement("div");
+      chips.setAttribute("data-role", "chips");
+      chips.style.cssText = [
+        "display:flex",
+        "align-items:center",
+        "gap:5px",
+        "min-width:0",
+        "flex-wrap:wrap",
       ].join(";");
 
       const flag = document.createElement("div");
@@ -167,33 +192,32 @@ function injectProfileBadgeScript(payload) {
       flag.style.cssText = [
         "display:inline-flex",
         "align-items:center",
-        "height:20px",
-        "padding:0 8px",
-        "border-radius:4px",
-        "border:1px solid rgba(166, 244, 107, 0.72)",
-        "background:rgba(166, 244, 107, 0.14)",
-        "color:#d9ff75",
-        "font-size:10px",
+        "height:18px",
+        "padding:0 7px",
+        "border-radius:999px",
+        "border:1px solid rgba(255, 255, 255, 0.14)",
+        "background:rgba(255, 255, 255, 0.06)",
+        "color:rgba(255,255,255,0.72)",
+        "font-size:9px",
         "font-weight:700",
-        "letter-spacing:0.08em",
+        "letter-spacing:0.04em",
         "line-height:1",
-        "text-transform:uppercase",
       ].join(";");
-      flag.textContent = "当前环境";
+      flag.textContent = "自动化";
 
       const idNode = document.createElement("div");
       idNode.setAttribute("data-role", "id");
       idNode.style.cssText = [
         "display:inline-flex",
         "align-items:center",
-        "min-height:20px",
+        "min-height:18px",
         "max-width:52%",
-        "padding:0 7px",
-        "border-radius:4px",
-        "border:1px solid rgba(255,255,255,0.14)",
-        "background:rgba(255,255,255,0.06)",
-        "color:rgba(255,255,255,0.84)",
-        "font-size:10px",
+        "padding:0 6px",
+        "border-radius:999px",
+        "border:1px solid rgba(255,255,255,0.08)",
+        "background:rgba(255,255,255,0.04)",
+        "color:rgba(255,255,255,0.66)",
+        "font-size:9px",
         "font-weight:600",
         "line-height:1",
         "white-space:nowrap",
@@ -204,7 +228,9 @@ function injectProfileBadgeScript(payload) {
       const title = document.createElement("div");
       title.setAttribute("data-role", "title");
       title.style.cssText = [
-        "font-size:13px",
+        "position:relative",
+        "z-index:1",
+        "font-size:12px",
         "font-weight:700",
         "color:#ffffff",
         "overflow:hidden",
@@ -215,15 +241,18 @@ function injectProfileBadgeScript(payload) {
       const meta = document.createElement("div");
       meta.setAttribute("data-role", "meta");
       meta.style.cssText = [
-        "font-size:11px",
-        "color:rgba(226,232,240,0.9)",
+        "position:relative",
+        "z-index:1",
+        "font-size:10px",
+        "color:rgba(255,255,255,0.58)",
         "overflow:hidden",
         "text-overflow:ellipsis",
         "white-space:nowrap",
       ].join(";");
 
-      header.appendChild(flag);
-      header.appendChild(idNode);
+      chips.appendChild(flag);
+      chips.appendChild(idNode);
+      header.appendChild(chips);
       badge.appendChild(accent);
       badge.appendChild(header);
       badge.appendChild(title);
@@ -248,7 +277,7 @@ function injectProfileBadgeScript(payload) {
         currentPayload.titleText || currentPayload.profileName || currentPayload.profileId || "";
     }
     if (metaNode) {
-      metaNode.textContent = currentPayload.metaText || `#${currentPayload.profileId || "default"}`;
+      metaNode.textContent = currentPayload.metaText || "自动化窗口";
     }
     if (idNode) {
       idNode.textContent = `#${currentPayload.profileId || "default"}`;
