@@ -9,7 +9,6 @@
  * - BROWSER_MODE=cdp: connectOverCDP 连接已开启远程调试端口的 Chrome（需你用 --remote-debugging-port 启动）
  */
 
-import { chromium } from 'playwright';
 import { spawn, exec } from 'child_process';
 import path from 'path';
 import {
@@ -24,6 +23,10 @@ import {
 import {
     logger
 } from '../utils/logger.js';
+import {
+    getPlaywrightChromium,
+    initBundledPlaywrightEnv
+} from '../utils/playwrightRuntime.js';
 import os from 'os';
 import AdmZip from 'adm-zip';
 import fs from 'fs-extra';
@@ -745,8 +748,14 @@ export async function getOrCreateBrowser(options = {}) {
 
         connectPromise = (async () => {
             const headless = options.headless !== undefined ? options.headless : getHeadlessMode();
+            const playwrightRuntime = initBundledPlaywrightEnv();
+            const chromium = await getPlaywrightChromium();
             logger.info(`getOrCreateBrowser - options.headless: ${options.headless}, 最终使用 headless: ${headless}`);
             const modeStr = headless ? '无头' : '有界面';
+
+            if (playwrightRuntime.browsersPath) {
+                logger.info('Playwright browsers path:', playwrightRuntime.browsersPath);
+            }
 
             if (mode === 'cdp') {
                 currentBrowserName = 'chrome';
@@ -828,8 +837,14 @@ export async function getOrCreateBrowser(options = {}) {
                         'launchPersistentContext'
                     );
                 } catch (e) {
+                    const browsersPathHint = playwrightRuntime.browsersPath
+                        ? ` 当前浏览器目录: ${playwrightRuntime.browsersPath}.`
+                        : '';
+                    const distributionHint = playwrightRuntime.usingBundledPath
+                        ? '请确认发布包中的 pw-browsers 目录已随程序完整分发。'
+                        : '请确认 Playwright Chromium 已安装，或显式设置 PLAYWRIGHT_BROWSERS_PATH。';
                     throw new Error(
-                        `启动内置 Chromium 失败。请确认 Playwright 浏览器已安装，且 userDataDir 可写。原错误: ${e.message}`
+                        `启动内置 Chromium 失败。${distributionHint}${browsersPathHint} 请确认 userDataDir 可写。原错误: ${e.message}`
                     );
                 }
 

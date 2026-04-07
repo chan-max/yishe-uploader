@@ -6,6 +6,9 @@ frontend/node_modules/
 dist/
 frontend/dist/
 build/
+release/
+yishe-uploader
+yishe-uploader.exe
 *.log
 
 # Environment files

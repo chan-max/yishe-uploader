@@ -1,6 +1,6 @@
 {
     "name": "yishe-auto-browser",
-    "version": "2.0.199",
+    "version": "2.0.200",
     "description": "Yishe Auto Browser - Browser automation API for auto-publish and related operations",
     "main": "src/index.js",
     "type": "module",

@@ -1,9 +1,10 @@
-# 构建 EXE 可执行文件
+# 构建可执行文件与随包浏览器发布目录
 
-本项目支持使用 nexe 将整个应用打包成单一可执行文件：
+本项目支持使用 `nexe` 生成可执行文件，并额外组装一个可直接用于制作安装包的发布目录。
 
 - Windows: 生成 `.exe`
 - macOS: 生成无扩展名可执行文件
+- Playwright Chromium: 随发布目录一起分发，目标机器无需再手动执行 `playwright install`
 
 ## 使用方法
 
@@ -13,113 +14,137 @@
 npm install
 ```
 
-### 2. 构建 EXE
+### 2. 构建发布产物
 
 ```bash
 npm run build:exe
 ```
 
-构建过程包括三个步骤：
-1. **构建前端**: 自动运行 `npm run web:build` 生成 `web/dist` 目录
-2. **打包后端**: 使用 esbuild 将 ESM 格式的后端代码打包成单一的 CommonJS 文件
-3. **生成可执行文件**: 使用 nexe 将打包后的代码编译为单文件程序
+构建过程包括四个步骤：
 
-### 3. 运行 EXE
+1. 构建前端 `web/dist`
+2. 使用 `esbuild` 打包后端代码
+3. 使用 `nexe` 生成可执行文件
+4. 组装 `release/` 发布目录，并把 Playwright Chromium 安装到随包目录
 
-构建完成后，会在项目根目录生成对应平台的文件：
+## 构建结果
+
+构建完成后会得到两类产物：
+
+### 根目录产物
 
 - Windows: `yishe-uploader.exe`
 - macOS: `yishe-uploader`
 
-```bash
-# Windows
-.\yishe-uploader.exe
+这个文件主要用于本机快速验证，不建议单独拿去分发。
 
-# macOS
-./yishe-uploader
-```
+### 发布目录
 
-然后访问 `http://localhost:7010` 即可使用。
-
-## 注意事项
-
-### ⚠️ 重要提示
-
-1. **Playwright 依赖**: 生成的 EXE 仍然需要 `node_modules` 目录（特别是 playwright 及其浏览器二进制文件）
-   - 建议将 EXE 与 `node_modules` 放在同一目录
-   - 或者在目标机器上运行 `npx playwright install` 安装浏览器
-
-2. **前端资源**: `web/dist` 会随可执行文件一起打包
-   - 正常情况下不需要再手动拷贝 `web/dist`
-
-3. **首次构建**:
-   - Windows 默认使用远端预编译 Node.js 二进制，首次下载可能较慢
-   - macOS 默认使用 `--build` 本地源码构建，耗时会明显更长
-
-### 环境变量
-
-可以通过环境变量自定义配置：
-
-- `FRONTEND_DIST`: 指定前端静态文件目录（默认为 `./web/dist`）
-- `YISHE_AUTO_BROWSER_CDP_USER_DATA_DIR` 或 `UPLOADER_CDP_USER_DATA_DIR`: 指定 Chrome CDP 用户数据目录；默认已统一到工作目录下的 `cdp-user-data`
-
-## 发布部署
-
-如果需要在其他机器上运行，建议打包以下内容：
-
-```
-your-app/
-├── yishe-auto-browser-windows.exe
-├── yishe-auto-browser-mac
-├── node_modules/          # playwright 等原生依赖
-└── temp/                  # 临时文件目录（可选，会自动创建）
-```
-
-或者只发布 EXE，在目标机器上：
+发布目录位于：
 
 ```bash
-# 安装 playwright 浏览器
-npx playwright install chromium
+release/windows-x64/
+release/mac-arm64/
+release/mac-x64/
 ```
+
+目录结构类似：
+
+```text
+release/<platform>/
+├── yishe-uploader(.exe)
+├── node_modules/
+│   ├── playwright/
+│   └── playwright-core/
+├── pw-browsers/
+└── web/
+    └── dist/
+```
+
+给用户分发，或者制作安装包时，请使用整个 `release/<platform>/` 目录。
+
+## 为什么现在可以开箱即用
+
+运行时会优先检测程序所在目录下的 `pw-browsers/`，并自动把 `PLAYWRIGHT_BROWSERS_PATH` 指向这里。只要安装包把整个发布目录安装到目标机器，程序启动后就能直接使用随包 Chromium。
+
+这意味着：
+
+- 用户不需要手动执行 `npx playwright install`
+- macOS 不依赖 `~/Library/Caches/ms-playwright`
+- Windows 不依赖 `%LOCALAPPDATA%\\ms-playwright`
+
+## 发布建议
+
+### Windows
+
+使用 Inno Setup、NSIS 或你现有的安装器，把 `release/windows-x64/` 的全部内容安装到同一个应用目录。
+
+### macOS
+
+使用 `pkgbuild` 或你现有的打包流程，把 `release/mac-*/` 的全部内容安装到应用目录中。
+
+重点不是“只安装一个可执行文件”，而是“安装整个发布目录”。
+
+## 重要限制
+
+### 1. 浏览器是平台相关的
+
+随包 Chromium 必须在对应平台构建：
+
+- Windows 包请在 Windows 上构建
+- macOS 包请在 macOS 上构建
+
+不要在 macOS 上构建 Windows 的随包浏览器，也不要在 Windows 上构建 macOS 的随包浏览器。
+
+### 2. 单独拷贝 exe 不够
+
+如果只拷贝根目录里的 `yishe-uploader.exe` 或 `yishe-uploader`，而没有一起带上：
+
+- `node_modules/playwright`
+- `node_modules/playwright-core`
+- `pw-browsers`
+- `web/dist`
+
+那么程序依然可能无法正常运行。
+
+## 环境变量
+
+支持以下覆盖项：
+
+- `FRONTEND_DIST`: 自定义前端静态资源目录
+- `PLAYWRIGHT_BROWSERS_PATH`: 强制指定 Playwright 浏览器目录
+- `YISHE_PLAYWRIGHT_BROWSERS_DIR` / `UPLOADER_PLAYWRIGHT_BROWSERS_DIR`: 指定随包浏览器目录
+- `YISHE_AUTO_BROWSER_CDP_USER_DATA_DIR` / `UPLOADER_CDP_USER_DATA_DIR`: 指定 Chrome CDP 用户数据目录
 
 ## 故障排除
 
-### 问题：EXE 启动后提示"前端未构建"
+### 问题：启动内置 Chromium 失败
 
-**解决方案**:
-- 先确认当前可执行文件是最新版本
-- 如果是历史版本，可手动补一个同级 `web/dist`
-- 或设置环境变量 `FRONTEND_DIST` 指向正确的前端目录
+优先检查：
 
-### 问题：浏览器连接失败
+1. 安装包是否把整个 `release/<platform>/` 目录都装进去了
+2. `pw-browsers/` 是否真实存在于程序目录旁边
+3. `userDataDir` 是否可写
 
-**解决方案**:
-- 确保已安装 playwright 浏览器: `npx playwright install`
-- 检查 `node_modules` 目录是否存在
+### 问题：前端页面打不开
 
-### 问题：构建失败
+优先检查：
 
-**解决方案**:
-- 确保已运行 `npm install` 安装所有依赖
-- 检查 Node.js 版本是否 >= 18.0.0
-- 查看错误信息，可能需要手动安装 `nexe` 或 `esbuild`
+1. 安装包里是否包含 `web/dist`
+2. 是否手动只复制了 exe，而没有复制发布目录
+
+### 问题：构建阶段下载浏览器失败
+
+优先检查：
+
+1. 当前机器网络是否可访问 Playwright 下载源
+2. 本地是否已经完成 `npm install`
+3. 是否在目标平台本机执行构建
 
 ## 技术细节
 
-- **打包工具**: nexe (将 Node.js 应用编译为独立可执行文件)
-- **代码打包**: esbuild (将 ESM 模块打包为 CommonJS)
-- **目标平台**: Windows x64 / macOS 当前架构, Node.js 20.18.3
-- **前端构建**: Vite (Vue 3 SPA)
-- **预编译源**: Windows 使用社区维护的 [urbdyn/nexe_builds](https://github.com/urbdyn/nexe_builds) 提供的预编译 Node.js 二进制文件
-
-> [!NOTE]
-> nexe 官方预编译版本较旧。本项目当前策略是：
-> - Windows: 通过 `--remote` 使用社区维护的预编译二进制
-> - macOS: 优先使用社区维护的 arm64 预编译基座，失败时再回退到 `--build` 本地编译
-
-## Release 产物
-
-GitHub Release 会固定生成两个下载文件：
-
-- `yishe-auto-browser-windows.exe`
-- `yishe-auto-browser-mac`
+- 打包工具: `nexe`
+- 后端 bundle: `esbuild`
+- 浏览器运行时: `playwright` + `playwright-core`
+- 随包浏览器目录: `pw-browsers`
+- 前端构建: `vite`

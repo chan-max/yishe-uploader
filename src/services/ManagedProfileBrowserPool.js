@@ -1,5 +1,3 @@
-import path from "path";
-import { chromium } from "playwright";
 import {
   ensureDefaultBrowserProfile,
   getActiveBrowserProfile,
@@ -8,6 +6,10 @@ import {
   markBrowserProfileUsed,
 } from "./BrowserProfileService.js";
 import { logger } from "../utils/logger.js";
+import {
+  getPlaywrightChromium,
+  initBundledPlaywrightEnv,
+} from "../utils/playwrightRuntime.js";
 
 const sessions = new Map();
 const badgeBoundPages = new WeakSet();
@@ -664,6 +666,13 @@ export async function getOrCreateManagedProfileBrowser(options = {}) {
 
   session.lastConnectError = null;
   session.connectPromise = (async () => {
+    const playwrightRuntime = initBundledPlaywrightEnv();
+    const chromium = await getPlaywrightChromium();
+
+    if (playwrightRuntime.browsersPath) {
+      logger.info("Playwright browsers path:", playwrightRuntime.browsersPath);
+    }
+
     try {
       session.contextInstance = await chromium.launchPersistentContext(
         profile.userDataDir,
@@ -688,8 +697,14 @@ export async function getOrCreateManagedProfileBrowser(options = {}) {
     } catch (error) {
       session.lastConnectError = error?.message || String(error);
       await closeSession(session);
+      const browsersPathHint = playwrightRuntime.browsersPath
+        ? ` 当前浏览器目录: ${playwrightRuntime.browsersPath}.`
+        : "";
+      const distributionHint = playwrightRuntime.usingBundledPath
+        ? "请确认发布包中的 pw-browsers 目录已随程序完整分发。"
+        : "请确认 Playwright Chromium 已安装，或显式设置 PLAYWRIGHT_BROWSERS_PATH。";
       throw new Error(
-        `启动内置 Chromium 失败。请确认 Playwright 浏览器已安装，且 userDataDir 可写。原错误: ${
+        `启动内置 Chromium 失败。${distributionHint}${browsersPathHint} 请确认 userDataDir 可写。原错误: ${
           error?.message || error
         }`,
       );
