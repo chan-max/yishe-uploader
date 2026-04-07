@@ -26,6 +26,7 @@ cookies/
 
 # Temporary files
 temp/
+temp-build/
 *.tmp
 *.temp
 

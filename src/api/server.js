@@ -34,6 +34,7 @@ import {
 import { PublishService } from '../services/PublishService.js';
 import taskManager from '../services/TaskManager.js';
 import { logger } from '../utils/logger.js';
+import { openExternalUrl, shouldAutoOpenBrowserOnStart } from '../utils/appLauncher.js';
 import { PLATFORM_CONFIGS } from '../config/platforms.js';
 import { getBrowserProfilesWorkspaceDir } from '../services/BrowserProfileService.js';
 import {
@@ -238,9 +239,21 @@ class ApiServer {
         });
 
         this.server.listen(this.port, () => {
+            const accessUrl = `http://localhost:${this.port}`;
             logger.info(`服务已启动，端口: ${this.port}`);
-            logger.info(`访问地址: http://localhost:${this.port}`);
+            logger.info(`访问地址: ${accessUrl}`);
             this.startBrowserCheckTimer();
+
+            if (shouldAutoOpenBrowserOnStart()) {
+                setTimeout(() => {
+                    const opened = openExternalUrl(accessUrl);
+                    if (opened) {
+                        logger.info(`已自动打开管理界面: ${accessUrl}`);
+                    } else {
+                        logger.warn(`自动打开管理界面失败，请手动访问: ${accessUrl}`);
+                    }
+                }, 1200);
+            }
         });
 
         return this.server;

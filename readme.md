@@ -55,43 +55,38 @@ npm run dev:no-watch
 
 执行 `npm run dev` 或 `npm run dev:no-watch` 后，访问 `http://localhost:7010` 即可使用 Web 界面。
 
-### 可执行文件运行
+### 安装包运行
 
-GitHub Release 默认提供两个可执行文件：
+GitHub Release 现在默认提供两类最终安装产物：
 
-- Windows: `yishe-auto-browser-windows.exe`
-- macOS: `yishe-auto-browser-mac`
+- Windows: 安装版 `.exe`
+- macOS: 安装版 `.pkg`
 
-运行方式如下：
+它们都包含：
 
-```bash
-# Windows
-yishe-auto-browser-windows.exe
+- 应用可执行文件
+- 前端 `web/dist`
+- `playwright` / `playwright-core`
+- 随包 `Chromium`
 
-# macOS
-chmod +x yishe-auto-browser-mac
-./yishe-auto-browser-mac
-```
+也就是说，用户安装后不需要再手动执行 `playwright install`。
 
-如果 macOS 首次运行被系统拦截，可再执行：
+### 构建发布目录与安装包
 
-```bash
-xattr -d com.apple.quarantine yishe-auto-browser-mac
-./yishe-auto-browser-mac
-```
-
-注意：当前可执行文件运行时仍依赖同目录下的 `node_modules`。
-前端页面资源会随可执行文件一起打包，不需要再额外拷贝 `web/dist`。
-
-### 构建 EXE 可执行文件
-
-如果需要将项目打包成单一的 Windows EXE 可执行文件：
+如果需要生成可分发产物：
 
 ```bash
+# 先生成 release/<platform>/ 随包目录
 npm run build:exe
+
+# 再生成最终安装包
+npm run build:installer
+
+# 或者一步完成
+npm run build:dist
 ```
 
-详细说明请参考 [构建 EXE 文档](docs/BUILD_EXE.md)。
+详细说明请参考 [构建安装包文档](docs/BUILD_EXE.md)。
 
 ## 📖 使用指南
 

@@ -1,9 +1,9 @@
-# 构建可执行文件与随包浏览器发布目录
+# 构建可执行文件、随包浏览器与最终安装包
 
-本项目支持使用 `nexe` 生成可执行文件，并额外组装一个可直接用于制作安装包的发布目录。
+本项目支持使用 `nexe` 生成可执行文件，组装随包浏览器发布目录，并继续生成最终安装包。
 
 - Windows: 生成 `.exe`
-- macOS: 生成无扩展名可执行文件
+- macOS: 生成 `.pkg`
 - Playwright Chromium: 随发布目录一起分发，目标机器无需再手动执行 `playwright install`
 
 ## 使用方法
@@ -14,7 +14,7 @@
 npm install
 ```
 
-### 2. 构建发布产物
+### 2. 构建发布目录
 
 ```bash
 npm run build:exe
@@ -27,6 +27,18 @@ npm run build:exe
 3. 使用 `nexe` 生成可执行文件
 4. 组装 `release/` 发布目录，并把 Playwright Chromium 安装到随包目录
 
+### 3. 生成最终安装包
+
+```bash
+npm run build:installer
+```
+
+或者直接一步完成：
+
+```bash
+npm run build:dist
+```
+
 ## 构建结果
 
 构建完成后会得到两类产物：
@@ -38,7 +50,7 @@ npm run build:exe
 
 这个文件主要用于本机快速验证，不建议单独拿去分发。
 
-### 发布目录
+### 发布目录 `release/<platform>/`
 
 发布目录位于：
 
@@ -61,7 +73,20 @@ release/<platform>/
     └── dist/
 ```
 
-给用户分发，或者制作安装包时，请使用整个 `release/<platform>/` 目录。
+这是安装包的原始输入目录。
+
+### 最终安装包 `dist/installers/`
+
+最终安装包会输出到：
+
+```bash
+dist/installers/
+```
+
+示例文件名：
+
+- Windows: `yishe-auto-browser-windows-setup-v2.0.200.exe`
+- macOS: `yishe-auto-browser-mac-arm64-v2.0.200.pkg`
 
 ## 为什么现在可以开箱即用
 
@@ -73,17 +98,37 @@ release/<platform>/
 - macOS 不依赖 `~/Library/Caches/ms-playwright`
 - Windows 不依赖 `%LOCALAPPDATA%\\ms-playwright`
 
+## 最终安装后的行为
+
+- Windows 安装器会把完整运行目录安装到用户本地应用目录，并创建快捷方式
+- macOS 安装器会安装 `.app` 到 `/Applications`
+- 启动安装后的程序时，会自动打开 `http://localhost:7010`
+
 ## 发布建议
 
 ### Windows
 
-使用 Inno Setup、NSIS 或你现有的安装器，把 `release/windows-x64/` 的全部内容安装到同一个应用目录。
+仓库已经内置 Inno Setup 打包脚本。Windows runner 安装 Inno Setup 后，执行：
+
+```bash
+npm run build:dist
+```
+
+即可得到最终安装版 `.exe`。
+
+如果是在本地 Windows 机器执行，请先安装 Inno Setup 6，或设置环境变量 `ISCC_PATH` 指向 `ISCC.exe`。
 
 ### macOS
 
-使用 `pkgbuild` 或你现有的打包流程，把 `release/mac-*/` 的全部内容安装到应用目录中。
+仓库已经内置 `.app` + `pkgbuild` 打包逻辑。macOS 上执行：
 
-重点不是“只安装一个可执行文件”，而是“安装整个发布目录”。
+```bash
+npm run build:dist
+```
+
+即可得到最终 `.pkg`。
+
+重点是：最终安装器内部已经包含整个发布目录，而不是只装单个可执行文件。
 
 ## 重要限制
 
@@ -105,7 +150,7 @@ release/<platform>/
 - `pw-browsers`
 - `web/dist`
 
-那么程序依然可能无法正常运行。
+那么程序依然可能无法正常运行。请始终使用安装包，或至少使用完整的 `release/<platform>/`。
 
 ## 环境变量
 
@@ -122,7 +167,7 @@ release/<platform>/
 
 优先检查：
 
-1. 安装包是否把整个 `release/<platform>/` 目录都装进去了
+1. 安装包是否由新版 `npm run build:installer` / `npm run build:dist` 生成
 2. `pw-browsers/` 是否真实存在于程序目录旁边
 3. `userDataDir` 是否可写
 
@@ -141,9 +186,17 @@ release/<platform>/
 2. 本地是否已经完成 `npm install`
 3. 是否在目标平台本机执行构建
 
+### 问题：Windows 安装包生成失败，提示未找到 ISCC
+
+优先检查：
+
+1. 本机是否已安装 Inno Setup 6
+2. `ISCC.exe` 是否在系统 PATH 中
+3. 或者是否已设置 `ISCC_PATH`
+
 ## 技术细节
 
-- 打包工具: `nexe`
+- 打包工具: `nexe` + Inno Setup / `pkgbuild`
 - 后端 bundle: `esbuild`
 - 浏览器运行时: `playwright` + `playwright-core`
 - 随包浏览器目录: `pw-browsers`

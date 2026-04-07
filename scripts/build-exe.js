@@ -17,7 +17,7 @@ import { build } from 'esbuild';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
-const tempDir = path.join(rootDir, 'temp');
+const tempDir = path.resolve(process.env.YISHE_BUILD_TEMP_DIR || path.join(rootDir, 'temp-build'));
 const bundlePath = path.join(tempDir, 'server-bundle.cjs');
 const nexeCacheDir = path.join(tempDir, 'nexe-cache');
 const releaseRootDir = path.join(rootDir, 'release');
@@ -44,6 +44,9 @@ const playwrightCliPath = path.join(rootDir, 'node_modules', '.bin', isWin ? 'pl
 const nexeCmd = path.join(rootDir, 'node_modules', '.bin', isWin ? 'nexe.cmd' : 'nexe');
 const forceBuild = ['1', 'true', 'yes'].includes(
     String(process.env.YISHE_NEXE_FORCE_BUILD || '').toLowerCase()
+);
+const skipWebBuild = ['1', 'true', 'yes'].includes(
+    String(process.env.YISHE_SKIP_WEB_BUILD || '').toLowerCase()
 );
 
 function ensureDir(dirPath) {
@@ -258,12 +261,22 @@ function stageReleaseBundle() {
 console.log(`🚀 开始构建 ${isWin ? 'Windows EXE' : isMac ? 'macOS' : '通用'} 可执行文件与发布目录...\n`);
 
 console.log('📦 步骤 1/4: 构建前端...');
-try {
-    execSync('npm run web:build', { stdio: 'inherit', cwd: rootDir });
-    console.log('✅ 前端构建完成\n');
-} catch (error) {
-    console.error('❌ 前端构建失败:', error.message);
-    process.exit(1);
+if (skipWebBuild) {
+    try {
+        assertExists(path.join(rootDir, 'web', 'dist'), '前端构建目录');
+        console.log('⏭️ 已跳过前端构建，复用现有 web/dist\n');
+    } catch (error) {
+        console.error('❌ 无法跳过前端构建:', error.message);
+        process.exit(1);
+    }
+} else {
+    try {
+        execSync('npm run web:build', { stdio: 'inherit', cwd: rootDir });
+        console.log('✅ 前端构建完成\n');
+    } catch (error) {
+        console.error('❌ 前端构建失败:', error.message);
+        process.exit(1);
+    }
 }
 
 console.log('📦 步骤 2/4: 打包后端代码...');

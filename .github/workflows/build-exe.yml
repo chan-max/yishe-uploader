@@ -7,6 +7,8 @@ on:
     paths:
       - 'package.json'
       - 'scripts/build-exe.js'
+      - 'scripts/build-installer.js'
+      - 'scripts/installers/**'
       - '.github/workflows/build-exe.yml'
   workflow_dispatch:
 
@@ -84,34 +86,36 @@ jobs:
         if: env.TAG_EXISTS == 'false'
         run: npm ci
 
-      - name: Build Program
+      - name: Install Inno Setup
+        if: matrix.os == 'windows-latest' && env.TAG_EXISTS == 'false'
+        shell: powershell
+        run: |
+          choco install innosetup --no-progress -y
+
+      - name: Build Release Bundle
         if: env.TAG_EXISTS == 'false'
         env:
           PYTHON: python
         run: npm run build:exe
 
+      - name: Build Installer
+        if: env.TAG_EXISTS == 'false'
+        run: npm run build:installer
+
       - name: Prepare Release Asset (Windows)
         if: matrix.os == 'windows-latest' && env.TAG_EXISTS == 'false'
         shell: pwsh
         run: |
-          $exeName = "yishe-auto-browser-windows.exe"
-          # 复制并重命名
-          Copy-Item -Path "yishe-uploader.exe" -Destination $exeName
-          # 创建输出目录并移动
           New-Item -ItemType Directory -Force -Path "release_assets"
-          Move-Item -Path $exeName -Destination "release_assets\"
+          Copy-Item -Path "dist/installers/*.exe" -Destination "release_assets\"
           "ASSET_DIR=release_assets" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Prepare Release Asset (macOS)
         if: startsWith(matrix.os, 'macos-') && env.TAG_EXISTS == 'false'
         shell: bash
         run: |
-          BINARY_NAME="yishe-auto-browser-mac"
-          cp yishe-uploader "$BINARY_NAME"
-          chmod +x "$BINARY_NAME"
-          file "$BINARY_NAME"
           mkdir -p release_assets
-          mv "$BINARY_NAME" release_assets/
+          cp dist/installers/*.pkg release_assets/
           echo "ASSET_DIR=release_assets" >> $GITHUB_ENV
 
       - name: Upload Artifact
