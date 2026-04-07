@@ -65,6 +65,29 @@ function findCommandOnPath(command) {
     }
 }
 
+function resolveWindowsInstallerLanguage(isccPath) {
+    const realCompilerDirs = Array.from(new Set([
+        path.dirname(isccPath || ''),
+        'C:\\Program Files (x86)\\Inno Setup 6',
+        'C:\\Program Files\\Inno Setup 6',
+    ].filter(Boolean)));
+
+    for (const compilerDir of realCompilerDirs) {
+        const chineseSimplifiedPath = path.join(compilerDir, 'Languages', 'ChineseSimplified.isl');
+        if (fs.existsSync(chineseSimplifiedPath)) {
+            return {
+                name: 'chinesesimplified',
+                messagesFile: chineseSimplifiedPath,
+            };
+        }
+    }
+
+    return {
+        name: 'english',
+        messagesFile: 'compiler:Default.isl',
+    };
+}
+
 function createMacAppBundle() {
     const appBundleName = 'Yishe Auto Browser.app';
     const stagingRoot = path.join(tempInstallerDir, 'macos');
@@ -158,11 +181,16 @@ function buildWindowsInstaller() {
         throw new Error('未找到 Inno Setup 编译器 ISCC。请先安装 Inno Setup 6，或设置 ISCC_PATH。');
     }
 
+    const installerLanguage = resolveWindowsInstallerLanguage(isccPath);
+
     ensureDir(distDir);
     assertExists(installerScriptPath, 'Inno Setup 脚本');
 
+    console.log(`使用安装器语言: ${installerLanguage.name}`);
+    console.log(`消息文件: ${installerLanguage.messagesFile}`);
+
     execSync(
-        `"${isccPath}" /DAppVersion="${version}" /DReleaseDir="${releaseDir}" /DOutputDir="${distDir}" /DOutputBaseFilename="${outputBaseFilename}" /DAppExeName="${releaseExecutableName}" "${installerScriptPath}"`,
+        `"${isccPath}" /DAppVersion="${version}" /DReleaseDir="${releaseDir}" /DOutputDir="${distDir}" /DOutputBaseFilename="${outputBaseFilename}" /DAppExeName="${releaseExecutableName}" /DInstallerLanguageName="${installerLanguage.name}" /DInstallerMessagesFile="${installerLanguage.messagesFile}" "${installerScriptPath}"`,
         {
             cwd: rootDir,
             stdio: 'inherit',

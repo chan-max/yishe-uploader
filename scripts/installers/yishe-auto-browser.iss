@@ -14,6 +14,12 @@
 #ifndef AppExeName
   #define AppExeName "yishe-uploader.exe"
 #endif
+#ifndef InstallerLanguageName
+  #define InstallerLanguageName "english"
+#endif
+#ifndef InstallerMessagesFile
+  #define InstallerMessagesFile "compiler:Default.isl"
+#endif
 
 [Setup]
 AppId={{6C6B86F1-8C95-4A5D-8F5B-4B3E5BB4A4D1}
@@ -35,7 +41,7 @@ SetupLogging=yes
 DisableProgramGroupPage=yes
 
 [Languages]
-Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
+Name: "{#InstallerLanguageName}"; MessagesFile: "{#InstallerMessagesFile}"
 
 [Tasks]
 Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "附加任务:"; Flags: unchecked
