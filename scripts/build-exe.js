@@ -1,11 +1,8 @@
 /**
- * 构建可执行文件，并生成可直接用于制作安装包的发布目录
+ * 构建可执行文件，并生成可直接分发的单文件发布目录
  *
  * 发布目录会包含：
- * - 可执行文件
- * - web/dist
- * - node_modules/playwright
- * - node_modules/playwright-core
+ * - 可执行文件（单文件可运行）
  */
 
 import { execSync } from 'child_process';
@@ -34,10 +31,6 @@ const exePath = path.join(rootDir, outputName);
 const releaseDirName = isWin ? 'windows-x64' : isMac ? `mac-${arch}` : `${platform}-${arch}`;
 const releaseDir = path.join(releaseRootDir, releaseDirName);
 const releaseExecutablePath = path.join(releaseDir, outputName);
-const releaseNodeModulesDir = path.join(releaseDir, 'node_modules');
-const releaseWebDistDir = path.join(releaseDir, 'web', 'dist');
-const playwrightPackageDir = path.join(rootDir, 'node_modules', 'playwright');
-const playwrightCorePackageDir = path.join(rootDir, 'node_modules', 'playwright-core');
 const nexeCmd = path.join(rootDir, 'node_modules', '.bin', isWin ? 'nexe.cmd' : 'nexe');
 const forceBuild = ['1', 'true', 'yes'].includes(
     String(process.env.YISHE_NEXE_FORCE_BUILD || '').toLowerCase()
@@ -59,11 +52,6 @@ function assertExists(targetPath, label) {
     if (!fs.existsSync(targetPath)) {
         throw new Error(`${label} 不存在: ${targetPath}`);
     }
-}
-
-function copyDir(sourceDir, targetDir) {
-    ensureDir(path.dirname(targetDir));
-    fs.cpSync(sourceDir, targetDir, { recursive: true, force: true });
 }
 
 function copyFile(sourceFile, targetFile) {
@@ -103,8 +91,8 @@ async function buildBackendBundle() {
         format: 'cjs',
         outfile: bundlePath,
         external: [
-            'playwright',
-            'playwright-core',
+            'chromium-bidi/lib/cjs/bidiMapper/BidiMapper',
+            'chromium-bidi/lib/cjs/cdp/CdpConnection',
         ],
         banner: {
             js: `
@@ -133,6 +121,29 @@ if (__nexe_patches.isNexe) {
         },
         minify: false,
     });
+
+    patchBundledRuntime();
+}
+
+function patchBundledRuntime() {
+    let bundleCode = fs.readFileSync(bundlePath, 'utf8');
+    const replacements = [
+        {
+            from: 'require.resolve("../../../package.json")',
+            to: 'process.execPath',
+            label: 'playwright-core package.json resolve',
+        },
+    ];
+
+    for (const replacement of replacements) {
+        if (!bundleCode.includes(replacement.from)) {
+            console.warn(`⚠️ 未找到需要补丁的片段: ${replacement.label}`);
+            continue;
+        }
+        bundleCode = bundleCode.split(replacement.from).join(replacement.to);
+    }
+
+    fs.writeFileSync(bundlePath, bundleCode);
 }
 
 async function buildExecutable() {
@@ -216,17 +227,8 @@ async function buildExecutable() {
     execSync(`"${nexeCmd}" ${nexeArgsString}`, { stdio: 'inherit', cwd: rootDir });
 }
 
-function stagePlaywrightRuntime() {
-    assertExists(playwrightPackageDir, 'playwright 运行时目录');
-    assertExists(playwrightCorePackageDir, 'playwright-core 运行时目录');
-
-    copyDir(playwrightPackageDir, path.join(releaseNodeModulesDir, 'playwright'));
-    copyDir(playwrightCorePackageDir, path.join(releaseNodeModulesDir, 'playwright-core'));
-}
-
 function stageReleaseBundle() {
     assertExists(exePath, '可执行文件');
-    assertExists(path.join(rootDir, 'web', 'dist'), '前端构建目录');
 
     cleanDir(releaseDir);
 
@@ -234,12 +236,9 @@ function stageReleaseBundle() {
     if (!isWin) {
         fs.chmodSync(releaseExecutablePath, 0o755);
     }
-
-    copyDir(path.join(rootDir, 'web', 'dist'), releaseWebDistDir);
-    stagePlaywrightRuntime();
 }
 
-console.log(`🚀 开始构建 ${isWin ? 'Windows EXE' : isMac ? 'macOS' : '通用'} 可执行文件与发布目录...\n`);
+console.log(`🚀 开始构建 ${isWin ? 'Windows EXE' : isMac ? 'macOS' : '通用'} 单文件可执行程序...\n`);
 
 console.log('📦 步骤 1/4: 构建前端...');
 if (skipWebBuild) {
@@ -279,10 +278,10 @@ try {
     process.exit(1);
 }
 
-console.log('📦 步骤 4/4: 组装 installer 发布目录...');
+console.log('📦 步骤 4/4: 组装单文件发布目录...');
 try {
     stageReleaseBundle();
-    console.log('✅ 发布目录组装完成\n');
+    console.log('✅ 单文件发布目录组装完成\n');
 } catch (error) {
     console.error('❌ 发布目录组装失败:', error.message);
     process.exit(1);
@@ -291,6 +290,6 @@ try {
 console.log('🎉 构建流程全部完成!');
 console.log(`📍 发布目录: ${releaseDir}`);
 console.log('\n⚠️ 发布说明:');
-console.log('   1. 给用户分发或制作安装包时，请使用 release 目录中的完整内容，而不是单独的 exe');
-console.log('   2. 当前安装包不再附带浏览器，目标机器需已安装本地 Chrome');
+console.log('   1. 当前构建目标是单文件可运行产物，可直接分发 exe / 可执行文件');
+console.log('   2. 不再附带浏览器，目标机器需已安装本地 Chrome');
 console.log('   3. Windows 包请在 Windows 构建，macOS 包请在 macOS 构建');

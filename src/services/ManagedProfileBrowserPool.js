@@ -8,6 +8,7 @@ import {
 import { logger } from "../utils/logger.js";
 import {
   getPlaywrightChromium,
+  getDefaultChromeExecutablePath,
   initBundledPlaywrightEnv,
 } from "../utils/playwrightRuntime.js";
 
@@ -328,12 +329,16 @@ function getHeadlessMode() {
   return false;
 }
 
-function buildPersistentLaunchOptions({ headless = false }) {
+function buildPersistentLaunchOptions({ headless = false, executablePath = null }) {
   const launchOptions = {
     headless,
     args: ["--no-first-run", "--no-default-browser-check", ...(headless ? [] : ["--start-maximized"])],
     ignoreHTTPSErrors: true,
   };
+
+  if (executablePath) {
+    launchOptions.executablePath = executablePath;
+  }
 
   launchOptions.viewport = headless ? { width: 1920, height: 1080 } : null;
   return launchOptions;
@@ -674,9 +679,12 @@ export async function getOrCreateManagedProfileBrowser(options = {}) {
   session.profileName = profile.name || profile.id;
   session.userDataDir = profile.userDataDir;
   session.currentBrowserOptions = {
-    mode: "bundled",
+    mode: "persistent",
     profileId: profile.id,
     headless,
+    chromeExecutablePath: String(
+      options.chromeExecutablePath || process.env.CHROME_EXECUTABLE_PATH || getDefaultChromeExecutablePath(),
+    ).trim(),
   };
 
   if (session.connectPromise) {
@@ -695,17 +703,16 @@ export async function getOrCreateManagedProfileBrowser(options = {}) {
 
   session.lastConnectError = null;
   session.connectPromise = (async () => {
-    const playwrightRuntime = initBundledPlaywrightEnv();
+    initBundledPlaywrightEnv();
     const chromium = await getPlaywrightChromium();
-
-    if (playwrightRuntime.browsersPath) {
-      logger.info("Playwright browsers path:", playwrightRuntime.browsersPath);
-    }
+    const executablePath = String(
+      options.chromeExecutablePath || process.env.CHROME_EXECUTABLE_PATH || getDefaultChromeExecutablePath(),
+    ).trim();
 
     try {
       session.contextInstance = await chromium.launchPersistentContext(
         profile.userDataDir,
-        buildPersistentLaunchOptions({ headless }),
+        buildPersistentLaunchOptions({ headless, executablePath }),
       );
       await setBrowserWindowMaximized(session.contextInstance, headless);
       await installFocusTracker(session.contextInstance);
@@ -726,14 +733,8 @@ export async function getOrCreateManagedProfileBrowser(options = {}) {
     } catch (error) {
       session.lastConnectError = error?.message || String(error);
       await closeSession(session);
-      const browsersPathHint = playwrightRuntime.browsersPath
-        ? ` 当前浏览器目录: ${playwrightRuntime.browsersPath}.`
-        : "";
-      const distributionHint = playwrightRuntime.usingBundledPath
-        ? "请确认发布包中的 pw-browsers 目录已随程序完整分发。"
-        : "请确认 Playwright Chromium 已安装，或显式设置 PLAYWRIGHT_BROWSERS_PATH。";
       throw new Error(
-        `启动内置 Chromium 失败。${distributionHint}${browsersPathHint} 请确认 userDataDir 可写。原错误: ${
+        `启动本地 Chrome 失败。请确认目标机器已安装 Chrome，或通过 CHROME_EXECUTABLE_PATH 指定本地 Chrome 路径，并确认 userDataDir 可写。原错误: ${
           error?.message || error
         }`,
       );
@@ -826,8 +827,8 @@ function buildInstanceSummary(profile, session, pages = []) {
     lastError: session?.lastConnectError || null,
     browserVersion: session?.browserVersion || profile.browserVersion || "",
     connection: {
-      mode: "bundled",
-      browserName: "chromium",
+      mode: "persistent",
+      browserName: "chrome",
       browserVersion: session?.browserVersion || profile.browserVersion || "",
       userDataDir: profile.userDataDir,
       profileId: profile.id,
@@ -895,8 +896,8 @@ export async function getManagedProfileBrowserStatus(options = {}) {
     lastError:
       instanceEntries.find((item) => item.lastError)?.lastError || null,
     connection: primaryInstance?.connection || {
-      mode: "bundled",
-      browserName: "chromium",
+      mode: "persistent",
+      browserName: "chrome",
       browserVersion: "",
       userDataDir: null,
       profileId: null,

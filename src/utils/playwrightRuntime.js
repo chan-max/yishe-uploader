@@ -1,5 +1,5 @@
 import path from 'path';
-import { existsSync, readdirSync } from 'fs';
+import { existsSync } from 'fs';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -11,18 +11,6 @@ function normalizeDir(value) {
     }
 
     return path.resolve(normalized);
-}
-
-function hasPlaywrightBrowserPayload(dirPath) {
-    if (!dirPath || !existsSync(dirPath)) {
-        return false;
-    }
-
-    try {
-        return readdirSync(dirPath).some((entry) => entry !== '.DS_Store');
-    } catch {
-        return false;
-    }
 }
 
 let playwrightImportPromise = null;
@@ -45,42 +33,57 @@ export function getAppDir() {
 }
 
 export function initBundledPlaywrightEnv() {
-    // 兼容旧命名，但不再自动推断程序目录旁的 pw-browsers。
-    const explicitBrowsersPath = normalizeDir(
-        process.env.PLAYWRIGHT_BROWSERS_PATH
-        || process.env.YISHE_PLAYWRIGHT_BROWSERS_DIR
-        || process.env.UPLOADER_PLAYWRIGHT_BROWSERS_DIR
-    );
-    if (explicitBrowsersPath) {
-        process.env.PLAYWRIGHT_BROWSERS_PATH = explicitBrowsersPath;
-        return {
-            browsersPath: explicitBrowsersPath,
-            exists: hasPlaywrightBrowserPayload(explicitBrowsersPath),
-            source: 'env',
-            usingBundledPath: false,
-        };
-    }
-
     return {
         browsersPath: null,
         exists: false,
-        source: 'default-cache',
+        source: 'local-chrome',
         usingBundledPath: false,
     };
+}
+
+function existsAny(paths = []) {
+    for (const candidate of paths) {
+        try {
+            if (candidate && existsSync(candidate)) {
+                return candidate;
+            }
+        } catch {
+            // ignore
+        }
+    }
+
+    return null;
+}
+
+export function getDefaultChromeExecutablePath() {
+    if (process.platform === 'win32') {
+        const pf = process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)';
+        const pf64 = process.env.ProgramFiles || 'C:\\Program Files';
+        return existsAny([
+            path.join(pf64, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+            path.join(pf, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+        ]) || path.join(pf64, 'Google', 'Chrome', 'Application', 'chrome.exe');
+    }
+
+    if (process.platform === 'darwin') {
+        return '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+    }
+
+    return '/usr/bin/google-chrome';
 }
 
 export async function getPlaywrightChromium() {
     initBundledPlaywrightEnv();
 
     if (!playwrightImportPromise) {
-        playwrightImportPromise = import('playwright');
+        playwrightImportPromise = import('playwright-core');
     }
 
     const playwrightModule = await playwrightImportPromise;
     const chromium = playwrightModule.chromium || playwrightModule.default?.chromium;
 
     if (!chromium) {
-        throw new Error('无法从 playwright 模块中解析 chromium');
+        throw new Error('无法从 playwright-core 模块中解析 chromium');
     }
 
     return chromium;

@@ -55,37 +55,31 @@ npm run dev:no-watch
 
 执行 `npm run dev` 或 `npm run dev:no-watch` 后，访问 `http://localhost:7010` 即可使用 Web 界面。
 
-### 安装包运行
+### 直连文件运行
 
-GitHub Release 现在默认提供两类最终安装产物：
+GitHub Release 现在默认提供两类最终直连产物：
 
-- Windows: 安装版 `.exe`
-- macOS: 安装版 `.pkg`
+- Windows: `yishe-auto-browser-windows.exe`
+- macOS: `yishe-auto-browser-mac`
 
-它们都包含：
+它们都是单文件产物，不再需要安装包；下载后即可直接双击运行。运行时默认使用目标机器已安装的本地 Chrome，也不会再下载或依赖 Playwright 自带浏览器。
 
-- 应用可执行文件
-- 前端 `web/dist`
-- `playwright` / `playwright-core`
-
-它们**不再附带浏览器二进制**，运行时默认使用目标机器已安装的本地 Chrome，也不需要额外执行 `playwright install`。
-
-### 构建发布目录与安装包
+### 构建发布目录与直连文件
 
 如果需要生成可分发产物：
 
 ```bash
-# 先生成 release/<platform>/ 随包目录
+# 先生成 release/<platform>/ 单文件发布目录
 npm run build:exe
 
-# 再生成最终安装包
+# 再生成最终直连文件（下载后双击即可用）
 npm run build:installer
 
 # 或者一步完成
 npm run build:dist
 ```
 
-详细说明请参考 [构建安装包文档](docs/BUILD_EXE.md)。
+详细说明请参考 [构建直连文件文档](docs/BUILD_EXE.md)。
 
 ## 📖 使用指南
 

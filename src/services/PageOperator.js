@@ -63,7 +63,7 @@ export class PageOperator {
 
     /**
      * 填写输入框
-     * @param {import('playwright').Page} page
+     * @param {import('playwright-core').Page} page
      * @param {string | string[]} selector - 单个选择器或备选选择器数组（按顺序尝试，直到有一个可见）
      * @param {string} text
      * @param {object} options

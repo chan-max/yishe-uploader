@@ -1,4 +1,4 @@
-name: Build and Release EXE
+name: Build and Release Direct Binary
 
 on:
   push:
@@ -86,19 +86,13 @@ jobs:
         if: env.TAG_EXISTS == 'false'
         run: npm ci
 
-      - name: Install Inno Setup
-        if: matrix.os == 'windows-latest' && env.TAG_EXISTS == 'false'
-        shell: powershell
-        run: |
-          choco install innosetup --no-progress -y
-
       - name: Build Release Bundle
         if: env.TAG_EXISTS == 'false'
         env:
           PYTHON: python
         run: npm run build:exe
 
-      - name: Build Installer
+      - name: Build Direct Artifact
         if: env.TAG_EXISTS == 'false'
         run: npm run build:installer
 
@@ -107,7 +101,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path "release_assets"
-          Copy-Item -Path "dist/installers/*.exe" -Destination "release_assets\"
+          Copy-Item -Path "dist/installers/yishe-auto-browser-windows.exe" -Destination "release_assets\"
           "ASSET_DIR=release_assets" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Prepare Release Asset (macOS)
@@ -115,7 +109,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p release_assets
-          cp dist/installers/*.pkg release_assets/
+          cp dist/installers/yishe-auto-browser-mac release_assets/
           echo "ASSET_DIR=release_assets" >> $GITHUB_ENV
 
       - name: Upload Artifact

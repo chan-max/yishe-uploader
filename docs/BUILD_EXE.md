@@ -1,12 +1,12 @@
-# 构建可执行文件与无浏览器安装包
+# 构建可执行文件与直连分发文件
 
-本项目使用 `nexe` 生成可执行文件，再组装 `release/` 发布目录并继续生成最终安装包。
+本项目使用 `nexe` 生成可执行文件，再组装 `release/` 单文件发布目录并继续生成最终直连分发文件。
 
 当前策略已经切回：
 
 - 运行时默认使用目标机器的本地 `Chrome`
-- 安装包不再附带 `Chromium` 或 `pw-browsers`
-- 发布目录仅包含程序本体、前端静态资源和 Playwright 运行时依赖
+- 程序不再附带 `Chromium` 或 `pw-browsers`
+- 发布目录仅包含程序本体
 
 ## 使用方法
 
@@ -29,7 +29,7 @@ npm run build:exe
 3. 使用 `nexe` 生成可执行文件
 4. 组装 `release/` 发布目录
 
-### 3. 生成最终安装包
+### 3. 生成最终直连文件
 
 ```bash
 npm run build:installer
@@ -64,19 +64,14 @@ release/mac-x64/
 
 ```text
 release/<platform>/
-├── yishe-uploader(.exe)
-├── node_modules/
-│   ├── playwright/
-│   └── playwright-core/
-└── web/
-    └── dist/
+└── yishe-uploader(.exe)
 ```
 
-这是安装包的原始输入目录。
+这是单文件发布目录。
 
-### 最终安装包 `dist/installers/`
+### 最终直连文件 `dist/installers/`
 
-最终安装包会输出到：
+最终直连文件会输出到：
 
 ```bash
 dist/installers/
@@ -84,8 +79,8 @@ dist/installers/
 
 示例文件名：
 
-- Windows: `yishe-auto-browser-windows-setup-v2.0.200.exe`
-- macOS: `yishe-auto-browser-mac-arm64-v2.0.200.pkg`
+- Windows: `yishe-auto-browser-windows.exe`
+- macOS: `yishe-auto-browser-mac`
 
 ## 运行要求
 
@@ -93,49 +88,41 @@ dist/installers/
 - 程序默认使用 `persistent` 模式连接本地 Chrome
 - 如需连接远程调试端口，可使用 `cdp` 模式
 
-当前安装包不附带浏览器二进制，因此不会再生成或分发 `pw-browsers/`。
+当前直连文件不附带浏览器二进制，因此不会再生成或分发 `pw-browsers/`。
 
-## 最终安装后的行为
+## 下载后的行为
 
-- Windows 安装器会把完整运行目录安装到用户本地应用目录，并创建快捷方式
-- macOS 安装器会安装 `.app` 到 `/Applications`
-- 启动安装后的程序时，会自动打开 `http://localhost:7010`
+- Windows: 下载 `yishe-auto-browser-windows.exe` 后，双击即可使用
+- macOS: 下载 `yishe-auto-browser-mac` 后，赋予执行权限并双击即可使用
+- 启动程序时，会自动打开 `http://localhost:7010`
 
 ## 发布建议
 
 ### Windows
 
-仓库已经内置 Inno Setup 打包脚本。Windows runner 安装 Inno Setup 后，执行：
+仓库现在会直接生成可分发的 Windows 单文件。执行：
 
 ```bash
 npm run build:dist
 ```
 
-即可得到最终安装版 `.exe`。
-
-如果是在本地 Windows 机器执行，请先安装 Inno Setup 6，或设置环境变量 `ISCC_PATH` 指向 `ISCC.exe`。
+即可得到最终直连文件。
 
 ### macOS
 
-仓库已经内置 `.app` + `pkgbuild` 打包逻辑。macOS 上执行：
+仓库会直接生成可分发的 macOS 单文件。macOS 上执行：
 
 ```bash
 npm run build:dist
 ```
 
-即可得到最终 `.pkg`。
+即可得到最终直连文件。
 
 ## 重要说明
 
-### 1. 单独拷贝 exe 不够
+### 1. 直连文件就是分发文件
 
-如果只拷贝根目录里的 `yishe-uploader.exe` 或 `yishe-uploader`，而没有一起带上：
-
-- `node_modules/playwright`
-- `node_modules/playwright-core`
-- `web/dist`
-
-那么程序依然可能无法正常运行。请始终使用安装包，或至少使用完整的 `release/<platform>/`。
+当前版本会把所需运行时代码直接打进单文件里。给用户分发时，优先使用 `dist/installers/` 里的最终文件，或 `release/<platform>/` 里的 `yishe-uploader(.exe)`。
 
 ### 2. 目标机器必须有本地 Chrome
 
@@ -166,20 +153,12 @@ npm run build:dist
 
 优先检查：
 
-1. 安装包里是否包含 `web/dist`
-2. 是否手动只复制了 exe，而没有复制发布目录
-
-### 问题：Windows 安装包生成失败，提示未找到 ISCC
-
-优先检查：
-
-1. 本机是否已安装 Inno Setup 6
-2. `ISCC.exe` 是否在系统 PATH 中
-3. 或者是否已设置 `ISCC_PATH`
+1. 是否使用了最新构建产物
+2. 是否被安全软件隔离或拦截
 
 ## 技术细节
 
-- 打包工具: `nexe` + Inno Setup / `pkgbuild`
+- 打包工具: `nexe`
 - 后端 bundle: `esbuild`
-- 浏览器运行时: `playwright` + `playwright-core`
+- 浏览器运行时: `playwright-core` + 本地 Chrome
 - 前端构建: `vite`

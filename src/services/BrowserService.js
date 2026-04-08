@@ -26,8 +26,7 @@ import {
     logger
 } from '../utils/logger.js';
 import {
-    getPlaywrightChromium,
-    initBundledPlaywrightEnv
+    getPlaywrightChromium
 } from '../utils/playwrightRuntime.js';
 import os from 'os';
 import AdmZip from 'adm-zip';
@@ -782,14 +781,9 @@ export async function getOrCreateBrowser(options = {}) {
 
         connectPromise = (async () => {
             const headless = options.headless !== undefined ? options.headless : getHeadlessMode();
-            const playwrightRuntime = initBundledPlaywrightEnv();
             const chromium = await getPlaywrightChromium();
             logger.info(`getOrCreateBrowser - options.headless: ${options.headless}, 最终使用 headless: ${headless}`);
             const modeStr = headless ? '无头' : '有界面';
-
-            if (playwrightRuntime.browsersPath) {
-                logger.info('Playwright browsers path:', playwrightRuntime.browsersPath);
-            }
 
             if (mode === 'cdp') {
                 currentBrowserName = 'chrome';
