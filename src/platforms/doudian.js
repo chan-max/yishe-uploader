@@ -20,6 +20,9 @@ const PREVIEW_IMAGE_SELECTORS = [
     'img[src^="blob:"]',
     'img[src^="data:image/"]'
 ];
+const MAIN_IMAGE_FIELD_SELECTOR = '[attr-field-id="主图"]';
+const MAIN_IMAGE_DELETE_STANDARD_SELECTOR = '[class*="hoverBottomWrapper"] > div:nth-child(2)';
+const MAIN_IMAGE_DELETE_HOVER_DELAY_MS = 320;
 const DOUDIAN_PUBLISH_SUCCESS_TEXT_PATTERNS = [
     '商品提交成功',
     '商品创建成功',
@@ -107,6 +110,631 @@ async function collectUploadedPreviewKeys(page) {
         logger.warn(`抖店采集已上传图片候选失败: ${error?.message || error}`);
         return [];
     }
+}
+
+async function collectMainImagePreviewKeys(page) {
+    try {
+        return await page.evaluate(({ fieldSelector, selectors }) => {
+            const field = document.querySelector(fieldSelector);
+            if (!(field instanceof HTMLElement)) {
+                return [];
+            }
+
+            const nodes = selectors.flatMap((selector) => Array.from(field.querySelectorAll(selector)));
+            const uniqueKeys = new Set();
+
+            nodes.forEach((node) => {
+                if (!(node instanceof HTMLImageElement)) return;
+                const src = node.currentSrc || node.src || '';
+                const width = node.naturalWidth || node.width || 0;
+                const height = node.naturalHeight || node.height || 0;
+                if (!src) return;
+                if (width > 32 || height > 32 || /^blob:|^data:image\//.test(src)) {
+                    uniqueKeys.add(`${src}|${width}|${height}`);
+                }
+            });
+
+            return Array.from(uniqueKeys);
+        }, {
+            fieldSelector: MAIN_IMAGE_FIELD_SELECTOR,
+            selectors: PREVIEW_IMAGE_SELECTORS
+        });
+    } catch (error) {
+        logger.warn(`抖店采集主图预览失败: ${error?.message || error}`);
+        return [];
+    }
+}
+
+async function clickMainImageDeleteButtonByPreviewIndex(page, previewIndex, { hoverMode = 'native' } = {}) {
+    try {
+        return await page.evaluate(({
+            fieldSelector,
+            previewSelectors,
+            deleteSelector,
+            previewIndex,
+            hoverMode
+        }) => {
+            const field = document.querySelector(fieldSelector);
+            const normalize = (value) => String(value || '').replace(/\s+/g, ' ').trim();
+            const previewPattern = /^blob:|^data:image\//;
+
+            const describe = (node) => {
+                if (!(node instanceof HTMLElement)) {
+                    return '';
+                }
+
+                return [
+                    node.tagName.toLowerCase(),
+                    normalize(node.getAttribute('attr-field-id')),
+                    normalize(node.getAttribute('aria-label')),
+                    normalize(node.getAttribute('title')),
+                    normalize(node.className),
+                    normalize(node.textContent).slice(0, 80)
+                ].filter(Boolean).join(' | ');
+            };
+
+            const isVisible = (element) => {
+                if (!(element instanceof HTMLElement)) return false;
+                const style = window.getComputedStyle(element);
+                const rect = element.getBoundingClientRect();
+                return style.display !== 'none'
+                    && style.visibility !== 'hidden'
+                    && style.opacity !== '0'
+                    && rect.width > 0
+                    && rect.height > 0;
+            };
+
+            const isPreviewImage = (node) => {
+                if (!(node instanceof HTMLImageElement)) return false;
+                const src = node.currentSrc || node.src || '';
+                const width = node.naturalWidth || node.width || 0;
+                const height = node.naturalHeight || node.height || 0;
+                return !!src && (width > 32 || height > 32 || previewPattern.test(src));
+            };
+
+            const getImageKey = (node) => {
+                if (!(node instanceof HTMLImageElement)) return '';
+                const src = node.currentSrc || node.src || '';
+                const width = node.naturalWidth || node.width || 0;
+                const height = node.naturalHeight || node.height || 0;
+                return src ? `${src}|${width}|${height}` : '';
+            };
+
+            const dispatchHover = (target) => {
+                if (!(target instanceof HTMLElement)) return;
+                const rect = target.getBoundingClientRect();
+                const eventInit = {
+                    bubbles: true,
+                    cancelable: true,
+                    view: window,
+                    clientX: rect.left + (rect.width / 2),
+                    clientY: rect.top + (rect.height / 2)
+                };
+
+                target.dispatchEvent(new MouseEvent('pointerover', eventInit));
+                target.dispatchEvent(new MouseEvent('mouseover', eventInit));
+                target.dispatchEvent(new MouseEvent('mouseenter', eventInit));
+                target.dispatchEvent(new MouseEvent('pointerenter', eventInit));
+                target.dispatchEvent(new MouseEvent('mousemove', eventInit));
+            };
+
+            const toUniqueElements = (nodes) => Array.from(new Set(
+                nodes.filter((node) => node instanceof HTMLElement)
+            ));
+
+            const collectStandardDeleteButtons = (scope) => {
+                if (!(scope instanceof HTMLElement)) return [];
+                return toUniqueElements(
+                    Array.from(scope.querySelectorAll(deleteSelector))
+                        .filter((node) => isVisible(node))
+                );
+            };
+
+            const findPreferredScope = (image) => {
+                let current = image.parentElement;
+                while (current && current instanceof HTMLElement) {
+                    if (collectStandardDeleteButtons(current).length > 0) {
+                        return current;
+                    }
+                    if (current === field) {
+                        break;
+                    }
+                    current = current.parentElement;
+                }
+                return null;
+            };
+
+            if (!(field instanceof HTMLElement)) {
+                return {
+                    clicked: false,
+                    hoverMode,
+                    imageIndex: previewIndex,
+                    previewCount: 0,
+                    visibleDeleteCount: 0,
+                    scopedDeleteCount: 0,
+                    deleteDescriptor: '',
+                    candidateDeleteDescriptors: [],
+                    reason: 'main-image-field-not-found'
+                };
+            }
+
+            const previewImages = toUniqueElements(
+                previewSelectors.flatMap((selector) => Array.from(field.querySelectorAll(selector)))
+            ).filter((node) => isPreviewImage(node));
+            const targetImage = previewImages[previewIndex];
+
+            if (!(targetImage instanceof HTMLImageElement)) {
+                const fieldDeleteButtons = collectStandardDeleteButtons(field);
+                return {
+                    clicked: false,
+                    hoverMode,
+                    imageIndex: previewIndex,
+                    previewCount: previewImages.length,
+                    visibleDeleteCount: fieldDeleteButtons.length,
+                    scopedDeleteCount: 0,
+                    deleteDescriptor: '',
+                    candidateDeleteDescriptors: fieldDeleteButtons.slice(0, 5).map((node) => describe(node)),
+                    reason: 'target-image-not-found'
+                };
+            }
+
+            if (!isPreviewImage(targetImage)) {
+                const fieldDeleteButtons = collectStandardDeleteButtons(field);
+                return {
+                    clicked: false,
+                    hoverMode,
+                    imageIndex: previewIndex,
+                    previewCount: previewImages.length,
+                    visibleDeleteCount: fieldDeleteButtons.length,
+                    scopedDeleteCount: 0,
+                    deleteDescriptor: '',
+                    candidateDeleteDescriptors: fieldDeleteButtons.slice(0, 5).map((node) => describe(node)),
+                    imageKey: getImageKey(targetImage),
+                    imageDescriptor: describe(targetImage),
+                    reason: 'target-image-not-preview'
+                };
+            }
+
+            const preferredScope = findPreferredScope(targetImage);
+            dispatchHover(preferredScope);
+            dispatchHover(targetImage);
+            const fieldDeleteButtons = collectStandardDeleteButtons(field);
+            const scopedDeleteButtons = collectStandardDeleteButtons(preferredScope);
+            const target = scopedDeleteButtons[0] || null;
+
+            if (!(target instanceof HTMLElement)) {
+                return {
+                    clicked: false,
+                    hoverMode,
+                    imageIndex: previewIndex,
+                    previewCount: previewImages.length,
+                    visibleDeleteCount: fieldDeleteButtons.length,
+                    scopedDeleteCount: scopedDeleteButtons.length,
+                    deleteDescriptor: '',
+                    candidateDeleteDescriptors: fieldDeleteButtons.slice(0, 5).map((node) => describe(node)),
+                    scopeDescriptor: describe(preferredScope),
+                    matchedScopeDescriptor: describe(preferredScope),
+                    imageKey: getImageKey(targetImage),
+                    imageDescriptor: describe(targetImage),
+                    reason: 'standard-delete-button-not-found'
+                };
+            }
+
+            const rect = target.getBoundingClientRect();
+            const eventInit = {
+                bubbles: true,
+                cancelable: true,
+                view: window,
+                clientX: rect.left + (rect.width / 2),
+                clientY: rect.top + (rect.height / 2)
+            };
+
+            target.dispatchEvent(new MouseEvent('pointerdown', eventInit));
+            target.dispatchEvent(new MouseEvent('mousedown', eventInit));
+            target.dispatchEvent(new MouseEvent('pointerup', eventInit));
+            target.dispatchEvent(new MouseEvent('mouseup', eventInit));
+            target.dispatchEvent(new MouseEvent('click', eventInit));
+
+            return {
+                clicked: true,
+                hoverMode,
+                imageIndex: previewIndex,
+                previewCount: previewImages.length,
+                visibleDeleteCount: fieldDeleteButtons.length,
+                scopedDeleteCount: scopedDeleteButtons.length,
+                deleteDescriptor: describe(target),
+                candidateDeleteDescriptors: fieldDeleteButtons.slice(0, 5).map((node) => describe(node)),
+                scopeDescriptor: describe(preferredScope),
+                matchedScopeDescriptor: describe(preferredScope),
+                imageKey: getImageKey(targetImage),
+                imageDescriptor: describe(targetImage),
+                reason: 'clicked',
+                searchStrategy: 'ancestor-standard-selector'
+            };
+        }, {
+            fieldSelector: MAIN_IMAGE_FIELD_SELECTOR,
+            previewSelectors: PREVIEW_IMAGE_SELECTORS,
+            deleteSelector: MAIN_IMAGE_DELETE_STANDARD_SELECTOR,
+            previewIndex,
+            hoverMode
+        });
+    } catch (error) {
+        logger.warn(`抖店主图删除点击失败: previewIndex=${previewIndex}, error=${error?.message || error}`);
+        return {
+            clicked: false,
+            hoverMode,
+            imageIndex: previewIndex,
+            previewCount: 0,
+            visibleDeleteCount: 0,
+            scopedDeleteCount: 0,
+            deleteDescriptor: '',
+            candidateDeleteDescriptors: [],
+            reason: error?.message || String(error || '')
+        };
+    }
+}
+
+async function clickOneMainImageDeleteButton(page) {
+    try {
+        return await page.evaluate(({ fieldSelector, previewSelectors, deleteSelector }) => {
+            const field = document.querySelector(fieldSelector);
+            const normalize = (value) => String(value || '').replace(/\s+/g, ' ').trim();
+            const previewPattern = /^blob:|^data:image\//;
+
+            const describe = (node) => {
+                if (!(node instanceof HTMLElement)) {
+                    return '';
+                }
+
+                return [
+                    node.tagName.toLowerCase(),
+                    normalize(node.getAttribute('attr-field-id')),
+                    normalize(node.getAttribute('aria-label')),
+                    normalize(node.getAttribute('title')),
+                    normalize(node.className),
+                    normalize(node.textContent).slice(0, 80)
+                ].filter(Boolean).join(' | ');
+            };
+
+            if (!(field instanceof HTMLElement)) {
+                return {
+                    clicked: false,
+                    hoverMode: 'js',
+                    imageIndex: -1,
+                    previewCount: 0,
+                    visibleDeleteCount: 0,
+                    scopedDeleteCount: 0,
+                    deleteDescriptor: '',
+                    candidateDeleteDescriptors: [],
+                    reason: 'main-image-field-not-found'
+                };
+            }
+
+            const isVisible = (element) => {
+                if (!(element instanceof HTMLElement)) return false;
+                const style = window.getComputedStyle(element);
+                const rect = element.getBoundingClientRect();
+                return style.display !== 'none'
+                    && style.visibility !== 'hidden'
+                    && style.opacity !== '0'
+                    && rect.width > 0
+                    && rect.height > 0;
+            };
+
+            const isPreviewImage = (node) => {
+                if (!(node instanceof HTMLImageElement)) return false;
+                const src = node.currentSrc || node.src || '';
+                const width = node.naturalWidth || node.width || 0;
+                const height = node.naturalHeight || node.height || 0;
+                return !!src && (width > 32 || height > 32 || previewPattern.test(src));
+            };
+
+            const getImageKey = (node) => {
+                if (!(node instanceof HTMLImageElement)) return '';
+                const src = node.currentSrc || node.src || '';
+                const width = node.naturalWidth || node.width || 0;
+                const height = node.naturalHeight || node.height || 0;
+                return src ? `${src}|${width}|${height}` : '';
+            };
+
+            const dispatchHover = (target) => {
+                if (!(target instanceof HTMLElement)) return;
+                const rect = target.getBoundingClientRect();
+                const eventInit = {
+                    bubbles: true,
+                    cancelable: true,
+                    view: window,
+                    clientX: rect.left + (rect.width / 2),
+                    clientY: rect.top + (rect.height / 2)
+                };
+                target.dispatchEvent(new MouseEvent('pointerover', eventInit));
+                target.dispatchEvent(new MouseEvent('mouseover', eventInit));
+                target.dispatchEvent(new MouseEvent('mouseenter', eventInit));
+                target.dispatchEvent(new MouseEvent('pointerenter', eventInit));
+                target.dispatchEvent(new MouseEvent('mousemove', eventInit));
+            };
+
+            const toUniqueElements = (nodes) => Array.from(new Set(
+                nodes.filter((node) => node instanceof HTMLElement)
+            ));
+
+            const collectStandardDeleteButtons = (scope) => {
+                if (!(scope instanceof HTMLElement)) return [];
+                return toUniqueElements(
+                    Array.from(scope.querySelectorAll(deleteSelector))
+                        .filter((node) => isVisible(node))
+                );
+            };
+
+            const findPreferredScope = (image) => {
+                let current = image.parentElement;
+                while (current && current instanceof HTMLElement) {
+                    if (collectStandardDeleteButtons(current).length > 0) {
+                        return current;
+                    }
+                    if (current === field) {
+                        break;
+                    }
+                    current = current.parentElement;
+                }
+                return null;
+            };
+
+            const previewImages = toUniqueElements(
+                previewSelectors.flatMap((selector) => Array.from(field.querySelectorAll(selector)))
+            ).filter((node) => isPreviewImage(node));
+            const fieldDeleteButtons = collectStandardDeleteButtons(field);
+
+            for (const [previewIndex, image] of previewImages.entries()) {
+                const preferredScope = findPreferredScope(image);
+                dispatchHover(preferredScope);
+                dispatchHover(image);
+                const scopedDeleteButtons = collectStandardDeleteButtons(preferredScope);
+                const target = scopedDeleteButtons[0] || null;
+                if (!(target instanceof HTMLElement)) {
+                    continue;
+                }
+
+                const rect = target.getBoundingClientRect();
+                const eventInit = {
+                    bubbles: true,
+                    cancelable: true,
+                    view: window,
+                    clientX: rect.left + (rect.width / 2),
+                    clientY: rect.top + (rect.height / 2)
+                };
+
+                target.dispatchEvent(new MouseEvent('pointerdown', eventInit));
+                target.dispatchEvent(new MouseEvent('mousedown', eventInit));
+                target.dispatchEvent(new MouseEvent('pointerup', eventInit));
+                target.dispatchEvent(new MouseEvent('mouseup', eventInit));
+                target.dispatchEvent(new MouseEvent('click', eventInit));
+
+                return {
+                    clicked: true,
+                    hoverMode: 'js',
+                    imageIndex: previewIndex,
+                    previewCount: previewImages.length,
+                    visibleDeleteCount: fieldDeleteButtons.length,
+                    scopedDeleteCount: scopedDeleteButtons.length,
+                    deleteDescriptor: describe(target),
+                    candidateDeleteDescriptors: fieldDeleteButtons.slice(0, 5).map((node) => describe(node)),
+                    scopeDescriptor: describe(preferredScope),
+                    matchedScopeDescriptor: describe(preferredScope),
+                    imageKey: getImageKey(image),
+                    imageDescriptor: describe(image),
+                    reason: 'clicked',
+                    searchStrategy: 'ancestor-standard-selector'
+                };
+            }
+
+            return {
+                clicked: false,
+                hoverMode: 'js',
+                imageIndex: -1,
+                previewCount: previewImages.length,
+                visibleDeleteCount: fieldDeleteButtons.length,
+                scopedDeleteCount: 0,
+                deleteDescriptor: '',
+                candidateDeleteDescriptors: fieldDeleteButtons.slice(0, 5).map((node) => describe(node)),
+                reason: previewImages.length > 0 ? 'standard-delete-button-not-found' : 'preview-image-not-found'
+            };
+        }, {
+            fieldSelector: MAIN_IMAGE_FIELD_SELECTOR,
+            previewSelectors: PREVIEW_IMAGE_SELECTORS,
+            deleteSelector: MAIN_IMAGE_DELETE_STANDARD_SELECTOR
+        });
+    } catch (error) {
+        logger.warn(`抖店主图删除点击失败: ${error?.message || error}`);
+        return {
+            clicked: false,
+            hoverMode: 'js',
+            imageIndex: -1,
+            previewCount: 0,
+            visibleDeleteCount: 0,
+            scopedDeleteCount: 0,
+            deleteDescriptor: '',
+            candidateDeleteDescriptors: [],
+            reason: error?.message || String(error || '')
+        };
+    }
+}
+
+async function hoverAndClickOneMainImageDeleteButton(page, hoverMode = 'native') {
+    if (hoverMode === 'js') {
+        return clickOneMainImageDeleteButton(page);
+    }
+
+    try {
+        const imageLocator = page.locator(`${MAIN_IMAGE_FIELD_SELECTOR} img`);
+        const imageCount = await imageLocator.count();
+        let previewIndex = 0;
+
+        for (let index = 0; index < imageCount; index += 1) {
+            const image = imageLocator.nth(index);
+            try {
+                const meta = await image.evaluate((node) => {
+                    if (!(node instanceof HTMLImageElement)) {
+                        return {
+                            src: '',
+                            width: 0,
+                            height: 0
+                        };
+                    }
+
+                    return {
+                        src: node.currentSrc || node.src || '',
+                        width: node.naturalWidth || node.width || 0,
+                        height: node.naturalHeight || node.height || 0,
+                        className: String(node.className || ''),
+                        alt: String(node.alt || '')
+                    };
+                });
+
+                const isPreviewImage = !!meta?.src && (
+                    Number(meta?.width || 0) > 32
+                    || Number(meta?.height || 0) > 32
+                    || /^blob:|^data:image\//.test(String(meta?.src || ''))
+                );
+
+                if (!isPreviewImage) {
+                    continue;
+                }
+
+                const currentPreviewIndex = previewIndex;
+                previewIndex += 1;
+
+                logger.info('抖店商品主图清理：准备悬停当前图片', {
+                    hoverMode,
+                    imageIndex: currentPreviewIndex,
+                    domIndex: index,
+                    hoverDelayMs: MAIN_IMAGE_DELETE_HOVER_DELAY_MS,
+                    width: meta?.width || 0,
+                    height: meta?.height || 0,
+                    alt: meta?.alt || '',
+                    className: meta?.className || '',
+                    src: String(meta?.src || '').slice(0, 180)
+                });
+                await image.scrollIntoViewIfNeeded().catch(() => undefined);
+                await image.hover({ force: true });
+                await page.waitForTimeout(MAIN_IMAGE_DELETE_HOVER_DELAY_MS);
+
+                const clickResult = await clickMainImageDeleteButtonByPreviewIndex(page, currentPreviewIndex, { hoverMode });
+                logger.info('抖店商品主图清理：当前图片标准删除结果', clickResult);
+                if (clickResult?.clicked) {
+                    return {
+                        ...clickResult,
+                        nativeHoverIndex: currentPreviewIndex,
+                        nativeHoverDomIndex: index
+                    };
+                }
+            } catch (error) {
+                logger.warn(`抖店主图原生 hover 删除尝试失败: image[${index}], error=${error?.message || error}`);
+            }
+        }
+    } catch (error) {
+        logger.warn(`抖店主图扫描可 hover 图片失败: ${error?.message || error}`);
+    }
+
+    const fallbackResult = await clickOneMainImageDeleteButton(page);
+    logger.info('抖店商品主图清理：原生 hover 路径未成功，执行JS标准删除结果', fallbackResult);
+    return fallbackResult;
+}
+
+async function waitForMainImagePreviewDecrease(page, beforeKeys) {
+    try {
+        await page.waitForFunction(({ fieldSelector, selectors, previousKeys, previousCount }) => {
+            const field = document.querySelector(fieldSelector);
+            if (!(field instanceof HTMLElement)) {
+                return true;
+            }
+
+            const nodes = selectors.flatMap((selector) => Array.from(field.querySelectorAll(selector)));
+            const uniqueKeys = new Set();
+
+            nodes.forEach((node) => {
+                if (!(node instanceof HTMLImageElement)) return;
+                const src = node.currentSrc || node.src || '';
+                const width = node.naturalWidth || node.width || 0;
+                const height = node.naturalHeight || node.height || 0;
+                if (!src) return;
+                if (width > 32 || height > 32 || /^blob:|^data:image\//.test(src)) {
+                    uniqueKeys.add(`${src}|${width}|${height}`);
+                }
+            });
+
+            const currentKeys = Array.from(uniqueKeys);
+            return currentKeys.length < previousCount || previousKeys.some((key) => !currentKeys.includes(key));
+        }, {
+            fieldSelector: MAIN_IMAGE_FIELD_SELECTOR,
+            selectors: PREVIEW_IMAGE_SELECTORS,
+            previousKeys: beforeKeys,
+            previousCount: beforeKeys.length
+        }, {
+            timeout: 6000
+        });
+        return true;
+    } catch (error) {
+        logger.warn(`抖店主图删除后未检测到预览减少: ${error?.message || error}`);
+        return false;
+    }
+}
+
+async function clearMainImages(page, hoverMode = 'native') {
+    let deletedCount = 0;
+
+    for (let round = 1; round <= 8; round += 1) {
+        const beforeKeys = await collectMainImagePreviewKeys(page);
+        if (beforeKeys.length <= 0) {
+            logger.info(`抖店商品主图清理完成: deleted=${deletedCount}, remaining=0`);
+            return {
+                deletedCount,
+                remainingCount: 0
+            };
+        }
+
+        const clickResult = await hoverAndClickOneMainImageDeleteButton(page, hoverMode);
+        logger.info(`抖店商品主图清理：第 ${round} 轮删除尝试`, clickResult);
+
+        if (!clickResult?.clicked) {
+            logger.warn(`抖店商品主图清理：未找到可点击删除按钮，remaining=${beforeKeys.length}, reason=${clickResult?.reason || 'unknown'}`);
+            return {
+                deletedCount,
+                remainingCount: beforeKeys.length
+            };
+        }
+
+        await page.waitForTimeout(400);
+        await waitForMainImagePreviewDecrease(page, beforeKeys);
+        const afterKeys = await collectMainImagePreviewKeys(page);
+        const removedByCount = Math.max(0, beforeKeys.length - afterKeys.length);
+        const hasRemovedKey = beforeKeys.some((key) => !afterKeys.includes(key));
+        const removedCount = removedByCount > 0 ? removedByCount : (hasRemovedKey ? 1 : 0);
+
+        if (removedCount <= 0) {
+            logger.warn(`抖店商品主图清理：点击删除后预览未减少，before=${beforeKeys.length}, after=${afterKeys.length}`);
+            await page.waitForTimeout(200);
+            continue;
+        }
+
+        deletedCount += removedCount;
+        logger.info(`抖店商品主图清理：删除成功，round=${round}, removed=${removedCount}, remaining=${afterKeys.length}`);
+
+        if (afterKeys.length <= 0) {
+            logger.info(`抖店商品主图清理完成: deleted=${deletedCount}, remaining=0`);
+            return {
+                deletedCount,
+                remainingCount: 0
+            };
+        }
+    }
+
+    const remainingKeys = await collectMainImagePreviewKeys(page);
+    logger.info(`抖店商品主图清理结束: deleted=${deletedCount}, remaining=${remainingKeys.length}`);
+    return {
+        deletedCount,
+        remainingCount: remainingKeys.length
+    };
 }
 
 async function triggerHover(page, selector, mode, logPrefix) {
@@ -478,6 +1106,19 @@ export async function publishToDoudian(publishInfo = {}) {
             startIndex: 0,
             uploadedPaths: []
         };
+        let mainImageClearResult = {
+            deletedCount: 0,
+            remainingCount: 0
+        };
+
+        if (mainImageActionReady && targetImages.length > 0) {
+            try {
+                mainImageClearResult = await clearMainImages(page, hoverMode);
+                await page.waitForTimeout(500);
+            } catch (error) {
+                logger.warn(`抖店商品主图清理失败: ${error?.message || error}`);
+            }
+        }
 
         if (targetImages.length > 0) {
             const preparedImages = await prepareImages(targetImages, imageManager);
@@ -780,6 +1421,8 @@ export async function publishToDoudian(publishInfo = {}) {
                 startIndex: uploadResult.startIndex,
                 uploadedPaths: uploadResult.uploadedPaths.map(toUserFriendlyPath),
                 uploadedNames: uploadResult.uploadedPaths.map(getPathFileName),
+                mainImageDeletedCount: mainImageClearResult.deletedCount,
+                mainImageRemainingCount: mainImageClearResult.remainingCount,
                 titleFilled,
                 titleValue: titleFilled ? title : '',
                 mainImageActionReady,
