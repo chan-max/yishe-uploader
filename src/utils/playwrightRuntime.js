@@ -44,19 +44,13 @@ export function getAppDir() {
     return path.resolve(__dirname, '../..');
 }
 
-export function getBundledPlaywrightBrowsersDir() {
-    const explicitDir = normalizeDir(
-        process.env.YISHE_PLAYWRIGHT_BROWSERS_DIR || process.env.UPLOADER_PLAYWRIGHT_BROWSERS_DIR
-    );
-    if (explicitDir) {
-        return explicitDir;
-    }
-
-    return path.join(getAppDir(), 'pw-browsers');
-}
-
 export function initBundledPlaywrightEnv() {
-    const explicitBrowsersPath = normalizeDir(process.env.PLAYWRIGHT_BROWSERS_PATH);
+    // 兼容旧命名，但不再自动推断程序目录旁的 pw-browsers。
+    const explicitBrowsersPath = normalizeDir(
+        process.env.PLAYWRIGHT_BROWSERS_PATH
+        || process.env.YISHE_PLAYWRIGHT_BROWSERS_DIR
+        || process.env.UPLOADER_PLAYWRIGHT_BROWSERS_DIR
+    );
     if (explicitBrowsersPath) {
         process.env.PLAYWRIGHT_BROWSERS_PATH = explicitBrowsersPath;
         return {
@@ -64,19 +58,6 @@ export function initBundledPlaywrightEnv() {
             exists: hasPlaywrightBrowserPayload(explicitBrowsersPath),
             source: 'env',
             usingBundledPath: false,
-        };
-    }
-
-    const bundledBrowsersPath = getBundledPlaywrightBrowsersDir();
-    const hasBundledBrowsers = hasPlaywrightBrowserPayload(bundledBrowsersPath);
-
-    if (hasBundledBrowsers || isPackagedRuntime()) {
-        process.env.PLAYWRIGHT_BROWSERS_PATH = bundledBrowsersPath;
-        return {
-            browsersPath: bundledBrowsersPath,
-            exists: hasBundledBrowsers,
-            source: hasBundledBrowsers ? 'bundled' : 'expected-bundled',
-            usingBundledPath: true,
         };
     }
 

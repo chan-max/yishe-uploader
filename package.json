@@ -1,6 +1,6 @@
 {
     "name": "yishe-auto-browser",
-    "version": "2.0.203",
+    "version": "2.0.209",
     "description": "Yishe Auto Browser - Browser automation API for auto-publish and related operations",
     "main": "src/index.js",
     "type": "module",
@@ -9,9 +9,7 @@
         "dev:no-watch": "npm run web:build && node src/api/server.js",
         "web:build": "vite build --config web/vite.config.js",
         "ecom:smoke": "node scripts/ecom-smoke.js",
-        "build:exe": "node scripts/build-exe.js",
-        "build:installer": "node scripts/build-installer.js",
-        "build:dist": "npm run build:exe && npm run build:installer"
+        "build:exe": "node scripts/build-exe.js"
     },
     "keywords": [
         "social-media",

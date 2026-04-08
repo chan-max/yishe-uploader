@@ -258,11 +258,29 @@ const profileForm = reactive({
 const profileItems = computed(() => Array.isArray(profilesState.value?.items) ? profilesState.value.items : [])
 const profileInstanceMap = computed(() => {
   const instances = Array.isArray(browserStatus.value?.instances) ? browserStatus.value.instances : []
-  return new Map(
+  const map = new Map(
     instances
       .map((item) => [String(item?.profileId || '').trim(), item])
       .filter(([profileId]) => !!profileId)
   )
+
+  const connection = browserStatus.value?.connection || null
+  const fallbackProfileId = String(connection?.profileId || connection?.activeProfileId || '').trim()
+  if (fallbackProfileId && !map.has(fallbackProfileId)) {
+    map.set(fallbackProfileId, {
+      profileId: fallbackProfileId,
+      hasInstance: !!browserStatus.value?.hasInstance,
+      isConnected: !!browserStatus.value?.isConnected,
+      connecting: !!browserStatus.value?.connecting,
+      pageCount: Number(browserStatus.value?.pageCount || 0),
+      lastActivity: browserStatus.value?.lastActivity || null,
+      lastError: browserStatus.value?.lastError || null,
+      browserVersion: connection?.browserVersion || '',
+      connection
+    })
+  }
+
+  return map
 })
 const profileRows = computed(() =>
   profileItems.value.map((item) => ({
@@ -329,7 +347,9 @@ function getProfileStatusHint(profile) {
   }
   if (instance.isConnected) {
     const versionText = instance.browserVersion || profile?.browserVersion || '未知版本'
-    return `Chromium ${versionText}`
+    const browserName = String(instance.connection?.browserName || '').trim().toLowerCase()
+    const browserLabel = browserName === 'chromium' ? 'Chromium' : 'Chrome'
+    return `${browserLabel} ${versionText}`
   }
   if (instance.connecting) {
     return '正在建立浏览器上下文'

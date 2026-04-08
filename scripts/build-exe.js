@@ -6,7 +6,6 @@
  * - web/dist
  * - node_modules/playwright
  * - node_modules/playwright-core
- * - pw-browsers（随包 Chromium）
  */
 
 import { execSync } from 'child_process';
@@ -35,12 +34,10 @@ const exePath = path.join(rootDir, outputName);
 const releaseDirName = isWin ? 'windows-x64' : isMac ? `mac-${arch}` : `${platform}-${arch}`;
 const releaseDir = path.join(releaseRootDir, releaseDirName);
 const releaseExecutablePath = path.join(releaseDir, outputName);
-const releaseBrowsersDir = path.join(releaseDir, 'pw-browsers');
 const releaseNodeModulesDir = path.join(releaseDir, 'node_modules');
 const releaseWebDistDir = path.join(releaseDir, 'web', 'dist');
 const playwrightPackageDir = path.join(rootDir, 'node_modules', 'playwright');
 const playwrightCorePackageDir = path.join(rootDir, 'node_modules', 'playwright-core');
-const playwrightCliPath = path.join(rootDir, 'node_modules', '.bin', isWin ? 'playwright.cmd' : 'playwright');
 const nexeCmd = path.join(rootDir, 'node_modules', '.bin', isWin ? 'nexe.cmd' : 'nexe');
 const forceBuild = ['1', 'true', 'yes'].includes(
     String(process.env.YISHE_NEXE_FORCE_BUILD || '').toLowerCase()
@@ -222,24 +219,9 @@ async function buildExecutable() {
 function stagePlaywrightRuntime() {
     assertExists(playwrightPackageDir, 'playwright 运行时目录');
     assertExists(playwrightCorePackageDir, 'playwright-core 运行时目录');
-    assertExists(playwrightCliPath, 'playwright CLI');
 
     copyDir(playwrightPackageDir, path.join(releaseNodeModulesDir, 'playwright'));
     copyDir(playwrightCorePackageDir, path.join(releaseNodeModulesDir, 'playwright-core'));
-}
-
-function installBundledChromium() {
-    ensureDir(releaseBrowsersDir);
-    console.log(`⬇️ 安装 Playwright Chromium 到随包目录: ${releaseBrowsersDir}`);
-
-    execSync(`"${playwrightCliPath}" install chromium`, {
-        cwd: rootDir,
-        stdio: 'inherit',
-        env: {
-            ...process.env,
-            PLAYWRIGHT_BROWSERS_PATH: releaseBrowsersDir,
-        },
-    });
 }
 
 function stageReleaseBundle() {
@@ -255,7 +237,6 @@ function stageReleaseBundle() {
 
     copyDir(path.join(rootDir, 'web', 'dist'), releaseWebDistDir);
     stagePlaywrightRuntime();
-    installBundledChromium();
 }
 
 console.log(`🚀 开始构建 ${isWin ? 'Windows EXE' : isMac ? 'macOS' : '通用'} 可执行文件与发布目录...\n`);
@@ -309,8 +290,7 @@ try {
 
 console.log('🎉 构建流程全部完成!');
 console.log(`📍 发布目录: ${releaseDir}`);
-console.log(`📍 发布浏览器目录: ${releaseBrowsersDir}`);
 console.log('\n⚠️ 发布说明:');
 console.log('   1. 给用户分发或制作安装包时，请使用 release 目录中的完整内容，而不是单独的 exe');
-console.log('   2. 目标机器不需要再手动执行 playwright install');
-console.log('   3. Windows 包请在 Windows 构建，macOS 包请在 macOS 构建，因为随包 Chromium 是平台相关的');
+console.log('   2. 当前安装包不再附带浏览器，目标机器需已安装本地 Chrome');
+console.log('   3. Windows 包请在 Windows 构建，macOS 包请在 macOS 构建');

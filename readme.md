@@ -5,7 +5,7 @@
 ## 项目定位
 
 - 提供**浏览器自动化**相关的 HTTP API 接口
-- 支持浏览器连接与管理（本地 Chrome 持久化模式、CDP 模式、内置 Playwright Chromium 兼容模式）
+- 支持浏览器连接与管理（本地 Chrome 持久化模式、CDP 模式）
 - 支持多平台内容发布（抖音、快手、小红书、微博等）
 - 面向需要自动化操作的场景，可与其他系统集成
 
@@ -25,7 +25,7 @@
 ### 环境要求
 
 - Node.js >= 18.0.0
-- Chrome/Chromium 浏览器
+- 本地 Chrome 浏览器
 
 ### 安装
 
@@ -67,9 +67,8 @@ GitHub Release 现在默认提供两类最终安装产物：
 - 应用可执行文件
 - 前端 `web/dist`
 - `playwright` / `playwright-core`
-- 随包 `Chromium`
 
-也就是说，用户安装后不需要再手动执行 `playwright install`。
+它们**不再附带浏览器二进制**，运行时默认使用目标机器已安装的本地 Chrome，也不需要额外执行 `playwright install`。
 
 ### 构建发布目录与安装包
 
@@ -164,7 +163,7 @@ yishe-auto-browser/
 
 ### 浏览器配置
 
-系统支持三种浏览器连接模式：
+系统支持两种浏览器连接模式：
 
 1. **持久化模式（默认）**: 使用本地 Chrome；传入 `profileId` 时，会优先绑定到多环境里该环境自己的用户数据目录
    ```bash
@@ -173,13 +172,7 @@ yishe-auto-browser/
    CHROME_PROFILE_DIR=Default
    ```
 
-2. **内置浏览器模式（兼容）**: 使用程序内置的 Playwright Chromium，并通过独立的用户数据目录复用登录状态
-   ```bash
-   BROWSER_MODE=bundled
-   BUNDLED_USER_DATA_DIR=/path/to/browser/user/data
-   ```
-
-3. **CDP 模式**: 连接已启动的 Chrome 实例
+2. **CDP 模式**: 连接已启动的 Chrome 实例
    ```bash
    BROWSER_MODE=cdp
    CDP_ENDPOINT=http://127.0.0.1:9222

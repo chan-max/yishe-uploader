@@ -5,8 +5,10 @@
  *
  * 支持两种模式（通过环境变量选择）：
  * - BROWSER_MODE=persistent (默认): launchPersistentContext 使用系统 Chrome，可绑定受管环境目录
- * - BROWSER_MODE=bundled: launchPersistentContext 使用 Playwright 内置 Chromium + 独立 user data dir
  * - BROWSER_MODE=cdp: connectOverCDP 连接已开启远程调试端口的 Chrome（需你用 --remote-debugging-port 启动）
+ *
+ * 兼容说明：
+ * - 旧的 bundled 模式已停用；若收到 bundled，会自动回退为 persistent。
  */
 
 import { spawn, exec } from 'child_process';
@@ -61,7 +63,7 @@ import {
 // 全局：Playwright Browser / BrowserContext
 let browserInstance = null;    // playwright Browser（cdp模式使用）
 let contextInstance = null;    // playwright BrowserContext（persistent/cdp 都会有）
-let currentUserDataDir = null; // 当前 user data dir（bundled/persistent）
+let currentUserDataDir = null; // 当前 user data dir（persistent）
 let currentProfileDir = null;
 let currentExecutablePath = null;
 let currentMode = null;
@@ -72,6 +74,7 @@ let currentManagedProfileId = null;
 let connectPromise = null;
 let lastConnectError = null;
 let currentBrowserOptions = {};
+let hasLoggedBundledModeFallback = false;
 const FOCUS_TRACKER_SCRIPT = `
 (() => {
   if (globalThis.__yisheFocusTrackerInstalled) {
@@ -184,13 +187,36 @@ function getCdpDefaultUserDataDir() {
     return path.resolve(getBrowserProfilesWorkspaceDir(), 'cdp-user-data');
 }
 
+function normalizeBrowserMode(value, { source = '浏览器模式' } = {}) {
+    const rawMode = String(value || '').trim().toLowerCase();
+    if (!rawMode) {
+        return 'persistent';
+    }
+
+    if (rawMode === 'bundled') {
+        if (!hasLoggedBundledModeFallback) {
+            logger.warn(`${source} 的 bundled 模式已停用，已自动改为 persistent，本地 Chrome 将被使用`);
+            hasLoggedBundledModeFallback = true;
+        }
+        return 'persistent';
+    }
+
+    if (rawMode === 'persistent' || rawMode === 'cdp') {
+        return rawMode;
+    }
+
+    logger.warn(`${source} 配置了未知值 "${rawMode}"，已自动回退为 persistent`);
+    return 'persistent';
+}
+
 function getBrowserMode() {
-    return (process.env.BROWSER_MODE || 'persistent').toLowerCase();
+    return normalizeBrowserMode(process.env.BROWSER_MODE, { source: '环境变量 BROWSER_MODE' });
 }
 
 function shouldUseManagedProfilePool(options = {}) {
-    const mode = String(options?.mode || getBrowserMode()).trim().toLowerCase() || 'persistent';
-    return mode === 'bundled';
+    // 当前版本已切回本地 Chrome，不再启用随包 Chromium 池。
+    void options;
+    return false;
 }
 
 function getHeadlessMode() {
@@ -212,39 +238,6 @@ function normalizePathLike(value) {
     } catch {
         return normalized;
     }
-}
-
-function resolveBundledProfileSelection(options = {}) {
-    const explicitProfileId = String(options.profileId || '').trim();
-    if (explicitProfileId) {
-        const profile = getBrowserProfile(explicitProfileId);
-        if (!profile) {
-            throw new Error(`指定环境不存在: ${explicitProfileId}`);
-        }
-        return {
-            profileId: profile.id,
-            userDataDir: profile.userDataDir,
-            profile,
-            source: 'profile',
-        };
-    }
-
-    const activeProfile = getActiveBrowserProfile() || ensureDefaultBrowserProfile();
-    if (activeProfile) {
-        return {
-            profileId: activeProfile.id,
-            userDataDir: activeProfile.userDataDir,
-            profile: activeProfile,
-            source: 'active-profile',
-        };
-    }
-
-    return {
-        profileId: null,
-        userDataDir: null,
-        profile: null,
-        source: 'missing-profile',
-    };
 }
 
 function resolvePersistentProfileSelection(options = {}) {
@@ -291,7 +284,7 @@ function resolvePersistentProfileSelection(options = {}) {
 }
 
 function resolveDesiredConnectionState(options = {}) {
-    const mode = String(options.mode || getBrowserMode()).trim().toLowerCase() || 'persistent';
+    const mode = normalizeBrowserMode(options.mode || getBrowserMode(), { source: '浏览器连接模式' });
     if (mode === 'cdp') {
         return {
             mode,
@@ -299,22 +292,13 @@ function resolveDesiredConnectionState(options = {}) {
         };
     }
 
-    if (mode === 'persistent') {
-        const persistentSelection = resolvePersistentProfileSelection(options);
-        return {
-            mode,
-            userDataDir: normalizePathLike(persistentSelection.userDataDir),
-            profileId: persistentSelection.profileId || null,
-            profileDir: String(options.chromeProfileDir || process.env.CHROME_PROFILE_DIR || 'Default').trim() || 'Default',
-            executablePath: normalizePathLike(options.chromeExecutablePath || process.env.CHROME_EXECUTABLE_PATH || getDefaultExecutablePath()),
-        };
-    }
-
-    const bundledSelection = resolveBundledProfileSelection(options);
+    const persistentSelection = resolvePersistentProfileSelection(options);
     return {
         mode,
-        userDataDir: normalizePathLike(bundledSelection.userDataDir),
-        profileId: bundledSelection.profileId || null,
+        userDataDir: normalizePathLike(persistentSelection.userDataDir),
+        profileId: persistentSelection.profileId || null,
+        profileDir: String(options.chromeProfileDir || process.env.CHROME_PROFILE_DIR || 'Default').trim() || 'Default',
+        executablePath: normalizePathLike(options.chromeExecutablePath || process.env.CHROME_EXECUTABLE_PATH || getDefaultExecutablePath()),
     };
 }
 
@@ -739,11 +723,15 @@ export async function getOrCreateBrowser(options = {}) {
 
     // Only update options if provided; otherwise keep using the successful options from before
     if (options && Object.keys(options).length > 0) {
-        currentBrowserOptions = options;
+        currentBrowserOptions = {
+            ...options,
+            mode: normalizeBrowserMode(options.mode || getBrowserMode(), { source: '浏览器连接模式' }),
+        };
     } else if (!currentBrowserOptions || Object.keys(currentBrowserOptions).length === 0) {
         // Fallback or initialization if absolutely no options exist
-        currentBrowserOptions = options || {};
+        currentBrowserOptions = { mode: getBrowserMode() };
     }
+    options = { ...currentBrowserOptions };
 
     // 并发保护：多次点击只跑一次连接
     if (connectPromise) {
@@ -764,7 +752,7 @@ export async function getOrCreateBrowser(options = {}) {
         return existingBrowser;
     }
 
-    const resolvedMode = String(options.mode || getBrowserMode()).trim().toLowerCase() || 'persistent';
+    const resolvedMode = normalizeBrowserMode(options.mode || getBrowserMode(), { source: '浏览器连接模式' });
 
     // 冷启动场景：仅在显式请求 CDP 模式时尝试接管现有 CDP 浏览器
     const requestedMode = String(options.mode || '').trim().toLowerCase();
@@ -788,7 +776,7 @@ export async function getOrCreateBrowser(options = {}) {
     try {
         const mode = resolvedMode;
         currentMode = mode;
-        currentBrowserName = mode === 'bundled' ? 'chromium' : 'chrome';
+        currentBrowserName = 'chrome';
         currentBrowserVersion = null;
         lastConnectError = null;
 
@@ -848,66 +836,6 @@ export async function getOrCreateBrowser(options = {}) {
                 currentManagedProfileId = null;
                 currentBrowserVersion = resolveActiveBrowserVersion();
 
-                return;
-            }
-
-            if (mode === 'bundled') {
-                const bundledSelection = resolveBundledProfileSelection(options);
-                const bundledUserDataDir = bundledSelection.userDataDir
-                    || process.env.BUNDLED_USER_DATA_DIR
-                    || getCdpDefaultUserDataDir();
-
-                currentBrowserName = 'chromium';
-                currentUserDataDir = bundledUserDataDir;
-                currentProfileDir = null;
-                currentExecutablePath = null;
-                currentCdpEndpoint = null;
-                currentManagedProfileId = bundledSelection.profileId || null;
-                if (currentManagedProfileId) {
-                    switchBrowserProfile(currentManagedProfileId);
-                }
-
-                logger.info(`使用 bundled 模式启动 (Playwright 内置 Chromium, ${modeStr})`);
-                logger.info('user data dir:', bundledUserDataDir);
-                if (currentManagedProfileId) {
-                    logger.info('profile id:', currentManagedProfileId);
-                }
-
-                try {
-                    contextInstance = await withTimeout(
-                        chromium.launchPersistentContext(
-                            bundledUserDataDir,
-                            buildPersistentLaunchOptions({ headless })
-                        ),
-                        60000,
-                        'launchPersistentContext'
-                    );
-                } catch (e) {
-                    const browsersPathHint = playwrightRuntime.browsersPath
-                        ? ` 当前浏览器目录: ${playwrightRuntime.browsersPath}.`
-                        : '';
-                    const distributionHint = playwrightRuntime.usingBundledPath
-                        ? '请确认发布包中的 pw-browsers 目录已随程序完整分发。'
-                        : '请确认 Playwright Chromium 已安装，或显式设置 PLAYWRIGHT_BROWSERS_PATH。';
-                    throw new Error(
-                        `启动内置 Chromium 失败。${distributionHint}${browsersPathHint} 请确认 userDataDir 可写。原错误: ${e.message}`
-                    );
-                }
-
-                await installFocusTracker(contextInstance);
-                await setBrowserWindowMaximized(contextInstance, headless);
-
-                browserStatus.isInitialized = true;
-                browserStatus.isConnected = true;
-                browserStatus.lastActivity = Date.now();
-                browserStatus.pageCount = (await getVisiblePagesDetailed()).length;
-                currentBrowserVersion = resolveActiveBrowserVersion();
-                if (currentManagedProfileId) {
-                    markBrowserProfileUsed(currentManagedProfileId, {
-                        browserVersion: currentBrowserVersion || '',
-                        lastUsedAt: new Date().toISOString(),
-                    });
-                }
                 return;
             }
 

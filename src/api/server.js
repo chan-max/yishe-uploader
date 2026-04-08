@@ -710,11 +710,11 @@ class ApiServer {
                                     schema: {
                                         type: 'object',
                                         properties: {
-                                            mode: { type: 'string', enum: ['bundled', 'persistent', 'cdp'], description: '浏览器来源。persistent=系统 Chrome（默认，支持绑定受管环境目录），bundled=程序内置 Chromium，cdp=连接现有调试端口 Chrome' },
+                                            mode: { type: 'string', enum: ['persistent', 'cdp'], description: '浏览器来源。persistent=系统 Chrome（默认，支持绑定受管环境目录），cdp=连接现有调试端口 Chrome' },
                                             cdpEndpoint: { type: 'string', description: '如 http://127.0.0.1:9222' },
                                             port: { type: 'number', description: 'CDP 调试端口，默认 9222（仅 cdp 模式需要）' },
                                             cdpUserDataDir: { type: 'string', description: '兼容字段：浏览器 User Data 目录' },
-                                            userDataDir: { type: 'string', description: '浏览器 User Data 目录；persistent/bundled 模式下均可使用，传 profileId 时会优先绑定到受管环境目录' },
+                                            userDataDir: { type: 'string', description: '浏览器 User Data 目录；persistent 模式下可使用，传 profileId 时会优先绑定到受管环境目录' },
                                             headless: { type: 'boolean', description: '是否无头模式，默认false（可通过HEADLESS环境变量设置）' }
                                         }
                                     }
@@ -1742,9 +1742,14 @@ class ApiServer {
         try {
             const body = await this.parseBody(req).catch(() => ({})) || {};
             const requestedMode = String(body?.mode || '').trim().toLowerCase();
-            const mode = requestedMode || 'persistent';
+            const mode = requestedMode === 'cdp' ? 'cdp' : 'persistent';
             const headless = body.headless === true ? true : (body.headless === false ? false : undefined);
             const profileId = String(body?.profileId || '').trim() || undefined;
+            if (requestedMode === 'bundled') {
+                logger.warn('API connect 收到已停用的 bundled 模式请求，已自动改为 persistent，本地 Chrome 将被使用');
+            } else if (requestedMode && !['persistent', 'cdp'].includes(requestedMode)) {
+                logger.warn(`API connect 收到未知浏览器模式 "${requestedMode}"，已自动改为 persistent`);
+            }
             await checkAndReconnectBrowser({ reconnect: false, profileId });
             const statusBefore = await getBrowserStatus({ profileId });
             if (statusBefore.hasInstance && statusBefore.isConnected && Object.keys(body).length === 0) {
@@ -1785,14 +1790,8 @@ class ApiServer {
                     connectOptions.chromeUserDataDir = explicitUserDataDir;
                 }
                 await getOrCreateBrowser(connectOptions);
-            } else {
-                await getOrCreateBrowser({
-                    mode: 'bundled',
-                    profileId,
-                    headless,
-                });
             }
-            const status = await getBrowserStatus();
+            const status = await getBrowserStatus({ profileId });
             this.sendResponse(res, 200, { success: true, data: status });
         } catch (error) {
             this.sendResponse(res, 500, { success: false, message: error.message });
@@ -1982,7 +1981,7 @@ class ApiServer {
             const body = await this.parseBody(req).catch(() => ({})) || {};
             const profileId = String(body?.profileId || '').trim() || undefined;
             await closeBrowser({ profileId });
-            const status = await getBrowserStatus();
+            const status = await getBrowserStatus({ profileId });
             this.sendResponse(res, 200, { success: true, data: status });
         } catch (error) {
             this.sendResponse(res, 500, { success: false, message: error.message });
