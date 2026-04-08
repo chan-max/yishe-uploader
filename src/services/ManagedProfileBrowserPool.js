@@ -332,7 +332,16 @@ function getHeadlessMode() {
 function buildPersistentLaunchOptions({ headless = false, executablePath = null }) {
   const launchOptions = {
     headless,
-    args: ["--no-first-run", "--no-default-browser-check", ...(headless ? [] : ["--start-maximized"])],
+    args: [
+      "--no-first-run",
+      "--no-default-browser-check",
+      "--disable-dev-shm-usage",
+      "--lang=zh-CN",
+      ...(headless ? [] : ["--start-maximized"]),
+    ],
+    locale: "zh-CN",
+    chromiumSandbox: true,
+    ignoreDefaultArgs: ["--enable-automation"],
     ignoreHTTPSErrors: true,
   };
 
@@ -342,6 +351,19 @@ function buildPersistentLaunchOptions({ headless = false, executablePath = null 
 
   launchOptions.viewport = headless ? { width: 1920, height: 1080 } : null;
   return launchOptions;
+}
+
+function withTimeout(promise, ms, label) {
+  let timer = null;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timeout after ${ms}ms`)), ms);
+  });
+  return Promise.race([
+    promise.finally(() => {
+      if (timer) clearTimeout(timer);
+    }),
+    timeout,
+  ]);
 }
 
 async function setBrowserWindowMaximized(context, headless = false) {
@@ -517,6 +539,7 @@ async function getSessionPages(session) {
     return [];
   }
 
+  const probeTimeoutMs = 1500;
   const pages = session.contextInstance.pages().filter((page) => {
     try {
       return page && !(typeof page.isClosed === "function" && page.isClosed());
@@ -531,13 +554,16 @@ async function getSessionPages(session) {
       let url = "";
       let isActive = index === 0;
       try {
-        title = await page.title().catch(() => "");
+        title = await withTimeout(page.title().catch(() => ""), probeTimeoutMs, "page.title").catch(() => "");
         url = page.url();
-        isActive = await page
-          .evaluate(() => {
+        isActive = await withTimeout(
+          page.evaluate(() => {
             const state = globalThis.__yisheFocusTracker || {};
             return document.visibilityState === "visible" || state.hasFocus === true;
-          })
+          }),
+          probeTimeoutMs,
+          "page.isActive",
+        )
           .catch(() => index === 0);
       } catch {
         // ignore

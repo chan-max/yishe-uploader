@@ -127,7 +127,7 @@ if (__nexe_patches.isNexe) {
 
 function patchBundledRuntime() {
     let bundleCode = fs.readFileSync(bundlePath, 'utf8');
-    const replacements = [
+    const stringReplacements = [
         {
             from: 'require.resolve("../../../package.json")',
             to: 'process.execPath',
@@ -135,12 +135,22 @@ function patchBundledRuntime() {
         },
     ];
 
-    for (const replacement of replacements) {
+    for (const replacement of stringReplacements) {
         if (!bundleCode.includes(replacement.from)) {
             console.warn(`⚠️ 未找到需要补丁的片段: ${replacement.label}`);
             continue;
         }
         bundleCode = bundleCode.split(replacement.from).join(replacement.to);
+    }
+
+    const cloneDeepUtilsPattern = /require\("kind-of", "typeOf"\);\s*require_for_own\(\);\s*require = fn;\s*module2\.exports = (utils\d*);/;
+    if (cloneDeepUtilsPattern.test(bundleCode)) {
+        bundleCode = bundleCode.replace(
+            cloneDeepUtilsPattern,
+            'require("kind-of", "typeOf");\n    $1.forOwn = require_for_own();\n    require = fn;\n    module2.exports = $1;'
+        );
+    } else {
+        console.warn('⚠️ 未找到需要补丁的片段: clone-deep lazy-cache forOwn alias');
     }
 
     fs.writeFileSync(bundlePath, bundleCode);

@@ -3,7 +3,6 @@
  */
 
 import { logger } from '../utils/logger.js';
-import { stealthScript } from '../utils/stealthScript.js';
 
 /**
  * 页面操作器类
@@ -34,31 +33,8 @@ export class PageOperator {
     /**
      * 设置反检测脚本
      */
-    async setupAntiDetection(page) {
-        return
-        // 注入增强型隐身脚本
-        await page.addInitScript(stealthScript);
-
-        logger.info('已注入增强型反检测脚本');
-
-        // 设置视口大小
-        await page.setViewportSize({ width: 1920, height: 1080 });
-
-        // 设置额外的请求头
-        await page.setExtraHTTPHeaders({
-            'Accept-Language': 'zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-            'Cache-Control': 'max-age=0',
-            'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-            'Sec-Ch-Ua-Mobile': '?0',
-            'Sec-Ch-Ua-Platform': '"Windows"',
-            'Sec-Fetch-Dest': 'document',
-            'Sec-Fetch-Mode': 'navigate',
-            'Sec-Fetch-Site': 'none',
-            'Sec-Fetch-User': '?1',
-            'Upgrade-Insecure-Requests': '1'
-        });
+    async setupAntiDetection(_page) {
+        logger.info('已启用 playwright-extra stealth 插件，跳过自定义页面补丁');
     }
 
     /**

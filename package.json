@@ -1,6 +1,6 @@
 {
     "name": "yishe-auto-browser",
-    "version": "2.0.211",
+    "version": "2.0.212",
     "description": "Yishe Auto Browser - Browser automation API for auto-publish and related operations",
     "main": "src/index.js",
     "type": "module",
@@ -35,6 +35,8 @@
         "ora": "^8.0.1",
         "pinia": "^2.1.7",
         "playwright-core": "^1.55.0",
+        "playwright-extra": "^4.3.6",
+        "puppeteer-extra-plugin-stealth": "^2.11.2",
         "vue": "^3.4.0",
         "vue-router": "^4.2.5"
     },

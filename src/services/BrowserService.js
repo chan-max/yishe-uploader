@@ -350,6 +350,8 @@ function buildPersistentLaunchOptions({ profileDir, executablePath, headless = f
     const args = [
         '--no-first-run',
         '--no-default-browser-check',
+        '--disable-dev-shm-usage',
+        '--lang=zh-CN',
         ...(profileDir ? [`--profile-directory=${profileDir}`] : []),
         ...(!headless ? ['--start-maximized'] : [])
     ];
@@ -358,6 +360,9 @@ function buildPersistentLaunchOptions({ profileDir, executablePath, headless = f
         headless: headless,
         executablePath: executablePath,
         args,
+        locale: 'zh-CN',
+        chromiumSandbox: true,
+        ignoreDefaultArgs: ['--enable-automation'],
         ignoreHTTPSErrors: true
     };
     
@@ -548,11 +553,14 @@ async function newPageWithReconnect(options = {}) {
                     contextOptions.viewport = { width: 1920, height: 1080 };
                 }
                 contextInstance = ctxs[0] || await browserInstance.newContext(contextOptions);
+                await installBrowserContextPatches(contextInstance);
             } else {
                 throw new Error('No browser context available');
             }
         }
-        return await contextInstance.newPage();
+        const page = await contextInstance.newPage();
+        await installFocusTrackerForPage(page);
+        return page;
     } catch (err) {
         if (!isBrowserClosedError(err)) throw err;
         logger.warn('检测到浏览器/上下文已关闭，清除引用并尝试重新连接:', err.message);
@@ -564,7 +572,9 @@ async function newPageWithReconnect(options = {}) {
         browserStatus.pageCount = 0;
         await getOrCreateBrowser(currentBrowserOptions);
         if (!contextInstance) throw new Error('重新连接后仍无法获取浏览器上下文');
-        return await contextInstance.newPage();
+        const page = await contextInstance.newPage();
+        await installFocusTrackerForPage(page);
+        return page;
     }
 }
 
@@ -617,6 +627,7 @@ export function launchWithDebugPort({ port = 9222, headless = null, userDataDir 
         `--user-data-dir=${finalUserDataDir}`,
         '--no-first-run',
         '--no-default-browser-check',
+        '--lang=zh-CN',
         '--disable-background-timer-throttling',
         '--disable-backgrounding-occluded-windows',
         '--disable-renderer-backgrounding',
@@ -816,7 +827,7 @@ export async function getOrCreateBrowser(options = {}) {
                     contextOptions.viewport = { width: 1920, height: 1080 };
                 }
                 contextInstance = browserInstance.contexts()[0] || await browserInstance.newContext(contextOptions);
-                await installFocusTracker(contextInstance);
+                await installBrowserContextPatches(contextInstance);
                 await setBrowserWindowMaximized(contextInstance, headless);
 
                 browserStatus.isInitialized = true;
@@ -876,7 +887,7 @@ export async function getOrCreateBrowser(options = {}) {
                 );
             }
 
-            await installFocusTracker(contextInstance);
+            await installBrowserContextPatches(contextInstance);
             await setBrowserWindowMaximized(contextInstance, headless);
 
             browserStatus.isInitialized = true;
@@ -1086,6 +1097,12 @@ async function installFocusTracker(context) {
     await Promise.all(pages.map((page) => installFocusTrackerForPage(page)));
 }
 
+async function installBrowserContextPatches(context) {
+    if (!context) return;
+
+    await installFocusTracker(context);
+}
+
 function isUserVisiblePage(page, { title = '', url = '' } = {}) {
     if (!page) return false;
     if (typeof page.isClosed === 'function' && page.isClosed()) return false;
@@ -1106,12 +1123,13 @@ async function getVisiblePagesDetailed() {
     const pages = getPagesInternal();
     const visiblePages = [];
     const seenPlaceholderKeys = new Set();
+    const probeTimeoutMs = 1500;
 
     for (const page of pages) {
         let title = '';
         let url = '';
         try {
-            title = await page.title().catch(() => '');
+            title = await withTimeout(page.title().catch(() => ''), probeTimeoutMs, 'page.title').catch(() => '');
             url = page.url();
         } catch {
             // ignore
@@ -1151,23 +1169,27 @@ async function getVisiblePagesDetailed() {
             updatedAt: 0
         };
         try {
-            focusState = await page.evaluate((trackerScript) => {
-                try {
-                    globalThis.eval(trackerScript);
-                } catch {
-                    // ignore
-                }
+            focusState = await withTimeout(
+                page.evaluate((trackerScript) => {
+                    try {
+                        globalThis.eval(trackerScript);
+                    } catch {
+                        // ignore
+                    }
 
-                const tracker = globalThis.__yisheFocusTracker || {};
-                return {
-                    hasFocus: typeof document?.hasFocus === 'function' ? document.hasFocus() : false,
-                    visibilityState: document?.visibilityState || 'unknown',
-                    lastFocusAt: Number(tracker.lastFocusAt || 0),
-                    lastBlurAt: Number(tracker.lastBlurAt || 0),
-                    lastVisibleAt: Number(tracker.lastVisibleAt || 0),
-                    updatedAt: Number(tracker.updatedAt || 0)
-                };
-            }, FOCUS_TRACKER_SCRIPT);
+                    const tracker = globalThis.__yisheFocusTracker || {};
+                    return {
+                        hasFocus: typeof document?.hasFocus === 'function' ? document.hasFocus() : false,
+                        visibilityState: document?.visibilityState || 'unknown',
+                        lastFocusAt: Number(tracker.lastFocusAt || 0),
+                        lastBlurAt: Number(tracker.lastBlurAt || 0),
+                        lastVisibleAt: Number(tracker.lastVisibleAt || 0),
+                        updatedAt: Number(tracker.updatedAt || 0)
+                    };
+                }, FOCUS_TRACKER_SCRIPT),
+                probeTimeoutMs,
+                'page.focusState'
+            );
         } catch {
             // ignore page state probing failures during navigation
         }
