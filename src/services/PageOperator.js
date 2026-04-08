@@ -34,7 +34,7 @@ export class PageOperator {
      * 设置反检测脚本
      */
     async setupAntiDetection(_page) {
-        logger.info('已启用 playwright-extra stealth 插件，跳过自定义页面补丁');
+        logger.info('当前使用本地 Chrome/CDP 连接，不额外注入 stealth 补丁');
     }
 
     /**

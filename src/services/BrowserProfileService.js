@@ -6,6 +6,8 @@ const REGISTRY_FILENAME = 'profiles.json';
 const PROFILE_FILENAME = 'profile.json';
 const PROFILE_DIRNAME = 'browser-profiles';
 const USER_DATA_DIRNAME = 'user-data';
+const DEBUG_PORT_BASE = Number(process.env.BROWSER_PROFILE_DEBUG_PORT_BASE) || 9333;
+const DEBUG_PORT_MAX = Number(process.env.BROWSER_PROFILE_DEBUG_PORT_MAX) || 9999;
 
 function getDefaultWorkspaceDir() {
     const envDir = process.env.YISHE_BROWSER_PROFILE_WORKSPACE_DIR || process.env.BROWSER_PROFILE_WORKSPACE_DIR;
@@ -80,6 +82,46 @@ function normalizePlatforms(value) {
     return Array.from(new Set(value.map((item) => String(item || '').trim()).filter(Boolean)));
 }
 
+function normalizeDebugPort(value) {
+    const port = Number(value);
+    if (!Number.isInteger(port) || port < 1024 || port > 65535) {
+        return null;
+    }
+    return port;
+}
+
+function collectUsedDebugPorts(registry, { excludeProfileId = '' } = {}) {
+    const usedPorts = new Set();
+    const normalizedExcludeProfileId = normalizeProfileId(excludeProfileId);
+    const items = Array.isArray(registry?.items) ? registry.items : [];
+
+    for (const item of items) {
+        const profileId = normalizeProfileId(item?.id);
+        if (!profileId || profileId === normalizedExcludeProfileId) {
+            continue;
+        }
+
+        const record = loadProfileRecord(profileId);
+        const debugPort = normalizeDebugPort(record?.debugPort);
+        if (debugPort) {
+            usedPorts.add(debugPort);
+        }
+    }
+
+    return usedPorts;
+}
+
+function allocateDebugPort(registry, options = {}) {
+    const usedPorts = collectUsedDebugPorts(registry, options);
+    for (let port = DEBUG_PORT_BASE; port <= DEBUG_PORT_MAX; port += 1) {
+        if (!usedPorts.has(port)) {
+            return port;
+        }
+    }
+
+    throw new Error(`没有可用的浏览器调试端口，请检查 ${DEBUG_PORT_BASE}-${DEBUG_PORT_MAX} 端口段`);
+}
+
 function buildProfileRecord(profileId, payload = {}) {
     const now = new Date().toISOString();
     return {
@@ -88,6 +130,7 @@ function buildProfileRecord(profileId, payload = {}) {
         remark: String(payload.remark || '').trim() || '',
         account: String(payload.account || '').trim() || '',
         platforms: normalizePlatforms(payload.platforms),
+        debugPort: normalizeDebugPort(payload.debugPort),
         browserVersion: String(payload.browserVersion || '').trim() || '',
         loginSummary: payload.loginSummary && typeof payload.loginSummary === 'object'
             ? payload.loginSummary
@@ -142,6 +185,23 @@ function saveProfileRecord(profileId, payload) {
     fs.writeJsonSync(getProfileMetaPath(profileId), buildProfileRecord(profileId, payload), { spaces: 2 });
 }
 
+function ensureProfileDebugPort(profileId, profile, registry) {
+    const debugPort = normalizeDebugPort(profile?.debugPort);
+    if (debugPort) {
+        return {
+            ...profile,
+            debugPort,
+        };
+    }
+
+    const nextRecord = buildProfileRecord(profileId, {
+        ...profile,
+        debugPort: allocateDebugPort(registry, { excludeProfileId: profileId }),
+    });
+    saveProfileRecord(profileId, nextRecord);
+    return nextRecord;
+}
+
 function summarizeProfile(profile, registry) {
     const profileId = normalizeProfileId(profile?.id);
     const userDataDir = getBrowserProfileUserDataDir(profileId);
@@ -152,6 +212,7 @@ function summarizeProfile(profile, registry) {
         remark: String(profile?.remark || '').trim() || '',
         account: String(profile?.account || '').trim() || '',
         platforms: normalizePlatforms(profile?.platforms),
+        debugPort: normalizeDebugPort(profile?.debugPort),
         browserVersion: String(profile?.browserVersion || '').trim() || '',
         loginSummary: profile?.loginSummary && typeof profile.loginSummary === 'object'
             ? profile.loginSummary
@@ -191,7 +252,10 @@ export function ensureBrowserProfilesWorkspace() {
 export function listBrowserProfiles() {
     const registry = loadRegistry();
     const profiles = registry.items
-        .map((item) => loadProfileRecord(item.id) || buildProfileRecord(item.id, item))
+        .map((item) => {
+            const record = loadProfileRecord(item.id) || buildProfileRecord(item.id, item);
+            return ensureProfileDebugPort(item.id, record, registry);
+        })
         .map((item) => summarizeProfile(item, registry));
 
     return {
@@ -212,7 +276,7 @@ export function getBrowserProfile(profileId) {
     if (!record) {
         return null;
     }
-    return summarizeProfile(record, registry);
+    return summarizeProfile(ensureProfileDebugPort(normalizedId, record, registry), registry);
 }
 
 export function createBrowserProfile(payload = {}) {
@@ -226,8 +290,14 @@ export function createBrowserProfile(payload = {}) {
     }
 
     const now = new Date().toISOString();
+    const requestedDebugPort = normalizeDebugPort(payload.debugPort);
+    const debugPort = requestedDebugPort || allocateDebugPort(registry);
+    if (collectUsedDebugPorts(registry).has(debugPort)) {
+        throw new Error(`浏览器调试端口已被其他环境占用: ${debugPort}`);
+    }
     const record = buildProfileRecord(profileId, {
         ...payload,
+        debugPort,
         createdAt: now,
         updatedAt: now,
     });
@@ -274,10 +344,19 @@ export function updateBrowserProfile(profileId, payload = {}) {
     }
 
     const registry = loadRegistry();
+    const hasDebugPortPatch = Object.prototype.hasOwnProperty.call(payload, 'debugPort');
+    const requestedDebugPort = hasDebugPortPatch
+        ? normalizeDebugPort(payload.debugPort)
+        : normalizeDebugPort(existing.debugPort);
+    const debugPort = requestedDebugPort || allocateDebugPort(registry, { excludeProfileId: normalizedId });
+    if (collectUsedDebugPorts(registry, { excludeProfileId: normalizedId }).has(debugPort)) {
+        throw new Error(`浏览器调试端口已被其他环境占用: ${debugPort}`);
+    }
     const nextRecord = buildProfileRecord(normalizedId, {
         ...existing,
         ...payload,
         id: normalizedId,
+        debugPort,
         updatedAt: new Date().toISOString(),
     });
     saveProfileRecord(normalizedId, nextRecord);

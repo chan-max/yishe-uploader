@@ -15,7 +15,7 @@
             环境根目录：{{ profilesState?.profilesRootDir || '-' }}
           </div>
           <div class="ui tiny text muted-text">
-            全局状态：{{ browserStatus?.hasInstance ? '已有浏览器实例' : '未连接' }}，默认使用本地 <code>Chrome</code> 并优先绑定当前环境目录
+            全局状态：{{ browserStatus?.hasInstance ? '已有浏览器实例' : '未连接' }}，默认使用本地 <code>Chrome</code>，每个环境绑定独立目录与独立端口
           </div>
         </div>
         <div class="segment-actions">
@@ -93,6 +93,7 @@
             <th>名称</th>
             <th>账号</th>
             <th>平台</th>
+            <th style="width: 96px;">端口</th>
             <th style="width: 170px;">浏览器状态</th>
             <th style="width: 90px;">页面</th>
             <th>数据目录</th>
@@ -102,7 +103,7 @@
         </thead>
         <tbody>
           <tr v-if="!profileRows.length">
-            <td colspan="9" class="empty-cell">还没有已管理环境，当前仍可直接使用默认目录模式。</td>
+            <td colspan="10" class="empty-cell">还没有已管理环境，当前仍可直接使用默认目录模式。</td>
           </tr>
           <tr v-for="item in profileRows" :key="item.id">
             <td>{{ item.id }}</td>
@@ -116,6 +117,10 @@
             </td>
             <td>{{ item.account || '-' }}</td>
             <td>{{ Array.isArray(item.platforms) && item.platforms.length ? item.platforms.join(', ') : '-' }}</td>
+            <td>
+              <code v-if="getProfilePort(item)">{{ getProfilePort(item) }}</code>
+              <span v-else>-</span>
+            </td>
             <td>
               <div class="runtime-state">
                 <span class="status-dot" :class="getProfileStatusClass(item)"></span>
@@ -337,24 +342,41 @@ function getProfileStatusText(profile) {
   return '未连接'
 }
 
+function getProfilePort(profile) {
+  const port = Number(
+    profile?.instance?.debugPort ||
+    profile?.instance?.connection?.debugPort ||
+    profile?.debugPort ||
+    0
+  )
+  return Number.isInteger(port) && port > 0 ? port : ''
+}
+
 function getProfileStatusHint(profile) {
   const instance = profile?.instance
+  const port = getProfilePort(profile)
+  const portText = port ? `端口 ${port}` : ''
   if (!instance) {
-    return profile?.browserVersion ? `最近版本：${profile.browserVersion}` : '浏览器窗口未打开'
+    if (profile?.browserVersion) {
+      return [portText, `最近版本：${profile.browserVersion}`].filter(Boolean).join(' · ')
+    }
+    return portText || '浏览器窗口未打开'
   }
   if (instance.lastError) {
-    return instance.lastError
+    return [portText, instance.lastError].filter(Boolean).join(' · ')
   }
   if (instance.isConnected) {
     const versionText = instance.browserVersion || profile?.browserVersion || '未知版本'
     const browserName = String(instance.connection?.browserName || '').trim().toLowerCase()
     const browserLabel = browserName === 'chromium' ? 'Chromium' : 'Chrome'
-    return `${browserLabel} ${versionText}`
+    return [portText, `${browserLabel} ${versionText}`].filter(Boolean).join(' · ')
   }
   if (instance.connecting) {
-    return '正在建立浏览器上下文'
+    return [portText, '正在建立浏览器上下文'].filter(Boolean).join(' · ')
   }
-  return instance.browserVersion || profile?.browserVersion || '浏览器窗口未打开'
+  return [portText, instance.browserVersion || profile?.browserVersion || '浏览器窗口未打开']
+    .filter(Boolean)
+    .join(' · ')
 }
 
 function normalizeProfileSelection() {
@@ -418,7 +440,7 @@ async function launchAndConnect(profileId = browserConfig.profileId) {
   setStatus('正在启动本地 Chrome 并连接...', 'info')
   try {
     const data = await connectBrowser({
-      mode: 'persistent',
+      mode: 'cdp',
       profileId: normalizedProfileId || undefined,
       headless: browserConfig.headless
     })
@@ -426,9 +448,13 @@ async function launchAndConnect(profileId = browserConfig.profileId) {
       throw new Error(data?.message || '连接失败')
     }
     browserStatus.value = data.data || null
-    await refreshProfiles()
+    await refreshAll(true)
+    const connectedProfile = profileRows.value.find((item) => item.id === normalizedProfileId) || null
+    const connectedPort = getProfilePort(connectedProfile) || getProfilePort({
+      instance: data.data?.instances?.find((item) => item?.profileId === normalizedProfileId)
+    })
     setStatus(
-      `本地 Chrome 已连接${browserConfig.headless ? '（无头）' : ''}${normalizedProfileId ? `，环境 ${normalizedProfileId}` : ''}`,
+      `本地 Chrome 已连接${browserConfig.headless ? '（无头）' : ''}${normalizedProfileId ? `，环境 ${normalizedProfileId}` : ''}${connectedPort ? `，端口 ${connectedPort}` : ''}`,
       'success'
     )
   } catch (error) {
@@ -450,7 +476,7 @@ async function handleCloseBrowser(profileId = browserConfig.profileId) {
       throw new Error(data?.message || '断开失败')
     }
     browserStatus.value = data.data || null
-    await refreshProfiles()
+    await refreshAll(true)
     setStatus(normalizedProfileId ? `环境 ${normalizedProfileId} 的浏览器已断开` : '浏览器已断开', 'success')
   } catch (error) {
     setStatus(error?.message || '断开浏览器失败', 'error')

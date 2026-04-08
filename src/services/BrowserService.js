@@ -213,9 +213,7 @@ function getBrowserMode() {
 }
 
 function shouldUseManagedProfilePool(options = {}) {
-    // 当前版本已切回本地 Chrome，不再启用随包 Chromium 池。
-    void options;
-    return false;
+    return !!String(options?.profileId || '').trim();
 }
 
 function getHeadlessMode() {
@@ -282,12 +280,53 @@ function resolvePersistentProfileSelection(options = {}) {
     };
 }
 
+function resolveCdpProfileSelection(options = {}) {
+    const explicitProfileId = String(options.profileId || '').trim();
+    if (explicitProfileId) {
+        const profile = getBrowserProfile(explicitProfileId);
+        if (!profile) {
+            throw new Error(`指定环境不存在: ${explicitProfileId}`);
+        }
+        return {
+            profileId: profile.id,
+            userDataDir: profile.userDataDir,
+            profile,
+            source: 'profile',
+        };
+    }
+
+    const explicitUserDataDir = normalizePathLike(
+        options.cdpUserDataDir ||
+        options.userDataDir ||
+        process.env.YISHE_AUTO_BROWSER_CDP_USER_DATA_DIR ||
+        process.env.UPLOADER_CDP_USER_DATA_DIR
+    );
+    if (explicitUserDataDir) {
+        return {
+            profileId: null,
+            userDataDir: explicitUserDataDir,
+            profile: null,
+            source: 'explicit-user-data',
+        };
+    }
+
+    return {
+        profileId: null,
+        userDataDir: getCdpDefaultUserDataDir(),
+        profile: null,
+        source: 'cdp-default',
+    };
+}
+
 function resolveDesiredConnectionState(options = {}) {
     const mode = normalizeBrowserMode(options.mode || getBrowserMode(), { source: '浏览器连接模式' });
     if (mode === 'cdp') {
+        const cdpSelection = resolveCdpProfileSelection(options);
         return {
             mode,
             cdpEndpoint: String(options.cdpEndpoint || process.env.CDP_ENDPOINT || 'http://127.0.0.1:9222').trim(),
+            userDataDir: normalizePathLike(cdpSelection.userDataDir),
+            profileId: cdpSelection.profileId || null,
         };
     }
 
@@ -332,7 +371,9 @@ async function shouldReconnectForOptions(options = {}) {
     }
 
     if (desired.mode === 'cdp') {
-        return desired.cdpEndpoint !== current.cdpEndpoint;
+        return desired.cdpEndpoint !== current.cdpEndpoint
+            || desired.userDataDir !== current.userDataDir
+            || (desired.profileId || null) !== (current.profileId || null);
     }
 
     if (desired.mode === 'persistent') {
@@ -350,8 +391,6 @@ function buildPersistentLaunchOptions({ profileDir, executablePath, headless = f
     const args = [
         '--no-first-run',
         '--no-default-browser-check',
-        '--disable-dev-shm-usage',
-        '--lang=zh-CN',
         ...(profileDir ? [`--profile-directory=${profileDir}`] : []),
         ...(!headless ? ['--start-maximized'] : [])
     ];
@@ -360,9 +399,6 @@ function buildPersistentLaunchOptions({ profileDir, executablePath, headless = f
         headless: headless,
         executablePath: executablePath,
         args,
-        locale: 'zh-CN',
-        chromiumSandbox: true,
-        ignoreDefaultArgs: ['--enable-automation'],
         ignoreHTTPSErrors: true
     };
     
@@ -627,7 +663,6 @@ export function launchWithDebugPort({ port = 9222, headless = null, userDataDir 
         `--user-data-dir=${finalUserDataDir}`,
         '--no-first-run',
         '--no-default-browser-check',
-        '--lang=zh-CN',
         '--disable-background-timer-throttling',
         '--disable-backgrounding-occluded-windows',
         '--disable-renderer-backgrounding',
@@ -799,7 +834,15 @@ export async function getOrCreateBrowser(options = {}) {
             if (mode === 'cdp') {
                 currentBrowserName = 'chrome';
                 const endpoint = options.cdpEndpoint || process.env.CDP_ENDPOINT || 'http://127.0.0.1:9222';
+                const cdpSelection = resolveCdpProfileSelection(options);
                 currentCdpEndpoint = endpoint;
+                currentUserDataDir = cdpSelection.userDataDir;
+                currentManagedProfileId = cdpSelection.profileId || null;
+                currentProfileDir = null;
+                currentExecutablePath = null;
+                if (currentManagedProfileId) {
+                    switchBrowserProfile(currentManagedProfileId);
+                }
                 logger.info(`使用 CDP 模式连接浏览器 (${modeStr}):`, endpoint);
                 // Chrome 启动后端口可能需几秒才就绪，重试连接
                 const maxRetries = 10;
@@ -834,12 +877,13 @@ export async function getOrCreateBrowser(options = {}) {
                 browserStatus.isConnected = true;
                 browserStatus.lastActivity = Date.now();
                 browserStatus.pageCount = (await getVisiblePagesDetailed()).length;
-
-                currentUserDataDir = null;
-                currentProfileDir = null;
-                currentExecutablePath = null;
-                currentManagedProfileId = null;
                 currentBrowserVersion = resolveActiveBrowserVersion();
+                if (currentManagedProfileId) {
+                    markBrowserProfileUsed(currentManagedProfileId, {
+                        browserVersion: currentBrowserVersion || '',
+                        lastUsedAt: new Date().toISOString(),
+                    });
+                }
 
                 return;
             }
@@ -930,6 +974,10 @@ export async function checkAndReconnectBrowser(options = {}) {
         return await checkManagedProfileBrowsers(options);
     }
 
+    const managedResult = await checkManagedProfileBrowsers({
+        reconnect: options.reconnect === true,
+    }).catch(() => null);
+
     const {
         reconnect = false,
         cdpEndpoint = currentCdpEndpoint || process.env.CDP_ENDPOINT || 'http://127.0.0.1:9222',
@@ -937,6 +985,10 @@ export async function checkAndReconnectBrowser(options = {}) {
     } = options;
 
     if (!contextInstance && !browserInstance) {
+        if (managedResult?.available) {
+            return managedResult;
+        }
+
         if (!reconnect) {
             return { available: false, message: '无浏览器实例' };
         }
@@ -988,6 +1040,11 @@ export async function checkAndReconnectBrowser(options = {}) {
     if (available) {
         return { available: true, status: await getBrowserStatus() };
     }
+
+    if (managedResult?.available) {
+        return managedResult;
+    }
+
     logger.info('浏览器实例已断开，清除引用');
     contextInstance = null;
     browserInstance = null;
@@ -1031,6 +1088,7 @@ export async function getBrowserStatus(options = {}) {
     }
 
     let pagesInfo = [];
+    const managedStatus = await getManagedProfileBrowserStatus().catch(() => null);
     currentBrowserVersion = resolveActiveBrowserVersion() || currentBrowserVersion;
     const profilesState = listBrowserProfiles();
     const activeProfile = currentManagedProfileId
@@ -1048,24 +1106,29 @@ export async function getBrowserStatus(options = {}) {
 
     return {
         ...browserStatus,
-        hasInstance: !!browserInstance || !!contextInstance,
-        connecting: !!connectPromise,
-        lastError: lastConnectError,
+        hasInstance: !!browserInstance || !!contextInstance || !!managedStatus?.hasInstance,
+        isConnected: browserStatus.isConnected || !!managedStatus?.isConnected,
+        pageCount: Number(browserStatus.pageCount || 0) + Number(managedStatus?.pageCount || 0),
+        connecting: !!connectPromise || (managedStatus?.instances || []).some((item) => item?.connecting),
+        lastError: lastConnectError || managedStatus?.lastError || null,
         connection: {
-            mode: currentMode,
-            browserName: currentBrowserName,
-            browserVersion: currentBrowserVersion,
+            mode: currentMode || managedStatus?.connection?.mode || null,
+            browserName: currentBrowserName || managedStatus?.connection?.browserName || null,
+            browserVersion: currentBrowserVersion || managedStatus?.connection?.browserVersion || null,
             executablePath: currentExecutablePath,
-            userDataDir: currentUserDataDir,
+            userDataDir: currentUserDataDir || managedStatus?.connection?.userDataDir || null,
             profileDir: currentProfileDir,
-            profileId: currentManagedProfileId,
-            activeProfileId: profilesState.activeProfileId || null,
-            cdpEndpoint: currentCdpEndpoint,
+            profileId: currentManagedProfileId || managedStatus?.connection?.profileId || null,
+            activeProfileId: profilesState.activeProfileId || managedStatus?.connection?.activeProfileId || null,
+            cdpEndpoint: currentCdpEndpoint || managedStatus?.connection?.cdpEndpoint || null,
+            debugPort: managedStatus?.connection?.debugPort || null,
             detectedProfiles: currentUserDataDir ? tryListProfiles(currentUserDataDir) : [],
-            activeProfile,
+            activeProfile: activeProfile || managedStatus?.connection?.activeProfile || null,
         },
         pages: pagesInfo,
-        profiles: profilesState.items,
+        profiles: managedStatus?.profiles || profilesState.items,
+        instances: managedStatus?.instances || [],
+        managedConnection: managedStatus?.connection || null,
         timestamp: new Date().toISOString()
     };
 }
@@ -1322,6 +1385,10 @@ export async function closeBrowser(options = {}) {
     if (shouldUseManagedProfilePool(options)) {
         await closeManagedProfileBrowser(options?.profileId);
         return;
+    }
+
+    if (!String(options?.profileId || '').trim() && !options?.mode) {
+        await closeManagedProfileBrowser();
     }
 
     try {

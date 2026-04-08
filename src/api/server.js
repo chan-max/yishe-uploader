@@ -1742,13 +1742,17 @@ class ApiServer {
         try {
             const body = await this.parseBody(req).catch(() => ({})) || {};
             const requestedMode = String(body?.mode || '').trim().toLowerCase();
-            const mode = requestedMode === 'cdp' ? 'cdp' : 'persistent';
             const headless = body.headless === true ? true : (body.headless === false ? false : undefined);
             const profileId = String(body?.profileId || '').trim() || undefined;
+            const mode = profileId
+                ? 'cdp'
+                : (requestedMode === 'cdp' ? 'cdp' : 'persistent');
             if (requestedMode === 'bundled') {
                 logger.warn('API connect 收到已停用的 bundled 模式请求，已自动改为 persistent，本地 Chrome 将被使用');
             } else if (requestedMode && !['persistent', 'cdp'].includes(requestedMode)) {
                 logger.warn(`API connect 收到未知浏览器模式 "${requestedMode}"，已自动改为 persistent`);
+            } else if (profileId && requestedMode === 'persistent') {
+                logger.info(`环境 ${profileId} 的浏览器连接已切换为独立 CDP 端口模式`);
             }
             await checkAndReconnectBrowser({ reconnect: false, profileId });
             const statusBefore = await getBrowserStatus({ profileId });
@@ -1758,23 +1762,27 @@ class ApiServer {
             }
 
             if (mode === 'cdp') {
-                const explicitCdp = body && body.cdpEndpoint;
-                if (explicitCdp) {
-                    await getOrCreateBrowser({ ...body, mode: 'cdp', headless });
+                if (profileId) {
+                    await getOrCreateBrowser({ ...body, mode: 'cdp', profileId, headless });
                 } else {
-                    const port = Number(body.port) || 9222;
-                    const userDataDir = (body.cdpUserDataDir || body.userDataDir || getDefaultCdpUserDataDir()).trim();
-                    const cdpEndpoint = `http://127.0.0.1:${port}`;
-                    const existingCdp = await checkCdpEndpointAvailable(cdpEndpoint);
-
-                    if (existingCdp.ok) {
-                        logger.info(`API connect 检测到现有 CDP 浏览器，直接复用: ${cdpEndpoint}`);
-                        await getOrCreateBrowser({ mode: 'cdp', cdpEndpoint, headless });
+                    const explicitCdp = body && body.cdpEndpoint;
+                    if (explicitCdp) {
+                        await getOrCreateBrowser({ ...body, mode: 'cdp', headless });
                     } else {
-                        logger.info('API connect 未检测到可复用 CDP 浏览器，启动新浏览器再连接, headless:', headless);
-                        launchWithDebugPort({ port, userDataDir, headless });
-                        await sleep(3500);
-                        await getOrCreateBrowser({ mode: 'cdp', cdpEndpoint, headless });
+                        const port = Number(body.port) || 9222;
+                        const userDataDir = (body.cdpUserDataDir || body.userDataDir || getDefaultCdpUserDataDir()).trim();
+                        const cdpEndpoint = `http://127.0.0.1:${port}`;
+                        const existingCdp = await checkCdpEndpointAvailable(cdpEndpoint);
+
+                        if (existingCdp.ok) {
+                            logger.info(`API connect 检测到现有 CDP 浏览器，直接复用: ${cdpEndpoint}`);
+                            await getOrCreateBrowser({ mode: 'cdp', cdpEndpoint, headless });
+                        } else {
+                            logger.info('API connect 未检测到可复用 CDP 浏览器，启动新浏览器再连接, headless:', headless);
+                            launchWithDebugPort({ port, userDataDir, headless });
+                            await sleep(3500);
+                            await getOrCreateBrowser({ mode: 'cdp', cdpEndpoint, headless });
+                        }
                     }
                 }
             } else if (mode === 'persistent') {

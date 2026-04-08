@@ -4,6 +4,7 @@ import {
   getBrowserProfile,
   listBrowserProfiles,
   markBrowserProfileUsed,
+  switchBrowserProfile,
 } from "./BrowserProfileService.js";
 import { logger } from "../utils/logger.js";
 import {
@@ -11,6 +12,9 @@ import {
   getDefaultChromeExecutablePath,
   initBundledPlaywrightEnv,
 } from "../utils/playwrightRuntime.js";
+import { spawn, exec } from "child_process";
+import http from "http";
+import https from "https";
 
 const sessions = new Map();
 const badgeBoundPages = new WeakSet();
@@ -329,28 +333,20 @@ function getHeadlessMode() {
   return false;
 }
 
-function buildPersistentLaunchOptions({ headless = false, executablePath = null }) {
-  const launchOptions = {
-    headless,
-    args: [
-      "--no-first-run",
-      "--no-default-browser-check",
-      "--disable-dev-shm-usage",
-      "--lang=zh-CN",
-      ...(headless ? [] : ["--start-maximized"]),
-    ],
-    locale: "zh-CN",
-    chromiumSandbox: true,
-    ignoreDefaultArgs: ["--enable-automation"],
-    ignoreHTTPSErrors: true,
-  };
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
-  if (executablePath) {
-    launchOptions.executablePath = executablePath;
+function normalizeDebugPort(value) {
+  const port = Number(value);
+  if (!Number.isInteger(port) || port < 1024 || port > 65535) {
+    return null;
   }
+  return port;
+}
 
-  launchOptions.viewport = headless ? { width: 1920, height: 1080 } : null;
-  return launchOptions;
+function buildCdpEndpoint(port) {
+  return `http://127.0.0.1:${port}`;
 }
 
 function withTimeout(promise, ms, label) {
@@ -424,10 +420,15 @@ function getSession(profileId, create = false) {
   }
   if (!sessions.has(normalizedProfileId) && create) {
     const profile = getBrowserProfile(normalizedProfileId);
+    const debugPort = normalizeDebugPort(profile?.debugPort);
     sessions.set(normalizedProfileId, {
       profileId: normalizedProfileId,
       profileName: profile?.name || normalizedProfileId,
       userDataDir: profile?.userDataDir || null,
+      debugPort,
+      cdpEndpoint: debugPort ? buildCdpEndpoint(debugPort) : null,
+      chromePid: null,
+      browserInstance: null,
       contextInstance: null,
       connectPromise: null,
       lastConnectError: null,
@@ -522,6 +523,8 @@ async function installFocusTracker(context) {
   if (!context) return;
 
   try {
+    await context.addInitScript(FOCUS_TRACKER_SCRIPT).catch(() => {});
+
     for (const page of context.pages()) {
       await installFocusTrackerForPage(page);
     }
@@ -532,6 +535,207 @@ async function installFocusTracker(context) {
   } catch (error) {
     logger.warn("安装页面焦点跟踪器失败:", error?.message || error);
   }
+}
+
+function execCommand(command, timeoutMs = 8000) {
+  return new Promise((resolve, reject) => {
+    exec(command, { timeout: timeoutMs, windowsHide: true }, (error, stdout, stderr) => {
+      if (error) {
+        const message = stderr ? String(stderr).trim() : error.message;
+        reject(new Error(message || error.message));
+        return;
+      }
+      resolve(String(stdout || "").trim());
+    });
+  });
+}
+
+async function checkCdpEndpointAvailable(endpoint) {
+  try {
+    const targetUrl = new URL("/json/version", endpoint);
+    const client = targetUrl.protocol === "https:" ? https : http;
+    return await new Promise((resolve) => {
+      const req = client.get(targetUrl, { timeout: 3000 }, (resp) => {
+        let data = "";
+        resp.on("data", (chunk) => {
+          data += chunk;
+        });
+        resp.on("end", () => {
+          try {
+            const json = JSON.parse(data);
+            resolve({
+              ok: true,
+              endpoint,
+              browser: json.Browser || json.browser || "",
+            });
+          } catch {
+            resolve({
+              ok: true,
+              endpoint,
+              browser: "",
+            });
+          }
+        });
+      });
+      req.on("error", (error) => resolve({ ok: false, endpoint, error: error?.message || "连接失败" }));
+      req.on("timeout", () => {
+        req.destroy();
+        resolve({ ok: false, endpoint, error: "连接超时" });
+      });
+    });
+  } catch (error) {
+    return {
+      ok: false,
+      endpoint,
+      error: error?.message || "检测 CDP 端点失败",
+    };
+  }
+}
+
+async function getListeningPids(port) {
+  const safePort = normalizeDebugPort(port);
+  if (!safePort) {
+    return [];
+  }
+
+  const pids = new Set();
+  if (process.platform === "win32") {
+    let output = "";
+    try {
+      output = await execCommand(`netstat -ano -p tcp | findstr :${safePort}`);
+    } catch {
+      return [];
+    }
+
+    const lines = output.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    for (const line of lines) {
+      if (!line.includes(`:${safePort}`) || !/\bLISTENING\b/i.test(line)) {
+        continue;
+      }
+
+      const parts = line.split(/\s+/);
+      const pid = parts[parts.length - 1];
+      if (pid && /^\d+$/.test(pid)) {
+        pids.add(pid);
+      }
+    }
+    return Array.from(pids);
+  }
+
+  try {
+    const output = await execCommand(`lsof -nP -iTCP:${safePort} -sTCP:LISTEN -t`);
+    output.split(/\s+/).filter(Boolean).forEach((pid) => pids.add(pid));
+    return Array.from(pids);
+  } catch {
+    return [];
+  }
+}
+
+async function resolveListeningPid(port) {
+  const pids = await getListeningPids(port);
+  return pids[0] || null;
+}
+
+async function killPids(pids = []) {
+  const uniquePids = Array.from(new Set(pids.map((pid) => String(pid || "").trim()).filter(Boolean)));
+  const killed = [];
+  const errors = [];
+
+  for (const pid of uniquePids) {
+    try {
+      if (process.platform === "win32") {
+        await execCommand(`taskkill /PID ${pid} /T /F`);
+      } else {
+        await execCommand(`kill -9 ${pid}`);
+      }
+      killed.push(pid);
+    } catch (error) {
+      errors.push({ pid, error: error?.message || String(error) });
+    }
+  }
+
+  return { killed, errors };
+}
+
+async function killPortProcesses(port) {
+  const pids = await getListeningPids(port);
+  if (!pids.length) {
+    return { killed: [], errors: [] };
+  }
+  return killPids(pids);
+}
+
+function buildChromeLaunchArgs({ port, headless = false, userDataDir }) {
+  return [
+    "--remote-debugging-address=127.0.0.1",
+    `--remote-debugging-port=${port}`,
+    `--user-data-dir=${userDataDir}`,
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-background-timer-throttling",
+    "--disable-backgrounding-occluded-windows",
+    "--disable-renderer-backgrounding",
+    ...(headless ? ["--headless=new"] : ["--start-maximized"]),
+  ];
+}
+
+function launchChromeWithDebugPort({ port, headless = false, userDataDir, executablePath }) {
+  const safePort = normalizeDebugPort(port);
+  const safeUserDataDir = String(userDataDir || "").trim();
+  const safeExecutablePath = String(executablePath || "").trim();
+
+  if (!safePort) {
+    throw new Error(`无效的调试端口: ${port}`);
+  }
+  if (!safeUserDataDir) {
+    throw new Error("缺少 userDataDir");
+  }
+  if (!safeExecutablePath) {
+    throw new Error("缺少 Chrome 可执行文件路径");
+  }
+
+  const child = spawn(
+    safeExecutablePath,
+    buildChromeLaunchArgs({ port: safePort, headless, userDataDir: safeUserDataDir }),
+    {
+      detached: true,
+      stdio: "ignore",
+    },
+  );
+  child.unref();
+
+  logger.info(
+    `已为环境启动 Chrome: port=${safePort}, pid=${child.pid || "unknown"}, userDataDir=${safeUserDataDir}`,
+  );
+  return {
+    pid: child.pid || null,
+    port: safePort,
+    userDataDir: safeUserDataDir,
+    headless,
+  };
+}
+
+function resolveSessionBrowserVersion(session) {
+  try {
+    if (session?.browserInstance && typeof session.browserInstance.version === "function") {
+      return session.browserInstance.version() || null;
+    }
+  } catch {
+    // ignore
+  }
+
+  try {
+    if (session?.contextInstance && typeof session.contextInstance.browser === "function") {
+      const browser = session.contextInstance.browser();
+      if (browser && typeof browser.version === "function") {
+        return browser.version() || null;
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  return null;
 }
 
 async function getSessionPages(session) {
@@ -587,18 +791,17 @@ async function getSessionPages(session) {
 }
 
 async function isSessionAvailable(session) {
-  if (!session?.contextInstance) {
+  if (!session?.browserInstance || !session?.contextInstance) {
     return false;
   }
 
   try {
-    const pages = await getSessionPages(session);
-    if (!getHeadlessMode() && pages.length === 0) {
-      session.browserStatus.isConnected = false;
-      session.browserStatus.pageCount = 0;
-      return false;
+    if (typeof session.browserInstance.isConnected === "function" && !session.browserInstance.isConnected()) {
+      throw new Error("浏览器连接已断开");
     }
 
+    const pages = await getSessionPages(session);
+    session.browserStatus.isInitialized = true;
     session.browserStatus.isConnected = true;
     session.browserStatus.pageCount = pages.length;
     session.browserStatus.lastActivity = Date.now();
@@ -607,10 +810,25 @@ async function isSessionAvailable(session) {
   } catch (error) {
     session.browserStatus.isConnected = false;
     session.browserStatus.pageCount = 0;
+    session.browserInstance = null;
+    session.contextInstance = null;
+    session.chromePid = null;
     session.lastConnectError = error?.message || String(error);
     session.updatedAt = new Date().toISOString();
     return false;
   }
+}
+
+function shouldReconnectSession(session, nextOptions = {}) {
+  const current = session?.currentBrowserOptions || {};
+  return (
+    String(current.mode || "") !== String(nextOptions.mode || "") ||
+    String(current.userDataDir || "") !== String(nextOptions.userDataDir || "") ||
+    String(current.chromeExecutablePath || "") !== String(nextOptions.chromeExecutablePath || "") ||
+    Number(current.debugPort || 0) !== Number(nextOptions.debugPort || 0) ||
+    String(current.cdpEndpoint || "") !== String(nextOptions.cdpEndpoint || "") ||
+    Boolean(current.headless) !== Boolean(nextOptions.headless)
+  );
 }
 
 async function focusSessionWindow(session) {
@@ -672,58 +890,107 @@ async function focusSessionWindow(session) {
     pageIndex: pageEntry?.index ?? 0,
     pageTitle: pageEntry?.title || "",
     pageUrl: pageEntry?.url || "",
+    debugPort: session.debugPort || null,
   };
 }
 
-async function closeSession(session) {
+function resetSession(session, { preserveError = false } = {}) {
   if (!session) return;
 
+  session.browserInstance = null;
+  session.contextInstance = null;
+  session.chromePid = null;
+  session.connectPromise = null;
+  session.browserStatus = createEmptyStatus();
+  session.browserVersion = null;
+  if (!preserveError) {
+    session.lastConnectError = null;
+  }
+  session.updatedAt = new Date().toISOString();
+}
+
+async function closeSession(session, { preserveError = false, killProcess = true } = {}) {
+  if (!session) return;
+
+  const browserInstance = session.browserInstance;
+  const chromePid = session.chromePid;
+  const debugPort = session.debugPort;
+
   try {
-    if (session.contextInstance) {
-      await session.contextInstance.close().catch(() => {});
+    if (browserInstance) {
+      try {
+        await browserInstance.close();
+      } catch {
+        try {
+          browserInstance.disconnect?.();
+        } catch {
+          // ignore
+        }
+      }
     }
   } finally {
-    session.contextInstance = null;
-    session.connectPromise = null;
-    session.browserStatus = createEmptyStatus();
-    session.browserVersion = null;
-    session.updatedAt = new Date().toISOString();
+    if (killProcess) {
+      if (chromePid) {
+        await killPids([chromePid]).catch(() => {});
+      } else if (debugPort && (browserInstance || session.contextInstance)) {
+        await killPortProcesses(debugPort).catch(() => {});
+      }
+    }
+    resetSession(session, { preserveError });
   }
 }
 
 export function hasManagedProfileBrowser(profileId) {
   const session = getSession(profileId);
-  return !!(session?.contextInstance || session?.connectPromise);
+  return !!(session?.browserInstance || session?.contextInstance || session?.connectPromise);
 }
 
 export async function getOrCreateManagedProfileBrowser(options = {}) {
   const profile = resolveProfile(options.profileId);
   const session = getSession(profile.id, true);
-  const headless =
-    typeof options.headless === "boolean" ? options.headless : getHeadlessMode();
+  const headless = typeof options.headless === "boolean" ? options.headless : getHeadlessMode();
+  const executablePath = String(
+    options.chromeExecutablePath || process.env.CHROME_EXECUTABLE_PATH || getDefaultChromeExecutablePath(),
+  ).trim();
+  const debugPort = normalizeDebugPort(options.port || options.debugPort || profile.debugPort);
+  if (!debugPort) {
+    throw new Error(`环境 ${profile.id} 未配置可用的浏览器调试端口`);
+  }
+
+  const cdpEndpoint = String(options.cdpEndpoint || buildCdpEndpoint(debugPort)).trim();
+  const nextOptions = {
+    mode: "cdp",
+    profileId: profile.id,
+    headless,
+    chromeExecutablePath: executablePath,
+    userDataDir: profile.userDataDir,
+    debugPort,
+    cdpEndpoint,
+  };
 
   session.profileName = profile.name || profile.id;
   session.userDataDir = profile.userDataDir;
-  session.currentBrowserOptions = {
-    mode: "persistent",
-    profileId: profile.id,
-    headless,
-    chromeExecutablePath: String(
-      options.chromeExecutablePath || process.env.CHROME_EXECUTABLE_PATH || getDefaultChromeExecutablePath(),
-    ).trim(),
-  };
+  session.debugPort = debugPort;
+  session.cdpEndpoint = cdpEndpoint;
 
   if (session.connectPromise) {
     await session.connectPromise;
     return wrapBrowserHandle(profile.id);
   }
 
+  if ((session.browserInstance || session.contextInstance || session.connectPromise) && shouldReconnectSession(session, nextOptions)) {
+    await closeSession(session);
+  }
+
+  session.currentBrowserOptions = nextOptions;
+
   if (await isSessionAvailable(session)) {
+    await installFocusTracker(session.contextInstance);
     await installProfileBadge(session.contextInstance, profile);
     return wrapBrowserHandle(profile.id);
   }
 
-  if (session.contextInstance) {
+  if (session.browserInstance || session.contextInstance) {
     await closeSession(session);
   }
 
@@ -731,15 +998,68 @@ export async function getOrCreateManagedProfileBrowser(options = {}) {
   session.connectPromise = (async () => {
     initBundledPlaywrightEnv();
     const chromium = await getPlaywrightChromium();
-    const executablePath = String(
-      options.chromeExecutablePath || process.env.CHROME_EXECUTABLE_PATH || getDefaultChromeExecutablePath(),
-    ).trim();
+    let launchedNewBrowser = false;
 
     try {
-      session.contextInstance = await chromium.launchPersistentContext(
-        profile.userDataDir,
-        buildPersistentLaunchOptions({ headless, executablePath }),
-      );
+      switchBrowserProfile(profile.id);
+
+      const existingEndpoint = await checkCdpEndpointAvailable(cdpEndpoint);
+      if (!existingEndpoint.ok) {
+        launchedNewBrowser = true;
+        const launched = launchChromeWithDebugPort({
+          port: debugPort,
+          headless,
+          userDataDir: profile.userDataDir,
+          executablePath,
+        });
+        session.chromePid = launched.pid || null;
+
+        const maxChecks = 15;
+        let ready = false;
+        for (let index = 0; index < maxChecks; index += 1) {
+          const status = await checkCdpEndpointAvailable(cdpEndpoint);
+          if (status.ok) {
+            ready = true;
+            break;
+          }
+          await sleep(1000);
+        }
+
+        if (!ready) {
+          throw new Error(`Chrome 调试端口未就绪: ${cdpEndpoint}`);
+        }
+      }
+
+      const maxRetries = 10;
+      let lastError = null;
+      for (let index = 0; index < maxRetries; index += 1) {
+        try {
+          session.browserInstance = await withTimeout(
+            chromium.connectOverCDP(cdpEndpoint),
+            15000,
+            "connectOverCDP",
+          );
+          break;
+        } catch (error) {
+          lastError = error;
+          if (index < maxRetries - 1) {
+            await sleep(1200);
+          }
+        }
+      }
+
+      if (!session.browserInstance) {
+        throw new Error(lastError?.message || `无法连接到 Chrome 调试端口: ${cdpEndpoint}`);
+      }
+
+      session.contextInstance = session.browserInstance.contexts()[0] || null;
+      if (!session.contextInstance) {
+        session.contextInstance = await session.browserInstance.newContext(
+          headless ? { viewport: { width: 1920, height: 1080 } } : { viewport: null },
+        );
+      }
+
+      session.chromePid = session.chromePid || (await resolveListeningPid(debugPort));
       await setBrowserWindowMaximized(session.contextInstance, headless);
       await installFocusTracker(session.contextInstance);
       await installProfileBadge(session.contextInstance, profile);
@@ -747,20 +1067,21 @@ export async function getOrCreateManagedProfileBrowser(options = {}) {
       session.browserStatus.isConnected = true;
       session.browserStatus.lastActivity = Date.now();
       session.browserStatus.pageCount = (await getSessionPages(session)).length;
-      session.browserVersion =
-        (typeof session.contextInstance.browser === "function"
-          ? session.contextInstance.browser()?.version?.()
-          : "") || null;
+      session.browserVersion = resolveSessionBrowserVersion(session);
       session.updatedAt = new Date().toISOString();
       markBrowserProfileUsed(profile.id, {
         browserVersion: session.browserVersion || "",
         lastUsedAt: session.updatedAt,
+        debugPort,
       });
     } catch (error) {
       session.lastConnectError = error?.message || String(error);
-      await closeSession(session);
+      await closeSession(session, {
+        preserveError: true,
+        killProcess: launchedNewBrowser || !!session.chromePid,
+      });
       throw new Error(
-        `启动本地 Chrome 失败。请确认目标机器已安装 Chrome，或通过 CHROME_EXECUTABLE_PATH 指定本地 Chrome 路径，并确认 userDataDir 可写。原错误: ${
+        `启动本地 Chrome 并连接环境失败。请确认目标机器已安装 Chrome，环境目录可写，且端口 ${debugPort} 未被其他程序占用。原错误: ${
           error?.message || error
         }`,
       );
@@ -833,12 +1154,17 @@ export function updateManagedProfileBrowserActivity(profileId) {
 }
 
 function buildInstanceSummary(profile, session, pages = []) {
-  const hasInstance = !!session?.contextInstance || !!session?.connectPromise;
+  const hasInstance = !!session?.browserInstance || !!session?.contextInstance || !!session?.connectPromise;
   const lastActivityValue = session?.browserStatus?.lastActivity || null;
+  const debugPort = normalizeDebugPort(session?.debugPort || profile?.debugPort);
+  const cdpEndpoint = session?.cdpEndpoint || (debugPort ? buildCdpEndpoint(debugPort) : null);
   return {
     profileId: profile.id,
     profileName: profile.name || profile.id,
     userDataDir: profile.userDataDir,
+    debugPort,
+    cdpEndpoint,
+    chromePid: session?.chromePid || null,
     hasInstance,
     isConnected: !!session?.browserStatus?.isConnected,
     connecting: !!session?.connectPromise,
@@ -853,11 +1179,14 @@ function buildInstanceSummary(profile, session, pages = []) {
     lastError: session?.lastConnectError || null,
     browserVersion: session?.browserVersion || profile.browserVersion || "",
     connection: {
-      mode: "persistent",
+      mode: "cdp",
       browserName: "chrome",
       browserVersion: session?.browserVersion || profile.browserVersion || "",
       userDataDir: profile.userDataDir,
       profileId: profile.id,
+      debugPort,
+      cdpEndpoint,
+      chromePid: session?.chromePid || null,
       activeProfileId: listBrowserProfiles().activeProfileId || null,
       activeProfile: getActiveBrowserProfile() || null,
     },
@@ -922,11 +1251,14 @@ export async function getManagedProfileBrowserStatus(options = {}) {
     lastError:
       instanceEntries.find((item) => item.lastError)?.lastError || null,
     connection: primaryInstance?.connection || {
-      mode: "persistent",
+      mode: "cdp",
       browserName: "chrome",
       browserVersion: "",
       userDataDir: null,
       profileId: null,
+      debugPort: null,
+      cdpEndpoint: null,
+      chromePid: null,
       activeProfileId: profileState.activeProfileId || null,
       activeProfile: getActiveBrowserProfile() || null,
     },
@@ -991,7 +1323,11 @@ export async function checkManagedProfileBrowsers(options = {}) {
     }
     if (reconnect) {
       try {
-        await getOrCreateManagedProfileBrowser(session.currentBrowserOptions || { profileId });
+        const reconnectOptions =
+          session.currentBrowserOptions && Object.keys(session.currentBrowserOptions).length
+            ? session.currentBrowserOptions
+            : { profileId };
+        await getOrCreateManagedProfileBrowser(reconnectOptions);
         available = true;
         reconnected = true;
       } catch (error) {
