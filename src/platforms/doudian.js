@@ -20,6 +20,21 @@ const PREVIEW_IMAGE_SELECTORS = [
     'img[src^="blob:"]',
     'img[src^="data:image/"]'
 ];
+const DOUDIAN_PUBLISH_SUCCESS_TEXT_PATTERNS = [
+    '商品提交成功',
+    '商品创建成功',
+    '发布成功',
+    '提交成功',
+    '创建成功',
+    '继续发布商品视频',
+    '分享到抖音'
+];
+const DOUDIAN_PUBLISH_FAILURE_TEXT_PATTERNS = [
+    '发布失败',
+    '提交失败',
+    '创建失败',
+    '保存失败'
+];
 
 function toUserFriendlyPath(filePath) {
     return String(filePath || '').replace(/\\/g, '/');
@@ -198,6 +213,127 @@ async function checkLogin(page) {
     }
 
     return !/login|signin|passport/i.test(page.url());
+}
+
+async function collectDoudianPublishSignals(page) {
+    try {
+        return await page.evaluate(({ successPatterns, failurePatterns }) => {
+            const normalize = (value) => String(value || '').replace(/\s+/g, '');
+            const bodyText = normalize(document.body?.innerText || '');
+            const buttons = Array.from(document.querySelectorAll('button')).map((button) => ({
+                text: normalize(button.textContent || ''),
+                visible: !!button.offsetParent,
+                disabled: !!button.disabled || button.getAttribute('aria-disabled') === 'true'
+            }));
+            const publishButton = buttons.find((item) => item.text.includes('发布商品'));
+
+            return {
+                matchedSuccessPatterns: successPatterns.filter((pattern) => bodyText.includes(pattern)),
+                matchedFailurePatterns: failurePatterns.filter((pattern) => bodyText.includes(pattern)),
+                hasVisiblePublishButton: !!publishButton?.visible,
+                publishButtonDisabled: !!publishButton?.disabled,
+                bodyPreview: bodyText.slice(0, 400)
+            };
+        }, {
+            successPatterns: DOUDIAN_PUBLISH_SUCCESS_TEXT_PATTERNS,
+            failurePatterns: DOUDIAN_PUBLISH_FAILURE_TEXT_PATTERNS
+        });
+    } catch (error) {
+        logger.warn(`抖店采集发布结果信号失败: ${error?.message || error}`);
+        return {
+            matchedSuccessPatterns: [],
+            matchedFailurePatterns: [],
+            hasVisiblePublishButton: true,
+            publishButtonDisabled: false,
+            bodyPreview: ''
+        };
+    }
+}
+
+async function waitForDoudianPublishConfirmation(page, baselineSignals = null) {
+    const startUrl = page.url();
+    const baselineSuccessPatterns = new Set(baselineSignals?.matchedSuccessPatterns || []);
+    const baselineFailurePatterns = new Set(baselineSignals?.matchedFailurePatterns || []);
+
+    try {
+        const result = await Promise.race([
+            page.waitForFunction(({ successPatterns, baselinePatterns }) => {
+                const bodyText = String(document.body?.innerText || '').replace(/\s+/g, '');
+                const matched = successPatterns.find((pattern) =>
+                    bodyText.includes(pattern) && !baselinePatterns.includes(pattern)
+                );
+                return matched ? { matched } : false;
+            }, {
+                successPatterns: DOUDIAN_PUBLISH_SUCCESS_TEXT_PATTERNS,
+                baselinePatterns: Array.from(baselineSuccessPatterns)
+            }, { timeout: 20000 }).then(async (handle) => ({
+                confirmed: true,
+                signal: 'success_text',
+                detail: (await handle.jsonValue())?.matched || ''
+            })),
+
+            page.waitForFunction(({ failurePatterns, baselinePatterns }) => {
+                const bodyText = String(document.body?.innerText || '').replace(/\s+/g, '');
+                const matched = failurePatterns.find((pattern) =>
+                    bodyText.includes(pattern) && !baselinePatterns.includes(pattern)
+                );
+                return matched ? { matched } : false;
+            }, {
+                failurePatterns: DOUDIAN_PUBLISH_FAILURE_TEXT_PATTERNS,
+                baselinePatterns: Array.from(baselineFailurePatterns)
+            }, { timeout: 20000 }).then(async (handle) => ({
+                confirmed: false,
+                signal: 'failure_text',
+                detail: (await handle.jsonValue())?.matched || ''
+            })),
+
+            page.waitForURL((url) => {
+                const href = String(url?.href || '');
+                return href !== startUrl && !href.includes('/ffa/g/create');
+            }, { timeout: 20000 }).then(() => ({
+                confirmed: true,
+                signal: 'url_changed',
+                detail: page.url()
+            }))
+        ]);
+
+        if (!result.confirmed) {
+            throw new Error(`检测到失败提示: ${result.detail || '未知失败提示'}`);
+        }
+
+        return {
+            ...result,
+            finalUrl: page.url()
+        };
+    } catch (error) {
+        const finalSignals = await collectDoudianPublishSignals(page);
+        const matchedFailure = finalSignals.matchedFailurePatterns.find((pattern) => !baselineFailurePatterns.has(pattern));
+        if (matchedFailure) {
+            throw new Error(`检测到失败提示: ${matchedFailure}`);
+        }
+
+        const matchedSuccess = finalSignals.matchedSuccessPatterns.find((pattern) => !baselineSuccessPatterns.has(pattern));
+        if (matchedSuccess) {
+            return {
+                confirmed: true,
+                signal: 'success_text_fallback',
+                detail: matchedSuccess,
+                finalUrl: page.url()
+            };
+        }
+
+        const currentUrl = page.url();
+        if (currentUrl !== startUrl && !currentUrl.includes('/ffa/g/create')) {
+            return {
+                confirmed: true,
+                signal: 'url_changed_fallback',
+                detail: currentUrl,
+                finalUrl: currentUrl
+            };
+        }
+
+        throw new Error(`未确认商品提交成功: ${error?.message || error}`);
+    }
 }
 
 export async function publishToDoudian(publishInfo = {}) {
@@ -574,12 +710,16 @@ export async function publishToDoudian(publishInfo = {}) {
 
         let publishSubmitted = false;
         let publishSuccessConfirmed = false;
+        let publishSuccessSignal = '';
+        let publishSuccessDetail = '';
+        let publishFinalUrl = page.url();
         try {
             logger.info('抖店发布提交流程：准备点击“发布商品”按钮');
             const publishButton = page.locator('button').filter({ hasText: '发布商品' }).first();
             await publishButton.waitFor({ timeout: 5000, state: 'visible' });
             await publishButton.scrollIntoViewIfNeeded().catch(() => undefined);
             await page.waitForTimeout(200);
+            const publishBaselineSignals = await collectDoudianPublishSignals(page);
             await clickWithFallback(
                 publishButton,
                 () => page.evaluate(() => {
@@ -593,15 +733,16 @@ export async function publishToDoudian(publishInfo = {}) {
                 '抖店发布提交流程：已使用JS点击“发布商品”按钮'
             );
             publishSubmitted = true;
-            logger.info('抖店发布提交流程：已提交发布，等待成功提示“商品提交成功，继续发布商品视频，分享到抖音”');
-            await page.getByText('商品提交成功，继续发布商品视频，分享到抖音').waitFor({
-                timeout: 10000,
-                state: 'visible'
-            });
+            logger.info('抖店发布提交流程：已提交发布，开始多信号确认发布结果');
+            const publishConfirmation = await waitForDoudianPublishConfirmation(page, publishBaselineSignals);
             publishSuccessConfirmed = true;
-            logger.info('抖店发布提交流程：已确认发布成功提示');
+            publishSuccessSignal = String(publishConfirmation?.signal || '').trim();
+            publishSuccessDetail = String(publishConfirmation?.detail || '').trim();
+            publishFinalUrl = String(publishConfirmation?.finalUrl || page.url() || '').trim();
+            logger.info(`抖店发布提交流程：已确认发布成功，signal=${publishSuccessSignal || 'unknown'}, detail=${publishSuccessDetail || 'n/a'}, finalUrl=${publishFinalUrl || 'n/a'}`);
         } catch (error) {
             logger.warn(`抖店发布提交流程执行失败: ${error?.message || error}`);
+            publishFinalUrl = page.url();
         }
 
         const uploaded = uploadResult.uploadedPaths.length;
@@ -648,14 +789,17 @@ export async function publishToDoudian(publishInfo = {}) {
                 productCodeFilled,
                 publishSubmitted,
                 publishSuccessConfirmed,
+                publishSuccessSignal,
+                publishSuccessDetail,
+                publishFinalUrl,
                 pageKeptOpen: !success
             }
         };
     } catch (error) {
-        logger.error('抖店图片上传失败:', error);
+        logger.error('抖店发布失败:', error);
         return {
             success: false,
-            message: error?.message || '抖店图片上传失败'
+            message: error?.message || '抖店发布失败'
         };
     } finally {
         tempFiles.forEach((file) => imageManager.deleteTempFile(file));
