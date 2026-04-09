@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 发布服务类 - 统一管理发布相关逻辑
  */
 
@@ -31,7 +31,7 @@ import {
 } from '../platforms/kuaishouShop.js';
 import {
     publishToTemu
-} from '../platforms/temu.js';
+} from '../platforms/temu/index.js';
 import {
     getOrCreateBrowser,
     isBrowserAvailable,
@@ -475,3 +475,4 @@ export class PublishService {
         }
     }
 }
+

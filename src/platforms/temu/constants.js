@@ -1,0 +1,78 @@
+﻿export const PLATFORM_KEY = 'temu';
+export const PLATFORM_NAME = 'Temu';
+export const TEMU_CREATE_URL = 'https://agentseller.temu.com/goods/create/category';
+export const TEMU_EDIT_URL_KEYWORD = '/goods/edit';
+export const TEMU_CATEGORY_URL_KEYWORD = '/goods/create/category';
+export const TEMU_LOGIN_URL_KEYWORDS = ['login', 'passport', 'auth'];
+export const TEMU_LOGIN_SUCCESS_TIMEOUT = 45_000;
+export const TEMU_CATEGORY_SELECT_TIMEOUT = 30_000;
+
+export const TEMU_LOGGED_IN_SELECTORS = [
+    '[class*="account-info_accountInfo"]',
+    '[class*="account-info_mallInfo"]',
+    '[class*="account-info_userInfo"]'
+];
+
+export const TEMU_LOGIN_ACCOUNT_SELECTORS = [
+    'form input[type="tel"]',
+    'input[type="tel"]',
+    'input[autocomplete="username"]',
+    'input[type="email"]',
+    'form input[name="username"]',
+    'form input[name="account"]',
+    'form input[name="phone"]',
+    'form input[name="mobile"]',
+    'form input[name="email"]',
+    'input[placeholder*="手机号"]',
+    'input[placeholder*="手机号码"]',
+    'input[placeholder*="账号"]',
+    'input[placeholder*="用户名"]',
+    'input[placeholder*="邮箱"]',
+    'input[placeholder*="登录账号"]',
+    'form input[type="text"]'
+];
+
+export const TEMU_LOGIN_PASSWORD_SELECTORS = [
+    'input[type="password"]',
+    'input[autocomplete="current-password"]',
+    'form input[name="password"]',
+    'input[placeholder*="密码"]'
+];
+
+export const TEMU_LOGIN_SUBMIT_SELECTORS = [
+    'button[type="submit"]',
+    'form button:not([disabled])',
+    '[role="button"][type="submit"]'
+];
+
+export const TEMU_LOGIN_MODE_LABELS = [
+    '密码登录',
+    '账号登录',
+    '手机号登录',
+    '手机登录',
+    '邮箱登录',
+    '使用密码登录'
+];
+
+export const TEMU_CATEGORY_KEYWORD_INPUT_SELECTORS = [
+    'input[placeholder="搜索分类：可输入商品名称"]',
+    'input[placeholder*="搜索分类"]',
+    'input[placeholder*="商品名称"]'
+];
+
+export const TEMU_CATEGORY_CASCADER_WRAPPER_SELECTOR = '[class*="cascaderInnerWrapper"]';
+
+export const TEMU_CATEGORY_ITEM_SELECTORS = [
+    'li[data-testid="beast-core-cascader-list-item"]'
+];
+
+export const TEMU_NEXT_STEP_LABELS = ['下一步', 'Next'];
+export const TEMU_LOGIN_SUBMIT_LABELS = ['登录', '立即登录', 'Log in', 'Sign in', '提交'];
+export const TEMU_LOGIN_RISK_KEYWORDS = ['验证码', '安全验证', '二次验证', '风控', '校验', '滑块', '验证'];
+export const TEMU_LOGIN_FAILURE_KEYWORDS = ['密码错误', '账号或密码错误', '登录失败', 'incorrect', 'invalid'];
+export const TEMU_EDIT_HINT_SELECTORS = [
+    'textarea[placeholder="请输入"]',
+    'input[placeholder*="商品"]',
+    'form textarea',
+    'form input[type="text"]'
+];

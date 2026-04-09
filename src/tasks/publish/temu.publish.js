@@ -1,4 +1,4 @@
-import { publishToTemu as runTemuPublish } from '../../platforms/temu.js';
+﻿import { publishToTemu as runTemuPublish } from '../../platforms/temu/index.js';
 
 export const TEMU_PUBLISH_TASK_KEY = 'publish:temu';
 
@@ -7,3 +7,4 @@ export async function executeTemuPublishTask(payload = {}) {
 }
 
 export default executeTemuPublishTask;
+
