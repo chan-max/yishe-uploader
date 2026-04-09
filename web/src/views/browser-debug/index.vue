@@ -72,6 +72,100 @@
 
         <div class="ui two column stackable grid">
           <div class="column">
+            <div class="ui segment utility-card">
+              <div class="panel-header">
+                <div>
+                  <h3 class="ui header">小功能</h3>
+                  <div class="panel-meta">把单点自动化动作单独拎出来，方便快速调试，也方便后面复用到别的流程。</div>
+                </div>
+                <button
+                  type="button"
+                  class="ui button"
+                  :class="{ loading: smallFeatureLoading }"
+                  :disabled="smallFeatureLoading || smallFeatureActionLoading"
+                  @click="refreshSmallFeatures"
+                >
+                  刷新列表
+                </button>
+              </div>
+
+              <div class="ui small form">
+                <div class="field">
+                  <label>功能</label>
+                  <select v-model="selectedSmallFeatureKey" class="ui dropdown" :disabled="smallFeatureLoading">
+                    <option value="">请选择小功能</option>
+                    <option v-for="item in smallFeatures" :key="item.key" :value="item.key">
+                      {{ item.name }} · {{ item.platform }}
+                    </option>
+                  </select>
+                </div>
+
+                <div v-if="selectedSmallFeature" class="template-intro utility-intro">
+                  <div class="template-head">
+                    <div class="template-title">{{ selectedSmallFeature.name }}</div>
+                    <span class="ui tiny orange basic label">{{ selectedSmallFeature.category }}</span>
+                  </div>
+                  <div class="template-desc">{{ selectedSmallFeature.description }}</div>
+                  <div v-if="Array.isArray(selectedSmallFeature.tips) && selectedSmallFeature.tips.length" class="utility-tips">
+                    <div v-for="tip in selectedSmallFeature.tips" :key="tip">{{ tip }}</div>
+                  </div>
+                </div>
+
+                <template v-if="selectedSmallFeatureKey === 'temu-login'">
+                  <div class="two fields">
+                    <div class="field">
+                      <label>Temu 账号</label>
+                      <input v-model="smallFeatureForm.account" type="text" placeholder="请输入 Temu 登录账号" />
+                    </div>
+                    <div class="field">
+                      <label>Temu 密码</label>
+                      <input v-model="smallFeatureForm.password" type="password" placeholder="请输入 Temu 登录密码" />
+                    </div>
+                  </div>
+
+                  <div class="two fields utility-option-grid">
+                    <div class="field">
+                      <label>环境编号</label>
+                      <input
+                        v-model="smallFeatureForm.profileId"
+                        type="text"
+                        placeholder="可选，留空时使用当前活动环境"
+                      />
+                    </div>
+                    <div class="field">
+                      <label>执行选项</label>
+                      <div class="ui checkbox compact-checkbox">
+                        <input
+                          id="temu-login-keep-open"
+                          v-model="smallFeatureForm.keepPageOpen"
+                          type="checkbox"
+                        />
+                        <label for="temu-login-keep-open">执行后保留页面</label>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="ui tiny info message utility-help">
+                    这个小功能会自动打开 Temu 登录页并执行“账号登录”流程。未填写环境编号时，会复用当前活动环境。
+                  </div>
+
+                  <button
+                    type="button"
+                    class="ui primary button"
+                    :class="{ loading: smallFeatureActionLoading }"
+                    :disabled="smallFeatureActionLoading || smallFeatureLoading"
+                    @click="runSelectedSmallFeature"
+                  >
+                    执行 Temu 登录
+                  </button>
+                </template>
+
+                <div v-else-if="selectedSmallFeatureKey" class="ui tiny message">
+                  当前页面还没有为这个小功能准备专门的输入表单，后面可以继续补。
+                </div>
+              </div>
+            </div>
+
             <div class="ui segment action-card">
               <div class="panel-header">
                 <div>
@@ -260,7 +354,12 @@
 
 <script setup>
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
-import { executeBrowserDebug, getBrowserPages } from '@/api/browser'
+import {
+  executeBrowserDebug,
+  getBrowserPages,
+  getBrowserSmallFeatures,
+  runBrowserSmallFeature
+} from '@/api/browser'
 
 const browserJsTemplates = [
   {
@@ -520,10 +619,14 @@ return {
 ]
 
 const browserPages = ref([])
+const smallFeatures = ref([])
 const selectedPageIndex = ref(null)
 const lastAutoSelectedPageIndex = ref(null)
+const selectedSmallFeatureKey = ref('temu-login')
 const tabsLoading = ref(false)
 const actionLoading = ref(false)
+const smallFeatureLoading = ref(false)
+const smallFeatureActionLoading = ref(false)
 const resultText = ref('')
 const status = reactive({ message: '', type: 'info' })
 
@@ -545,9 +648,17 @@ const playwrightForm = reactive({
   expression: "await page.setInputFiles('input[type=file]', '/tmp/a.png')\nreturn await page.title()"
 })
 
+const smallFeatureForm = reactive({
+  account: '',
+  password: '',
+  profileId: '',
+  keepPageOpen: true
+})
+
 const selectedPage = computed(() => browserPages.value.find(item => item.index === selectedPageIndex.value) || null)
 const focusedPage = computed(() => browserPages.value.find(item => item.isFocusedTab) || null)
 const hasSelectedPage = computed(() => selectedPage.value !== null)
+const selectedSmallFeature = computed(() => smallFeatures.value.find(item => item.key === selectedSmallFeatureKey.value) || null)
 const selectedBrowserJsTemplate = computed(() => browserJsTemplates.find(item => item.id === browserJsForm.templateId) || null)
 const selectedPlaywrightTemplate = computed(() => playwrightTemplates.find(item => item.id === playwrightForm.templateId) || null)
 const statusClass = computed(() => {
@@ -597,6 +708,70 @@ function applyBrowserJsTemplate() {
 function applyPlaywrightTemplate() {
   if (!selectedPlaywrightTemplate.value) return
   playwrightForm.expression = selectedPlaywrightTemplate.value.code
+}
+
+async function loadSmallFeatures(silent = false) {
+  smallFeatureLoading.value = !silent
+  try {
+    const res = await getBrowserSmallFeatures()
+    const items = Array.isArray(res?.data) ? res.data : []
+    smallFeatures.value = items
+
+    const hasCurrentSelection = items.some(item => item.key === selectedSmallFeatureKey.value)
+    if (!hasCurrentSelection) {
+      selectedSmallFeatureKey.value = items[0]?.key || ''
+    }
+
+    if (!silent) {
+      setStatus('小功能目录已刷新', 'success')
+    }
+  } catch (error) {
+    smallFeatures.value = []
+    if (!silent) {
+      setStatus(error?.response?.data?.message || error.message || '获取小功能目录失败', 'error')
+    }
+  } finally {
+    smallFeatureLoading.value = false
+  }
+}
+
+async function refreshSmallFeatures() {
+  await loadSmallFeatures()
+}
+
+async function runSelectedSmallFeature() {
+  if (!selectedSmallFeatureKey.value) {
+    setStatus('请先选择要执行的小功能', 'error')
+    return
+  }
+
+  if (selectedSmallFeatureKey.value === 'temu-login') {
+    if (!smallFeatureForm.account.trim()) {
+      setStatus('请输入 Temu 登录账号', 'error')
+      return
+    }
+    if (!smallFeatureForm.password.trim()) {
+      setStatus('请输入 Temu 登录密码', 'error')
+      return
+    }
+  }
+
+  smallFeatureActionLoading.value = true
+  try {
+    const res = await runBrowserSmallFeature(selectedSmallFeatureKey.value, {
+      account: smallFeatureForm.account,
+      password: smallFeatureForm.password,
+      profileId: smallFeatureForm.profileId,
+      keepPageOpen: smallFeatureForm.keepPageOpen
+    })
+    resultText.value = JSON.stringify(res, null, 2)
+    setStatus(res?.message || `已执行小功能: ${selectedSmallFeature.value?.name || selectedSmallFeatureKey.value}`, res?.success === false ? 'error' : 'success')
+    await refreshTabs(true)
+  } catch (error) {
+    setStatus(error?.response?.data?.message || error.message || '执行小功能失败', 'error')
+  } finally {
+    smallFeatureActionLoading.value = false
+  }
 }
 
 watch(() => browserJsForm.templateId, () => {
@@ -703,6 +878,7 @@ let pollTimer
 onMounted(async () => {
   applyBrowserJsTemplate()
   applyPlaywrightTemplate()
+  await loadSmallFeatures(true)
   await refreshTabs(true)
   pollTimer = setInterval(() => {
     refreshTabs(true)
@@ -747,7 +923,8 @@ onUnmounted(() => {
 .current-page-card,
 .action-card,
 .console-card,
-.result-card {
+.result-card,
+.utility-card {
   border-radius: 16px;
 }
 
@@ -878,6 +1055,33 @@ onUnmounted(() => {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.6rem;
+}
+
+.utility-intro {
+  margin-bottom: 1rem;
+}
+
+.utility-tips {
+  margin-top: 0.45rem;
+  display: grid;
+  gap: 0.35rem;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.utility-option-grid {
+  align-items: flex-end;
+}
+
+.utility-help {
+  margin-top: 0.25rem;
+}
+
+.compact-checkbox {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
 }
 
 .result-output {

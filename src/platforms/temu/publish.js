@@ -8,8 +8,7 @@ import {
     resolveTemuCategoryIntent
 } from './utils.js';
 import {
-    resolveTemuLoginState,
-    performTemuLogin
+    resolveTemuLoginState
 } from './login.js';
 import {
     ensureTemuCreatePage,
@@ -20,6 +19,9 @@ import {
     collectTemuFrameworkSnapshot,
     collectTemuEditPageStructure
 } from './page.js';
+import {
+    runTemuLoginSmallFeature
+} from './smallFeatures.js';
 
 export async function publishToTemu(publishInfo = {}) {
     const pageOperator = new PageOperator();
@@ -61,10 +63,20 @@ export async function publishToTemu(publishInfo = {}) {
 
         if (!loginState.loggedIn) {
             if (settings.needLogin) {
-                const loginResult = await performTemuLogin(page, settings, pageOperator);
+                const loginResult = await runTemuLoginSmallFeature({
+                    ...publishInfo,
+                    account: settings.account,
+                    password: settings.password,
+                    loginUrl: settings.loginUrl,
+                    keepPageOpen: true,
+                    profileId: publishInfo?.profileId
+                }, {
+                    page,
+                    pageOperator
+                });
                 if (!loginResult.success) {
                     pushTrace(executionTrace, 'perform_login', 'failed', {
-                        reason: loginResult.reason,
+                        reason: loginResult.data?.loginState?.reason || loginResult.message,
                         currentUrl: page.url()
                     });
                     const snapshot = await collectTemuFrameworkSnapshot(page);
@@ -80,8 +92,9 @@ export async function publishToTemu(publishInfo = {}) {
                             pageTitle: snapshot.title,
                             detectedButtons: snapshot.buttons,
                             detectedInputs: snapshot.inputs,
-                            loginState: loginResult.loginState || null,
-                            bodyPreview: loginResult.bodyPreview || snapshot.bodyPreview,
+                            loginState: loginResult.data?.loginState || null,
+                            bodyPreview: loginResult.data?.bodyPreview || snapshot.bodyPreview,
+                            loginFeatureResult: loginResult.data || null,
                             executionTrace,
                             pageKeptOpen: settings.keepPageOpen
                         }
@@ -89,7 +102,8 @@ export async function publishToTemu(publishInfo = {}) {
                 }
 
                 pushTrace(executionTrace, 'perform_login', 'success', {
-                    reason: loginResult.reason,
+                    via: 'temu_login_small_feature',
+                    message: loginResult.message,
                     currentUrl: page.url()
                 });
                 await ensureTemuCreatePage(page, settings.createUrl);

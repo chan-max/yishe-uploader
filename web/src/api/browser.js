@@ -40,6 +40,21 @@ export function openLinkUrl(url) {
   return request({ url: '/browser/open-link', method: 'post', data: { url } })
 }
 
+export function getBrowserSmallFeatures() {
+  return request({ url: '/browser/small-features', method: 'get' })
+}
+
+export function runBrowserSmallFeature(featureKey, data = {}) {
+  return request({
+    url: '/browser/small-features/run',
+    method: 'post',
+    data: {
+      featureKey,
+      ...data
+    }
+  })
+}
+
 export function getBrowserPages() {
   return request({ url: '/browser/pages', method: 'get' })
 }

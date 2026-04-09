@@ -1,6 +1,7 @@
 ﻿import {
     PLATFORM_KEY,
-    TEMU_CREATE_URL
+    TEMU_CREATE_URL,
+    TEMU_LOGIN_URL
 } from './constants.js';
 
 function normalizeBoolean(value) {
@@ -116,7 +117,8 @@ export function normalizeTemuSettings(publishInfo = {}) {
         password: String(settings.password || publishInfo.password || '').trim(),
         needLogin: normalizeBoolean(settings.needLogin ?? publishInfo.needLogin),
         keepPageOpen: normalizeBoolean(settings.keepPageOpen ?? publishInfo.keepPageOpen),
-        createUrl: String(settings.createUrl || publishInfo.createUrl || TEMU_CREATE_URL).trim() || TEMU_CREATE_URL
+        createUrl: String(settings.createUrl || publishInfo.createUrl || TEMU_CREATE_URL).trim() || TEMU_CREATE_URL,
+        loginUrl: String(settings.loginUrl || publishInfo.loginUrl || TEMU_LOGIN_URL).trim() || TEMU_LOGIN_URL
     };
 }
 

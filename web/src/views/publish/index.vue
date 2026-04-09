@@ -62,6 +62,47 @@
                 </div>
               </div>
             </div>
+
+            <div v-if="form.platforms.includes('temu')" class="field">
+              <label>Temu 设置</label>
+              <div class="two fields" style="margin-bottom: 0.85rem;">
+                <div class="field">
+                  <input
+                    v-model="form.platformSettings.temu.categoryPath"
+                    type="text"
+                    placeholder="类目路径，如 女装 > 连衣裙 > 碎花裙"
+                  />
+                </div>
+                <div class="field">
+                  <input
+                    v-model="form.platformSettings.temu.categoryKeyword"
+                    type="text"
+                    placeholder="类目关键词（选填），如 碎花连衣裙"
+                  />
+                </div>
+              </div>
+              <div class="ui checkbox">
+                <input v-model="form.platformSettings.temu.needLogin" type="checkbox" id="temu-need-login" />
+                <label for="temu-need-login">发布前先执行 Temu 登录</label>
+              </div>
+              <div v-if="form.platformSettings.temu.needLogin" class="two fields" style="margin-top: 0.85rem;">
+                <div class="field">
+                  <input
+                    v-model="form.platformSettings.temu.account"
+                    type="text"
+                    placeholder="Temu 登录账号"
+                  />
+                </div>
+                <div class="field">
+                  <input
+                    v-model="form.platformSettings.temu.password"
+                    type="password"
+                    placeholder="Temu 登录密码"
+                  />
+                </div>
+              </div>
+              <small style="color: #999;">类目路径支持用 `>`、`/`、`,` 分隔。勾选后，发布流程会先复用浏览器自动化端的 Temu 登录小功能。</small>
+            </div>
           </div>
 
           <div class="ui small buttons" style="margin-top: 1rem;">
@@ -118,7 +159,8 @@ const platformList = [
   { id: 'douyin', name: '抖音', icon: '🎵' },
   { id: 'kuaishou', name: '快手', icon: '⚡' },
   { id: 'xiaohongshu', name: '小红书', icon: '📕' },
-  { id: 'weibo', name: '微博', icon: '🔥' }
+  { id: 'weibo', name: '微博', icon: '🔥' },
+  { id: 'temu', name: 'Temu', icon: '🛒' }
 ]
 const status = reactive({ message: '', type: 'info' })
 const publishing = ref(false)
@@ -132,7 +174,11 @@ const form = reactive({
   title: '',
   scheduled: false,
   scheduleTime: '',
-  platformSettings: { douyin: { productLink: '', productTitle: '', location: '' }, xiaohongshu: { location: '' } }
+  platformSettings: {
+    douyin: { productLink: '', productTitle: '', location: '' },
+    xiaohongshu: { location: '' },
+    temu: { needLogin: false, account: '', password: '', categoryPath: '', categoryKeyword: '' }
+  }
 })
 const tagsInput = ref('')
 
@@ -174,6 +220,12 @@ async function refreshLoginStatus() {
 
 async function handlePublish() {
   if (!canPublish.value) return
+  if (form.platforms.includes('temu') && form.platformSettings.temu.needLogin) {
+    if (!form.platformSettings.temu.account.trim() || !form.platformSettings.temu.password.trim()) {
+      setStatus('已开启 Temu 自动登录，请填写账号和密码', 'error')
+      return
+    }
+  }
   publishing.value = true
   setStatus('正在发布...', 'info')
   try {
@@ -187,7 +239,19 @@ async function handlePublish() {
       filePath,
       scheduled: form.scheduled,
       scheduleTime: form.scheduled && form.scheduleTime ? new Date(form.scheduleTime).toISOString() : undefined,
-      platformSettings: { douyin: form.platformSettings.douyin, xiaohongshu: form.platformSettings.xiaohongshu }
+      temuCategoryPath: form.platforms.includes('temu') ? form.platformSettings.temu.categoryPath.trim() : undefined,
+      temuCategoryKeyword: form.platforms.includes('temu') ? form.platformSettings.temu.categoryKeyword.trim() : undefined,
+      platformSettings: {
+        douyin: form.platformSettings.douyin,
+        xiaohongshu: form.platformSettings.xiaohongshu,
+        temu: {
+          categoryPath: form.platformSettings.temu.categoryPath.trim(),
+          categoryKeyword: form.platformSettings.temu.categoryKeyword.trim(),
+          needLogin: form.platformSettings.temu.needLogin,
+          account: form.platformSettings.temu.account.trim(),
+          password: form.platformSettings.temu.password.trim()
+        }
+      }
     }
     const res = await fetch(`${API_BASE}/api/publish`, {
       method: 'POST',

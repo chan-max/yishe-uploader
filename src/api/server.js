@@ -32,6 +32,10 @@ import {
     switchManagedBrowserProfile
 } from '../services/BrowserService.js';
 import { PlatformLoginService } from '../services/PlatformLoginService.js';
+import {
+    listBrowserAutomationSmallFeatures,
+    runBrowserAutomationSmallFeature
+} from '../services/BrowserAutomationSmallFeatureService.js';
 import taskManager from '../services/TaskManager.js';
 import { logger } from '../utils/logger.js';
 import { openExternalUrl, shouldAutoOpenBrowserOnStart } from '../utils/appLauncher.js';
@@ -439,6 +443,10 @@ class ApiServer {
                     await this.handleBrowserOpenPlatform(req, res);
                 } else if (reqPath === '/api/browser/open-link' && method === 'POST') {
                     await this.handleBrowserOpenLink(req, res);
+                } else if (reqPath === '/api/browser/small-features' && method === 'GET') {
+                    await this.handleBrowserSmallFeatures(req, res);
+                } else if (reqPath === '/api/browser/small-features/run' && method === 'POST') {
+                    await this.handleBrowserRunSmallFeature(req, res);
                 } else if (reqPath === '/api/browser/open-user-data-dir' && method === 'POST') {
                     await this.handleBrowserOpenUserDataDir(req, res);
                 } else if (reqPath === '/api/browser/pages' && method === 'GET') {
@@ -527,6 +535,8 @@ class ApiServer {
                 { method: 'POST', path: '/api/browser/check-port', description: '检测 CDP 端口' },
                 { method: 'POST', path: '/api/browser/open-platform', description: '在已连接浏览器中打开指定平台创作页' },
                 { method: 'POST', path: '/api/browser/open-link', description: '在已连接浏览器中打开指定链接' },
+                { method: 'GET', path: '/api/browser/small-features', description: '获取浏览器自动化端“小功能”目录' },
+                { method: 'POST', path: '/api/browser/small-features/run', description: '执行浏览器自动化端“小功能”' },
                 { method: 'POST', path: '/api/browser/open-user-data-dir', description: '在本机文件管理器中打开指定用户数据目录' },
                 { method: 'GET', path: '/api/browser/pages', description: '获取当前浏览器标签页列表' },
                 { method: 'POST', path: '/api/browser/debug', description: '对当前浏览器页面执行调试动作（goto/click/fill/text/eval 等）' },
@@ -840,6 +850,38 @@ class ApiServer {
                             }
                         },
                         responses: { 200: { description: '打开结果' } }
+                    }
+                },
+                '/api/browser/small-features': {
+                    get: {
+                        tags: ['Browser'],
+                        summary: '获取浏览器自动化端小功能目录',
+                        responses: { 200: { description: '小功能目录结果' } }
+                    }
+                },
+                '/api/browser/small-features/run': {
+                    post: {
+                        tags: ['Browser'],
+                        summary: '执行浏览器自动化端小功能',
+                        requestBody: {
+                            required: true,
+                            content: {
+                                'application/json': {
+                                    schema: {
+                                        type: 'object',
+                                        required: ['featureKey'],
+                                        properties: {
+                                            featureKey: { type: 'string', description: '小功能标识，如 temu-login' },
+                                            profileId: { type: 'string', description: '可选，指定执行环境' },
+                                            keepPageOpen: { type: 'boolean', description: '执行后是否保留页面，默认 true' },
+                                            account: { type: 'string', description: '账号类小功能需要的账号' },
+                                            password: { type: 'string', description: '账号类小功能需要的密码' }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        responses: { 200: { description: '执行结果' } }
                     }
                 },
                 '/api/browser/open-user-data-dir': {
@@ -2162,6 +2204,34 @@ class ApiServer {
             });
         } catch (error) {
             this.sendResponse(res, 500, { success: false, message: error.message || '打开链接失败' });
+        }
+    }
+
+    async handleBrowserSmallFeatures(req, res) {
+        try {
+            this.sendResponse(res, 200, {
+                success: true,
+                data: listBrowserAutomationSmallFeatures()
+            });
+        } catch (error) {
+            this.sendResponse(res, 500, { success: false, message: error.message || '获取小功能目录失败' });
+        }
+    }
+
+    async handleBrowserRunSmallFeature(req, res) {
+        try {
+            const body = await this.parseBody(req).catch(() => ({})) || {};
+            const featureKey = String(body?.featureKey || '').trim();
+            if (!featureKey) {
+                this.sendResponse(res, 400, { success: false, message: '缺少 featureKey' });
+                return;
+            }
+
+            const { featureKey: _featureKey, ...payload } = body;
+            const result = await runBrowserAutomationSmallFeature(featureKey, payload);
+            this.sendResponse(res, 200, result);
+        } catch (error) {
+            this.sendResponse(res, 500, { success: false, message: error.message || '执行小功能失败' });
         }
     }
 

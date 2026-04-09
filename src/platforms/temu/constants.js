@@ -1,11 +1,13 @@
 ﻿export const PLATFORM_KEY = 'temu';
 export const PLATFORM_NAME = 'Temu';
 export const TEMU_CREATE_URL = 'https://agentseller.temu.com/goods/create/category';
+export const TEMU_LOGIN_URL = 'https://seller.kuajingmaihuo.com/login';
 export const TEMU_EDIT_URL_KEYWORD = '/goods/edit';
 export const TEMU_CATEGORY_URL_KEYWORD = '/goods/create/category';
 export const TEMU_LOGIN_URL_KEYWORDS = ['login', 'passport', 'auth'];
 export const TEMU_LOGIN_SUCCESS_TIMEOUT = 45_000;
 export const TEMU_CATEGORY_SELECT_TIMEOUT = 30_000;
+export const TEMU_SELLER_HOST_KEYWORDS = ['seller.kuajingmaihuo.com', 'agentseller.temu.com'];
 
 export const TEMU_LOGGED_IN_SELECTORS = [
     '[class*="account-info_accountInfo"]',
@@ -14,6 +16,8 @@ export const TEMU_LOGGED_IN_SELECTORS = [
 ];
 
 export const TEMU_LOGIN_ACCOUNT_SELECTORS = [
+    'form input[type="text"]',
+    'input[type="text"]',
     'form input[type="tel"]',
     'input[type="tel"]',
     'input[autocomplete="username"]',
@@ -28,8 +32,7 @@ export const TEMU_LOGIN_ACCOUNT_SELECTORS = [
     'input[placeholder*="账号"]',
     'input[placeholder*="用户名"]',
     'input[placeholder*="邮箱"]',
-    'input[placeholder*="登录账号"]',
-    'form input[type="text"]'
+    'input[placeholder*="登录账号"]'
 ];
 
 export const TEMU_LOGIN_PASSWORD_SELECTORS = [
@@ -46,8 +49,8 @@ export const TEMU_LOGIN_SUBMIT_SELECTORS = [
 ];
 
 export const TEMU_LOGIN_MODE_LABELS = [
-    '密码登录',
     '账号登录',
+    '密码登录',
     '手机号登录',
     '手机登录',
     '邮箱登录',
@@ -68,6 +71,7 @@ export const TEMU_CATEGORY_ITEM_SELECTORS = [
 
 export const TEMU_NEXT_STEP_LABELS = ['下一步', 'Next'];
 export const TEMU_LOGIN_SUBMIT_LABELS = ['登录', '立即登录', 'Log in', 'Sign in', '提交'];
+export const TEMU_LOGIN_CONFIRM_LABELS = ['同意并登录'];
 export const TEMU_LOGIN_RISK_KEYWORDS = ['验证码', '安全验证', '二次验证', '风控', '校验', '滑块', '验证'];
 export const TEMU_LOGIN_FAILURE_KEYWORDS = ['密码错误', '账号或密码错误', '登录失败', 'incorrect', 'invalid'];
 export const TEMU_EDIT_HINT_SELECTORS = [

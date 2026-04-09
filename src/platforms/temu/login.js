@@ -9,9 +9,12 @@ import {
     TEMU_LOGIN_ACCOUNT_SELECTORS,
     TEMU_LOGIN_SUBMIT_SELECTORS,
     TEMU_LOGIN_SUBMIT_LABELS,
+    TEMU_LOGIN_CONFIRM_LABELS,
     TEMU_LOGIN_RISK_KEYWORDS,
     TEMU_LOGIN_FAILURE_KEYWORDS,
-    TEMU_EDIT_URL_KEYWORD
+    TEMU_EDIT_URL_KEYWORD,
+    TEMU_LOGIN_URL,
+    TEMU_SELLER_HOST_KEYWORDS
 } from './constants.js';
 import {
     limitText
@@ -26,6 +29,13 @@ import {
 import {
     logger
 } from '../../utils/logger.js';
+
+const TEMU_TEXT_CLICK_SELECTOR = 'button,[role="button"],a,span,div,label,p';
+
+function isTemuSellerPage(pageUrl) {
+    const currentUrl = String(pageUrl || '');
+    return TEMU_SELLER_HOST_KEYWORDS.some((keyword) => currentUrl.includes(keyword));
+}
 
 export async function resolveTemuLoginState(page) {
     const currentUrl = String(page.url() || '');
@@ -86,23 +96,58 @@ export async function resolveTemuLoginState(page) {
     }
 
     return {
-        loggedIn: currentUrl.includes('agentseller.temu.com'),
+        loggedIn: isTemuSellerPage(currentUrl),
         currentUrl,
-        reason: currentUrl.includes('agentseller.temu.com') ? 'seller_domain_fallback' : 'non_seller_page',
+        reason: isTemuSellerPage(currentUrl) ? 'seller_domain_fallback' : 'non_seller_page',
         bodyPreview: limitText(bodyText, 240)
     };
 }
 
-async function switchTemuLoginMode(page) {
-    const existingPasswordInput = await findFirstVisibleSelector(page, TEMU_LOGIN_PASSWORD_SELECTORS);
-    if (existingPasswordInput) {
+export async function ensureTemuLoginPage(page, loginUrl = TEMU_LOGIN_URL) {
+    const currentUrl = String(page.url() || '');
+    const passwordInput = await findFirstVisibleSelector(page, TEMU_LOGIN_PASSWORD_SELECTORS);
+    const accountInput = await findFirstVisibleSelector(page, TEMU_LOGIN_ACCOUNT_SELECTORS);
+
+    if (TEMU_LOGIN_URL_KEYWORDS.some((keyword) => currentUrl.includes(keyword)) && (passwordInput || accountInput)) {
         return {
-            switched: false,
-            reason: 'password_form_already_visible'
+            success: true,
+            currentUrl,
+            reusedCurrentPage: true
         };
     }
 
-    const clicked = await clickClickableByText(page, TEMU_LOGIN_MODE_LABELS);
+    logger.info(`${PLATFORM_NAME}准备打开登录页`, {
+        currentUrl,
+        loginUrl
+    });
+
+    await page.goto(loginUrl, {
+        waitUntil: 'domcontentloaded',
+        timeout: 60_000
+    });
+    await page.waitForTimeout(2500);
+
+    return {
+        success: true,
+        currentUrl: page.url(),
+        reusedCurrentPage: false
+    };
+}
+
+async function switchTemuLoginMode(page) {
+    const existingAccountInput = await findFirstVisibleSelector(page, TEMU_LOGIN_ACCOUNT_SELECTORS);
+    const existingPasswordInput = await findFirstVisibleSelector(page, TEMU_LOGIN_PASSWORD_SELECTORS);
+    if (existingAccountInput && existingPasswordInput) {
+        return {
+            switched: false,
+            reason: 'account_password_form_already_visible'
+        };
+    }
+
+    const clicked = await clickClickableByText(page, TEMU_LOGIN_MODE_LABELS, {
+        selector: TEMU_TEXT_CLICK_SELECTOR,
+        exact: true
+    });
     if (!clicked) {
         return {
             switched: false,
@@ -115,6 +160,43 @@ async function switchTemuLoginMode(page) {
         switched: true,
         reason: 'login_mode_clicked',
         clickedText: clicked.text
+    };
+}
+
+async function confirmTemuLoginSubmit(page, timeoutMs = 15_000) {
+    const deadline = Date.now() + timeoutMs;
+
+    while (Date.now() < deadline) {
+        const loginState = await resolveTemuLoginState(page);
+        if (loginState.loggedIn) {
+            return {
+                success: true,
+                clicked: false,
+                skipped: true,
+                reason: 'login_completed_without_confirm',
+                loginState
+            };
+        }
+
+        const clicked = await clickClickableByText(page, TEMU_LOGIN_CONFIRM_LABELS, {
+            selector: TEMU_TEXT_CLICK_SELECTOR,
+            exact: true
+        });
+        if (clicked) {
+            await page.waitForTimeout(1200);
+            return {
+                success: true,
+                clicked: true,
+                text: clicked.text
+            };
+        }
+
+        await page.waitForTimeout(500);
+    }
+
+    return {
+        success: false,
+        reason: 'login_confirm_not_found'
     };
 }
 
@@ -212,6 +294,8 @@ export async function performTemuLogin(page, settings, pageOperator) {
         currentUrl: page.url()
     });
 
+    await ensureTemuLoginPage(page, settings.loginUrl);
+
     const formState = await waitForTemuLoginForm(page);
     if (formState.alreadyLoggedIn) {
         return {
@@ -240,10 +324,13 @@ export async function performTemuLogin(page, settings, pageOperator) {
     });
     await page.waitForTimeout(600);
 
-    const submitBySelector = await clickVisibleSelector(page, TEMU_LOGIN_SUBMIT_SELECTORS);
-    if (!submitBySelector) {
-        const submitByText = await clickClickableByText(page, TEMU_LOGIN_SUBMIT_LABELS);
-        if (!submitByText) {
+    const submitByText = await clickClickableByText(page, TEMU_LOGIN_SUBMIT_LABELS, {
+        selector: TEMU_TEXT_CLICK_SELECTOR,
+        exact: true
+    });
+    if (!submitByText) {
+        const submitBySelector = await clickVisibleSelector(page, TEMU_LOGIN_SUBMIT_SELECTORS);
+        if (!submitBySelector) {
             return {
                 success: false,
                 reason: 'login_submit_not_found',
@@ -251,8 +338,19 @@ export async function performTemuLogin(page, settings, pageOperator) {
             };
         }
     }
+    logger.info(`${PLATFORM_NAME}已点击登录按钮`, submitByText || { selectorMatched: true });
 
-    await page.waitForTimeout(1500);
+    await page.waitForTimeout(600);
+
+    const confirmResult = await confirmTemuLoginSubmit(page);
+    if (!confirmResult?.success) {
+        return {
+            success: false,
+            reason: confirmResult?.reason || 'login_confirm_not_found',
+            message: `未找到${PLATFORM_NAME}“同意并登录”按钮`
+        };
+    }
+    logger.info(`${PLATFORM_NAME}已处理“同意并登录”步骤`, confirmResult);
 
     const successState = await waitForTemuLoginSuccess(page);
     if (!successState.success) {
