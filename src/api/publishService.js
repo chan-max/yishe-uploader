@@ -68,8 +68,7 @@ class PublishService {
     }
 
     /**
-     * 发布到单个平台
-     * 为兼容旧接口保留，内部委托给 executePlatformAction
+     * 执行单个平台动作
      */
     async publishToPlatform(platform, publishInfo, runtimeOptions = {}) {
         return this.executePlatformAction(platform, {

@@ -31,7 +31,7 @@ import {
     deleteManagedBrowserProfile,
     switchManagedBrowserProfile
 } from '../services/BrowserService.js';
-import { PublishService } from '../services/PublishService.js';
+import { PlatformLoginService } from '../services/PlatformLoginService.js';
 import taskManager from '../services/TaskManager.js';
 import { logger } from '../utils/logger.js';
 import { openExternalUrl, shouldAutoOpenBrowserOnStart } from '../utils/appLauncher.js';
@@ -2718,7 +2718,7 @@ class ApiServer {
             const url = new URL(req.url, `http://${req.headers.host}`);
             const forceRefresh = url.searchParams.get('refresh') === '1';
             const profileId = String(url.searchParams.get('profileId') || '').trim() || undefined;
-            const loginStatus = await PublishService.checkSocialMediaLoginStatus(forceRefresh, { profileId });
+            const loginStatus = await PlatformLoginService.checkSocialMediaLoginStatus(forceRefresh, { profileId });
             if (profileId) {
                 try {
                     updateManagedBrowserProfile(profileId, {

@@ -16,12 +16,13 @@ import chalk from 'chalk';
 import ora from 'ora';
 import axios from 'axios';
 import inquirer from 'inquirer';
-import {
-    PublishService
-} from './services/PublishService.js';
+import publishService from './api/publishService.js';
 import {
     BrowserService
 } from './services/BrowserService.js';
+import {
+    PlatformLoginService
+} from './services/PlatformLoginService.js';
 import {
     logger
 } from './utils/logger.js';
@@ -169,7 +170,7 @@ async function getPendingData(dataSource = 'PRODUCT') {
 async function checkPlatformLoginStatus() {
     try {
         logger.info('正在检查各平台登录状态...');
-        const loginStatus = await PublishService.checkSocialMediaLoginStatus();
+        const loginStatus = await PlatformLoginService.checkSocialMediaLoginStatus();
 
         const loggedInPlatforms = [];
         const notLoggedInPlatforms = [];
@@ -210,7 +211,7 @@ async function publishToPlatform(platform, item) {
             tags: item.tags
         };
 
-        const result = await PublishService.publishSingle(config);
+        const result = await publishService.publishToPlatform(platform, config);
 
         if (result.success) {
             logger.info(`✅ ${platform} 发布成功: ${result.message}`);
@@ -472,7 +473,7 @@ program
             spinner.text = '正在检查登录状态...';
 
             // 检查登录状态
-            const loginStatus = await PublishService.checkSocialMediaLoginStatus();
+            const loginStatus = await PlatformLoginService.checkSocialMediaLoginStatus();
 
             // 显示登录状态
             console.log('\n📱 登录状态检查结果:');
@@ -500,7 +501,7 @@ program
             // 执行发布（逐个平台）。不关闭浏览器，便于继续操作
             const results = [];
             for (const cfg of publishConfigs) {
-                const r = await PublishService.publishSingle(cfg);
+                const r = await publishService.publishToPlatform(cfg.platform, cfg);
                 results.push(r);
             }
 
@@ -536,7 +537,7 @@ program
         const spinner = ora('正在检查登录状态...').start();
 
         try {
-            const loginStatus = await PublishService.checkSocialMediaLoginStatus(options.force);
+            const loginStatus = await PlatformLoginService.checkSocialMediaLoginStatus(options.force);
 
             spinner.succeed('登录状态检查完成');
 
@@ -636,7 +637,7 @@ program
             };
 
             spinner.text = '正在测试发布...';
-            const results = [await PublishService.publishSingle(testContent)];
+            const results = [await publishService.publishToPlatform(testContent.platform, testContent)];
 
             spinner.succeed('测试完成');
 
