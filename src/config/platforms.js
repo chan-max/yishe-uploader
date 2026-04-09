@@ -423,20 +423,32 @@ export const PLATFORM_CONFIGS = {
     },
     temu: {
         name: 'Temu',
-        uploadUrl: 'https://kuajing.pinduoduo.com/main/product/list',
+        uploadUrl: 'https://agentseller.temu.com/goods/create/category',
         waitUntil: 'domcontentloaded',
-        timeout: 30000,
+        timeout: 45000,
         antiDetection: true,
         checkLogin: true,
         selectors: {
-            titleInput: 'input[placeholder*="标题"]',
+            categoryKeywordInput: 'input[placeholder="搜索分类：可输入商品名称"]',
+            categoryItem: 'li[data-testid="beast-core-cascader-list-item"]',
+            nextButton: 'button',
+            titleInput: 'textarea[placeholder="请输入"]',
             contentInput: 'textarea',
             fileInput: 'input[type="file"]',
             submitButton: 'button'
         },
         loginSelectors: {
-            userElements: ['.user-avatar'],
-            loginElements: ['.login-btn']
+            userElements: [
+                '[class*="account-info_accountInfo"]',
+                '[class*="account-info_mallInfo"]',
+                '[class*="account-info_userInfo"]'
+            ],
+            loginElements: [
+                'input[type="password"]',
+                'input[autocomplete="current-password"]',
+                'form input[type="tel"]',
+                'form input[name="password"]'
+            ]
         }
     },
     taobao: {

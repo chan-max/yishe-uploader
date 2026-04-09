@@ -30,6 +30,9 @@ import {
     publishToKuaishouShop
 } from '../platforms/kuaishouShop.js';
 import {
+    publishToTemu
+} from '../platforms/temu.js';
+import {
     getOrCreateBrowser,
     isBrowserAvailable,
     updateBrowserActivity
@@ -184,6 +187,9 @@ export class PublishService {
                 case 'kuaishou_shop':
                     result = await publishToKuaishouShop(publishInfo);
                     break;
+                case 'temu':
+                    result = await publishToTemu(publishInfo);
+                    break;
                 case 'weibo':
                     result = await publishToWeibo(publishInfo);
                     break;
@@ -266,6 +272,11 @@ export class PublishService {
                     name: 'kuaishou_shop',
                     checker: new GenericLoginChecker('快手小店', { selectors: PLATFORM_CONFIGS.kuaishou_shop.loginSelectors }),
                     config: PLATFORM_CONFIGS.kuaishou_shop
+                },
+                {
+                    name: 'temu',
+                    checker: new GenericLoginChecker('Temu', { selectors: PLATFORM_CONFIGS.temu.loginSelectors }),
+                    config: PLATFORM_CONFIGS.temu
                 },
                 {
                     name: 'weibo',
@@ -446,7 +457,7 @@ export class PublishService {
             logger.error('登录状态检查整体过程出错:', overallError);
             // 如果整体过程出错，返回所有平台的错误状态
             const errorLoginStatus = {};
-            const platformNames = ['xiaohongshu', 'douyin', 'kuaishou', 'doudian', 'kuaishou_shop', 'weibo'];
+            const platformNames = ['xiaohongshu', 'douyin', 'kuaishou', 'doudian', 'kuaishou_shop', 'temu', 'weibo'];
             for (const platformName of platformNames) {
                 errorLoginStatus[platformName] = {
                     isLoggedIn: false,

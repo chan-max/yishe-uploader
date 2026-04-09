@@ -97,6 +97,15 @@ export const PLATFORM_REGISTRY = {
         capabilities: [
             createCapability('publish', '发布商品', '发布电商商品', resolveCapabilityHandler({ platform: 'kuaishou_shop', action: 'publish' }))
         ]
+    },
+    temu: {
+        id: 'temu',
+        name: 'Temu',
+        category: 'commerce',
+        defaultAction: 'publish',
+        capabilities: [
+            createCapability('publish', '发布商品', '发布 Temu 商品', resolveCapabilityHandler({ platform: 'temu', action: 'publish' }))
+        ]
     }
 };
 

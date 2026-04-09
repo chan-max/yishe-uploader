@@ -403,7 +403,7 @@ program
     .command('publish')
     .description('发布内容到社交媒体平台')
     .option('--file <file>', '从 JS/JSON 文件加载发布配置对象')
-    .option('-p, --platform <platform>', '指定平台 (weibo|douyin|xiaohongshu|kuaishou|doudian|kuaishou_shop)')
+    .option('-p, --platform <platform>', '指定平台 (weibo|douyin|xiaohongshu|kuaishou|doudian|kuaishou_shop|temu)')
     .option('-P, --platforms <platforms>', '指定多个平台，用逗号分隔')
     .option('-t, --title <title>', '发布标题')
     .option('-c, --content <content>', '发布内容')

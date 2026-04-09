@@ -7,6 +7,7 @@ import executeXianyuPublishTask, { XIANYU_PUBLISH_TASK_KEY } from './publish/xia
 import executeTiktokPublishTask, { TIKTOK_PUBLISH_TASK_KEY } from './publish/tiktok.publish.js';
 import executeDoudianPublishTask, { DOUDIAN_PUBLISH_TASK_KEY } from './publish/doudian.publish.js';
 import executeKuaishouShopPublishTask, { KUAISHOU_SHOP_PUBLISH_TASK_KEY } from './publish/kuaishou-shop.publish.js';
+import executeTemuPublishTask, { TEMU_PUBLISH_TASK_KEY } from './publish/temu.publish.js';
 
 export const TASK_REGISTRY = {
     [DOUYIN_PUBLISH_TASK_KEY]: {
@@ -80,6 +81,14 @@ export const TASK_REGISTRY = {
         name: '快手小店发布商品',
         description: '执行快手小店发布任务',
         handler: executeKuaishouShopPublishTask
+    },
+    [TEMU_PUBLISH_TASK_KEY]: {
+        key: TEMU_PUBLISH_TASK_KEY,
+        platform: 'temu',
+        action: 'publish',
+        name: 'Temu 发布商品',
+        description: '执行 Temu 商品发布任务',
+        handler: executeTemuPublishTask
     }
 };
 

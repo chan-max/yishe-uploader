@@ -26,7 +26,7 @@ export function checkPort(port) {
 
 /**
  * 在已连接浏览器中打开指定平台创作页
- * @param {string} platform - 平台 id：douyin | xiaohongshu | weibo | kuaishou
+ * @param {string} platform - 平台 id：douyin | xiaohongshu | weibo | kuaishou | doudian | kuaishou_shop | temu
  */
 export function openPlatformUrl(platform) {
   return request({ url: '/browser/open-platform', method: 'post', data: { platform } })

@@ -84,7 +84,7 @@
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/api/platforms` | 支持的平台列表，响应 `{ "platforms": ["douyin", "kuaishou", "xiaohongshu", "weibo"] }` |
+| GET | `/api/platforms` | 支持的平台列表，响应示例 `{ "platforms": ["douyin", "kuaishou", "xiaohongshu", "weibo", "doudian", "kuaishou_shop", "temu"] }` |
 | GET | `/api/login-status?refresh=1` | 各平台登录状态，`refresh=1` 时强制重新检测 |
 
 ---
