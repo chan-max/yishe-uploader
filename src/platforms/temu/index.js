@@ -5,5 +5,6 @@ export {
 } from './publish.js';
 
 export {
-    runTemuLoginSmallFeature
+    runTemuLoginSmallFeature,
+    runTemuSessionCollectSmallFeature
 } from './smallFeatures.js';

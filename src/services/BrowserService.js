@@ -26,6 +26,9 @@ import {
     logger
 } from '../utils/logger.js';
 import {
+    patchContextNewPage
+} from '../utils/playwrightPageFactory.js';
+import {
     getPlaywrightChromium
 } from '../utils/playwrightRuntime.js';
 import os from 'os';
@@ -391,6 +394,9 @@ function buildPersistentLaunchOptions({ profileDir, executablePath, headless = f
     const args = [
         '--no-first-run',
         '--no-default-browser-check',
+        '--disable-background-timer-throttling',
+        '--disable-backgrounding-occluded-windows',
+        '--disable-renderer-backgrounding',
         ...(profileDir ? [`--profile-directory=${profileDir}`] : []),
         ...(!headless ? ['--start-maximized'] : [])
     ];
@@ -577,7 +583,7 @@ function isBrowserClosedError(err) {
 /**
  * 包装 newPage：若因浏览器/上下文已关闭而失败，则清除旧引用并重新 getOrCreateBrowser 后重试一次
  */
-async function newPageWithReconnect(options = {}) {
+async function newPageWithReconnect(options = {}, pageOptions = {}) {
     try {
         if (!contextInstance) {
             if (browserInstance && typeof browserInstance.contexts === 'function') {
@@ -594,7 +600,7 @@ async function newPageWithReconnect(options = {}) {
                 throw new Error('No browser context available');
             }
         }
-        const page = await contextInstance.newPage();
+        const page = await contextInstance.newPage(pageOptions);
         await installFocusTrackerForPage(page);
         return page;
     } catch (err) {
@@ -608,7 +614,7 @@ async function newPageWithReconnect(options = {}) {
         browserStatus.pageCount = 0;
         await getOrCreateBrowser(currentBrowserOptions);
         if (!contextInstance) throw new Error('重新连接后仍无法获取浏览器上下文');
-        const page = await contextInstance.newPage();
+        const page = await contextInstance.newPage(pageOptions);
         await installFocusTrackerForPage(page);
         return page;
     }
@@ -722,8 +728,9 @@ export async function detectExistingBrowser() {
         const status = await getManagedProfileBrowserStatus();
         if (status?.hasInstance && status?.isConnected) {
             return {
-                newPage: async () => await createProfileBrowserPage(
-                    status?.connection?.profileId || status?.connection?.activeProfileId || undefined
+                newPage: async (pageOptions = {}) => await createProfileBrowserPage(
+                    status?.connection?.profileId || status?.connection?.activeProfileId || undefined,
+                    pageOptions
                 )
             };
         }
@@ -734,8 +741,9 @@ export async function detectExistingBrowser() {
         // 尝试连接到现有的浏览器实例
         if ((contextInstance || browserInstance) && await isBrowserAvailable()) {
             logger.info('检测到现有浏览器实例，页面数量:', browserStatus.pageCount);
+            await installBrowserContextPatches(contextInstance);
             return {
-                newPage: async () => await newPageWithReconnect(currentBrowserOptions)
+                newPage: async (pageOptions = {}) => await newPageWithReconnect(currentBrowserOptions, pageOptions)
             };
         }
 
@@ -782,7 +790,7 @@ export async function getOrCreateBrowser(options = {}) {
     if (connectPromise) {
         await connectPromise;
         return {
-            newPage: async () => await newPageWithReconnect(currentBrowserOptions)
+            newPage: async (pageOptions = {}) => await newPageWithReconnect(currentBrowserOptions, pageOptions)
         };
     }
 
@@ -956,7 +964,9 @@ export async function getOrCreateBrowser(options = {}) {
             connectPromise = null;
         }
 
-        return { newPage: async () => await newPageWithReconnect(currentBrowserOptions) };
+        return {
+            newPage: async (pageOptions = {}) => await newPageWithReconnect(currentBrowserOptions, pageOptions)
+        };
 
     } catch (error) {
         logger.error('浏览器启动失败:', error);
@@ -1163,6 +1173,10 @@ async function installFocusTracker(context) {
 async function installBrowserContextPatches(context) {
     if (!context) return;
 
+    patchContextNewPage(context, {
+        background: true,
+        headless: isHeadlessConnection()
+    });
     await installFocusTracker(context);
 }
 
@@ -1341,10 +1355,10 @@ export async function getBrowserPage(pageIndex, options = {}) {
 
 export async function createBrowserPage(options = {}) {
     if (shouldUseManagedProfilePool(options)) {
-        return await createProfileBrowserPage(options?.profileId);
+        return await createProfileBrowserPage(options?.profileId, options);
     }
 
-    return await newPageWithReconnect(currentBrowserOptions);
+    return await newPageWithReconnect(currentBrowserOptions, options);
 }
 
 /**

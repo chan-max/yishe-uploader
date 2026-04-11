@@ -390,8 +390,8 @@ const ebayPlatform = {
         shop_hot_products: 'heuristic',
         search_suggestions: 'verified',
     },
-    customSceneExecutors: {
-        search_suggestions: collectEbaySearchSuggestions,
+    customTaskTypeExecutors: {
+        'ebay.search_suggestions': collectEbaySearchSuggestions,
     },
     hooks: {
         async normalizeRecord(context) {

@@ -75,7 +75,7 @@
             <div class="ui segment utility-card">
               <div class="panel-header">
                 <div>
-                  <h3 class="ui header">小功能</h3>
+                  <h3 class="ui header">工具集</h3>
                   <div class="panel-meta">把单点自动化动作单独拎出来，方便快速调试，也方便后面复用到别的流程。</div>
                 </div>
                 <button
@@ -93,7 +93,7 @@
                 <div class="field">
                   <label>功能</label>
                   <select v-model="selectedSmallFeatureKey" class="ui dropdown" :disabled="smallFeatureLoading">
-                    <option value="">请选择小功能</option>
+                    <option value="">请选择工具</option>
                     <option v-for="item in smallFeatures" :key="item.key" :value="item.key">
                       {{ item.name }} · {{ item.platform }}
                     </option>
@@ -146,7 +146,7 @@
                   </div>
 
                   <div class="ui tiny info message utility-help">
-                    这个小功能会自动打开 Temu 登录页并执行“账号登录”流程。未填写环境编号时，会复用当前活动环境。
+                    这个工具会自动打开 Temu 登录页并执行“账号登录”流程。未填写环境编号时，会复用当前活动环境。
                   </div>
 
                   <button
@@ -160,8 +160,58 @@
                   </button>
                 </template>
 
+                <template v-else-if="selectedSmallFeatureKey === 'temu-session-collect'">
+                  <div class="two fields utility-option-grid">
+                    <div class="field">
+                      <label>环境编号</label>
+                      <input
+                        v-model="smallFeatureForm.profileId"
+                        type="text"
+                        placeholder="可选，留空时使用当前活动环境"
+                      />
+                    </div>
+                    <div class="field">
+                      <label>执行选项</label>
+                      <div class="ui checkbox compact-checkbox">
+                        <input
+                          id="temu-session-keep-open"
+                          v-model="smallFeatureForm.keepPageOpen"
+                          type="checkbox"
+                        />
+                        <label for="temu-session-keep-open">执行后保留页面</label>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="field">
+                    <label>采集范围</label>
+                    <div class="ui checkbox compact-checkbox">
+                      <input
+                        id="temu-session-region-cookies"
+                        v-model="smallFeatureForm.collectRegionCookies"
+                        type="checkbox"
+                      />
+                      <label for="temu-session-region-cookies">尽力补抓 global / us / eu 三套区域 Cookie</label>
+                    </div>
+                  </div>
+
+                  <div class="ui tiny info message utility-help">
+                    这个工具不会自动登录，也不会上传账号密码。它只会采集当前浏览器环境里已经登录好的 Temu 会话。
+                  </div>
+
+                  <button
+                    type="button"
+                    class="ui primary button"
+                    :class="{ loading: smallFeatureActionLoading }"
+                    :disabled="smallFeatureActionLoading || smallFeatureLoading"
+                    @click="runSelectedSmallFeature"
+                  >
+                    执行 Temu 会话采集
+                  </button>
+                </template>
+
                 <div v-else-if="selectedSmallFeatureKey" class="ui tiny message">
-                  当前页面还没有为这个小功能准备专门的输入表单，后面可以继续补。
+                  当前页面还没有为这个工具准备专门的输入表单，后面可以继续补。
                 </div>
               </div>
             </div>
@@ -652,7 +702,8 @@ const smallFeatureForm = reactive({
   account: '',
   password: '',
   profileId: '',
-  keepPageOpen: true
+  keepPageOpen: true,
+  collectRegionCookies: true
 })
 
 const selectedPage = computed(() => browserPages.value.find(item => item.index === selectedPageIndex.value) || null)
@@ -723,12 +774,12 @@ async function loadSmallFeatures(silent = false) {
     }
 
     if (!silent) {
-      setStatus('小功能目录已刷新', 'success')
+      setStatus('工具目录已刷新', 'success')
     }
   } catch (error) {
     smallFeatures.value = []
     if (!silent) {
-      setStatus(error?.response?.data?.message || error.message || '获取小功能目录失败', 'error')
+      setStatus(error?.response?.data?.message || error.message || '获取工具目录失败', 'error')
     }
   } finally {
     smallFeatureLoading.value = false
@@ -741,7 +792,7 @@ async function refreshSmallFeatures() {
 
 async function runSelectedSmallFeature() {
   if (!selectedSmallFeatureKey.value) {
-    setStatus('请先选择要执行的小功能', 'error')
+    setStatus('请先选择要执行的工具', 'error')
     return
   }
 
@@ -758,17 +809,26 @@ async function runSelectedSmallFeature() {
 
   smallFeatureActionLoading.value = true
   try {
-    const res = await runBrowserSmallFeature(selectedSmallFeatureKey.value, {
-      account: smallFeatureForm.account,
-      password: smallFeatureForm.password,
+    const payload = {
       profileId: smallFeatureForm.profileId,
       keepPageOpen: smallFeatureForm.keepPageOpen
-    })
+    }
+
+    if (selectedSmallFeatureKey.value === 'temu-login') {
+      payload.account = smallFeatureForm.account
+      payload.password = smallFeatureForm.password
+    }
+
+    if (selectedSmallFeatureKey.value === 'temu-session-collect') {
+      payload.collectRegionCookies = smallFeatureForm.collectRegionCookies
+    }
+
+    const res = await runBrowserSmallFeature(selectedSmallFeatureKey.value, payload)
     resultText.value = JSON.stringify(res, null, 2)
-    setStatus(res?.message || `已执行小功能: ${selectedSmallFeature.value?.name || selectedSmallFeatureKey.value}`, res?.success === false ? 'error' : 'success')
+    setStatus(res?.message || `已执行工具: ${selectedSmallFeature.value?.name || selectedSmallFeatureKey.value}`, res?.success === false ? 'error' : 'success')
     await refreshTabs(true)
   } catch (error) {
-    setStatus(error?.response?.data?.message || error.message || '执行小功能失败', 'error')
+    setStatus(error?.response?.data?.message || error.message || '执行工具失败', 'error')
   } finally {
     smallFeatureActionLoading.value = false
   }

@@ -12,6 +12,7 @@ import {
   getDefaultChromeExecutablePath,
   initBundledPlaywrightEnv,
 } from "../utils/playwrightRuntime.js";
+import { patchContextNewPage } from "../utils/playwrightPageFactory.js";
 import { spawn, exec } from "child_process";
 import http from "http";
 import https from "https";
@@ -445,7 +446,7 @@ function getSession(profileId, create = false) {
 function wrapBrowserHandle(profileId) {
   return {
     profileId,
-    newPage: async () => createProfileBrowserPage(profileId),
+    newPage: async (pageOptions = {}) => createProfileBrowserPage(profileId, pageOptions),
   };
 }
 
@@ -985,6 +986,10 @@ export async function getOrCreateManagedProfileBrowser(options = {}) {
   session.currentBrowserOptions = nextOptions;
 
   if (await isSessionAvailable(session)) {
+    patchContextNewPage(session.contextInstance, {
+      background: true,
+      headless,
+    });
     await installFocusTracker(session.contextInstance);
     await installProfileBadge(session.contextInstance, profile);
     return wrapBrowserHandle(profile.id);
@@ -1060,6 +1065,10 @@ export async function getOrCreateManagedProfileBrowser(options = {}) {
       }
 
       session.chromePid = session.chromePid || (await resolveListeningPid(debugPort));
+      patchContextNewPage(session.contextInstance, {
+        background: true,
+        headless,
+      });
       await setBrowserWindowMaximized(session.contextInstance, headless);
       await installFocusTracker(session.contextInstance);
       await installProfileBadge(session.contextInstance, profile);
@@ -1127,14 +1136,14 @@ export async function getManagedProfileBrowserPage(profileId, pageIndex = 0) {
   return pages[index];
 }
 
-export async function createProfileBrowserPage(profileId) {
+export async function createProfileBrowserPage(profileId, pageOptions = {}) {
   const targetProfile = resolveProfile(profileId);
   await getOrCreateManagedProfileBrowser({ profileId: targetProfile.id });
   const session = getSession(targetProfile.id);
   if (!session?.contextInstance) {
     throw new Error("浏览器上下文不可用");
   }
-  const page = await session.contextInstance.newPage();
+  const page = await session.contextInstance.newPage(pageOptions);
   await installFocusTrackerForPage(page);
   await installProfileBadgeForPage(page, targetProfile);
   session.browserStatus.lastActivity = Date.now();

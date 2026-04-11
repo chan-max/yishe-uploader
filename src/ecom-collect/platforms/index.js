@@ -40,6 +40,172 @@ export const PLATFORM_CONFIGS = Object.fromEntries(
     PLATFORM_LIST.map((item) => [item.platform, item]),
 );
 
+const TASK_ENTITY_TYPE_BY_SCENE = {
+    search: 'product',
+    product_detail: 'product',
+    shop_hot_products: 'product',
+    search_suggestions: 'keyword_signal',
+    trend_keywords: 'keyword_signal',
+};
+
+export function buildDefaultTaskTypeValue(platform, collectScene) {
+    const normalizedPlatform = String(platform || '').trim();
+    const normalizedScene = String(collectScene || '').trim();
+    if (!normalizedPlatform || !normalizedScene) {
+        return '';
+    }
+    return `${normalizedPlatform}.${normalizedScene}`;
+}
+
+function normalizeTaskTypeExamples(examples, platform, taskType) {
+    if (!Array.isArray(examples)) {
+        return [];
+    }
+
+    return examples.map((item) => {
+        const payload =
+            item?.payload && typeof item.payload === 'object'
+                ? cloneValue(item.payload)
+                : {};
+        const restPayload = {
+            ...payload,
+        };
+        delete restPayload.collectScene;
+
+        return {
+            ...cloneValue(item),
+            payload: {
+                ...restPayload,
+                platform,
+                taskType,
+                configData:
+                    payload?.configData && typeof payload.configData === 'object'
+                        ? payload.configData
+                        : {},
+            },
+        };
+    });
+}
+
+function buildTaskTypeCapability(platformValue, platformLabel, scene, override = {}) {
+    const collectScene = String(
+        override.collectScene || scene?.value || override.sceneValue || '',
+    ).trim();
+    const value = String(
+        override.value ||
+            override.taskType ||
+            buildDefaultTaskTypeValue(platformValue, collectScene),
+    ).trim();
+
+    if (!value) {
+        return null;
+    }
+
+    const docs =
+        override?.docs && typeof override.docs === 'object'
+            ? cloneValue(override.docs)
+            : scene?.docs && typeof scene.docs === 'object'
+                ? cloneValue(scene.docs)
+                : {};
+    const examples = normalizeTaskTypeExamples(
+        Array.isArray(docs.examples) ? docs.examples : [],
+        platformValue,
+        value,
+    );
+
+    return {
+        value,
+        taskType: value,
+        label:
+            String(override.label || scene?.label || value).trim() ||
+            `${platformLabel || platformValue} 任务`,
+        description:
+            String(override.description || scene?.description || '').trim() || '',
+        platform: platformValue,
+        collectScene,
+        entityType:
+            String(
+                override.entityType ||
+                    TASK_ENTITY_TYPE_BY_SCENE[collectScene] ||
+                    'unknown',
+            ).trim() || 'unknown',
+        availability:
+            String(override.availability || scene?.availability || '').trim() ||
+            undefined,
+        availabilityLabel:
+            String(
+                override.availabilityLabel || scene?.availabilityLabel || '',
+            ).trim() || undefined,
+        runnable:
+            override.runnable !== undefined
+                ? !!override.runnable
+                : scene?.runnable !== false,
+        verification:
+            String(override.verification || scene?.verification || '').trim() ||
+            undefined,
+        verificationLabel:
+            String(
+                override.verificationLabel || scene?.verificationLabel || '',
+            ).trim() || undefined,
+        reason: String(override.reason || scene?.reason || '').trim() || null,
+        fields: Array.isArray(overridesToFields(override, scene))
+            ? overridesToFields(override, scene)
+            : [],
+        docs: {
+            ...docs,
+            examples,
+        },
+    };
+}
+
+function overridesToFields(overrides, scene) {
+    if (Array.isArray(overrides?.fields)) {
+        return cloneValue(overrides.fields);
+    }
+    if (Array.isArray(scene?.fields)) {
+        return cloneValue(scene.fields);
+    }
+    return [];
+}
+
+function buildPlatformTaskTypes(platformValue, platformLabel, scenes, taskTypes) {
+    const sceneMap = new Map(
+        (Array.isArray(scenes) ? scenes : [])
+            .filter(Boolean)
+            .map((item) => [String(item?.value || '').trim(), item]),
+    );
+    const rawTaskTypes = Array.isArray(taskTypes) && taskTypes.length
+        ? taskTypes
+        : (Array.isArray(scenes) ? scenes : []).map((scene) => ({
+            taskType: buildDefaultTaskTypeValue(platformValue, scene?.value),
+            collectScene: scene?.value,
+            label: scene?.label,
+            description: scene?.description,
+            runnable: scene?.runnable,
+            availability: scene?.availability,
+            availabilityLabel: scene?.availabilityLabel,
+            verification: scene?.verification,
+            verificationLabel: scene?.verificationLabel,
+            reason: scene?.reason,
+            fields: scene?.fields,
+            docs: scene?.docs,
+        }));
+
+    return rawTaskTypes
+        .map((item) => {
+            const collectScene = String(
+                item?.collectScene || item?.scene || item?.sceneValue || '',
+            ).trim();
+            return buildTaskTypeCapability(
+                platformValue,
+                platformLabel,
+                sceneMap.get(collectScene) || null,
+                item,
+            );
+        })
+        .filter(Boolean);
+}
+
 export function getPlatformCatalog() {
     return getPlatformCapabilities().map((item) => ({
         value: item.value,
@@ -47,11 +213,15 @@ export function getPlatformCatalog() {
         label: item.label,
         regions: item.regions,
         supportedScenes: Array.isArray(item.supportedScenes) ? [...item.supportedScenes] : [],
+        supportedTaskTypes: Array.isArray(item.supportedTaskTypes)
+            ? [...item.supportedTaskTypes]
+            : [],
         status: item.status,
         statusLabel: item.statusLabel,
         runnable: item.runnable,
         reason: item.reason,
         scenes: Array.isArray(item.scenes) ? item.scenes : [],
+        taskTypes: Array.isArray(item.taskTypes) ? item.taskTypes : [],
         docs: item.docs || {},
         maintenance: item.maintenance || {},
     }));
@@ -83,6 +253,19 @@ function normalizePlatformCapability(item) {
     );
     const status = String(capability.status || 'heuristic').trim() || 'heuristic';
     const statusMeta = ECOM_CAPABILITY_STATUS_META[status] || ECOM_CAPABILITY_STATUS_META.heuristic;
+    const taskTypes = buildPlatformTaskTypes(
+        item.platform,
+        item.label,
+        scenes,
+        capability.taskTypes,
+    );
+    const supportedTaskTypes = Array.from(
+        new Set(
+            taskTypes
+                .map((taskType) => String(taskType?.value || taskType?.taskType || '').trim())
+                .filter(Boolean),
+        ),
+    );
 
     return {
         value: item.platform,
@@ -94,10 +277,13 @@ function normalizePlatformCapability(item) {
         runnable:
             capability.runnable !== undefined
                 ? !!capability.runnable
-                : scenes.some((scene) => scene?.runnable !== false),
+                : taskTypes.some((taskType) => taskType?.runnable !== false) ||
+                  scenes.some((scene) => scene?.runnable !== false),
         reason: String(capability.reason || '').trim() || null,
         supportedScenes,
         scenes,
+        supportedTaskTypes,
+        taskTypes,
         docs: capability.docs || {},
         maintenance: capability.maintenance || {},
         verification:
@@ -115,4 +301,82 @@ export function getPlatformCapability(platform) {
     return getPlatformCapabilities().find(
         (item) => item.value === String(platform || '').trim(),
     ) || null;
+}
+
+export function getPlatformTaskTypeCapability(platform, taskType) {
+    const normalizedTaskType = String(taskType || '').trim();
+    if (!normalizedTaskType) {
+        return null;
+    }
+
+    const capability =
+        platform && typeof platform === 'object' && !Array.isArray(platform)
+            ? platform
+            : getPlatformCapability(platform);
+    if (!capability) {
+        return null;
+    }
+
+    return (
+        capability.taskTypes?.find((item) => item.value === normalizedTaskType) ||
+        null
+    );
+}
+
+export function getTaskTypeCapability(taskType) {
+    const normalizedTaskType = String(taskType || '').trim();
+    if (!normalizedTaskType) {
+        return null;
+    }
+
+    return (
+        getPlatformCapabilities()
+            .flatMap((item) => item.taskTypes || [])
+            .find((item) => item.value === normalizedTaskType) || null
+    );
+}
+
+export function resolveCollectTaskConfig(input = {}) {
+    let platform = String(input.platform || '').trim();
+    let collectScene = String(input.collectScene || '').trim();
+    let taskType = String(input.taskType || '').trim();
+
+    if (!platform && taskType.includes('.')) {
+        platform = taskType.split('.')[0] || '';
+    }
+    if (!taskType && platform && collectScene) {
+        taskType = buildDefaultTaskTypeValue(platform, collectScene);
+    }
+
+    const platformConfig = getPlatformConfig(platform);
+    const platformCapability = getPlatformCapability(platform);
+    let taskTypeCapability = getPlatformTaskTypeCapability(platformCapability, taskType);
+
+    if (!taskTypeCapability && collectScene && platformCapability) {
+        taskTypeCapability = getPlatformTaskTypeCapability(
+            platformCapability,
+            buildDefaultTaskTypeValue(platform, collectScene),
+        );
+    }
+
+    if (!collectScene && taskTypeCapability?.collectScene) {
+        collectScene = String(taskTypeCapability.collectScene || '').trim();
+    }
+    if (!taskType && taskTypeCapability?.value) {
+        taskType = String(taskTypeCapability.value || '').trim();
+    }
+
+    const sceneCapability = Array.isArray(platformCapability?.scenes)
+        ? platformCapability.scenes.find((item) => item?.value === collectScene) || null
+        : null;
+
+    return {
+        platform,
+        collectScene,
+        taskType,
+        platformConfig,
+        platformCapability,
+        sceneCapability,
+        taskTypeCapability,
+    };
 }

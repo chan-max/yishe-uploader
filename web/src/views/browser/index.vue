@@ -34,18 +34,41 @@
       <div v-if="profileEditorVisible" class="ui secondary segment profile-editor">
         <div class="ui small form">
           <div class="two fields">
-            <div class="field">
-              <label>环境编号</label>
+            <div class="field" :class="{ error: !!profileFormErrors.id }">
+              <label>
+                环境编号
+                <span class="field-optional">可选</span>
+              </label>
               <input
                 v-model="profileForm.id"
                 type="text"
                 :disabled="!!editingProfileId"
                 placeholder="例如 001；留空自动生成"
+                @blur="handleProfileFieldBlur('id')"
+                @input="handleProfileFieldInput('id')"
               />
+              <div v-if="profileFormErrors.id" class="validation-hint validation-hint-error">
+                {{ profileFormErrors.id }}
+              </div>
+              <div v-else class="validation-hint">
+                留空时自动生成；如填写，只支持字母、数字、下划线和中划线。
+              </div>
             </div>
-            <div class="field">
-              <label>环境名称</label>
-              <input v-model="profileForm.name" type="text" placeholder="例如 抖音主账号" />
+            <div class="field" :class="{ error: !!profileFormErrors.name }">
+              <label>
+                环境名称
+                <span class="field-required">*</span>
+              </label>
+              <input
+                v-model="profileForm.name"
+                type="text"
+                placeholder="例如 抖音主账号"
+                @blur="handleProfileFieldBlur('name')"
+                @input="handleProfileFieldInput('name')"
+              />
+              <div v-if="profileFormErrors.name" class="validation-hint validation-hint-error">
+                {{ profileFormErrors.name }}
+              </div>
             </div>
           </div>
 
@@ -259,6 +282,10 @@ const profileForm = reactive({
   account: '',
   platformsText: ''
 })
+const profileFormErrors = reactive({
+  id: '',
+  name: ''
+})
 
 const profileItems = computed(() => Array.isArray(profilesState.value?.items) ? profilesState.value.items : [])
 const profileInstanceMap = computed(() => {
@@ -317,6 +344,59 @@ const statusTypeClass = computed(() => {
 function setStatus(message, type = 'info') {
   status.message = message
   status.type = type
+}
+
+function clearProfileFormErrors() {
+  profileFormErrors.id = ''
+  profileFormErrors.name = ''
+}
+
+function validateProfileId(value) {
+  const normalized = String(value || '').trim()
+  if (!normalized) {
+    return ''
+  }
+  if (!/^[a-zA-Z0-9_-]+$/.test(normalized)) {
+    return '环境编号仅支持字母、数字、下划线和中划线'
+  }
+  return ''
+}
+
+function validateProfileName(value) {
+  const normalized = String(value || '').trim()
+  if (!normalized) {
+    return '请填写环境名称'
+  }
+  return ''
+}
+
+function validateProfileField(field) {
+  if (field === 'id') {
+    profileFormErrors.id = editingProfileId.value ? '' : validateProfileId(profileForm.id)
+    return !profileFormErrors.id
+  }
+
+  if (field === 'name') {
+    profileFormErrors.name = validateProfileName(profileForm.name)
+    return !profileFormErrors.name
+  }
+
+  return true
+}
+
+function validateProfileForm() {
+  const fields = editingProfileId.value ? ['name'] : ['id', 'name']
+  return fields.every((field) => validateProfileField(field))
+}
+
+function handleProfileFieldBlur(field) {
+  validateProfileField(field)
+}
+
+function handleProfileFieldInput(field) {
+  if (profileFormErrors[field]) {
+    validateProfileField(field)
+  }
 }
 
 function formatDateTime(value) {
@@ -493,6 +573,7 @@ function resetProfileForm() {
   profileForm.remark = ''
   profileForm.account = ''
   profileForm.platformsText = ''
+  clearProfileFormErrors()
 }
 
 function closeProfileEditor() {
@@ -517,6 +598,11 @@ function openEditProfileForm(profile) {
 }
 
 async function submitProfileForm() {
+  if (!validateProfileForm()) {
+    setStatus('请先完善必填项后再提交', 'error')
+    return
+  }
+
   profileSubmitting.value = true
   try {
     const isEditing = !!editingProfileId.value
@@ -529,10 +615,6 @@ async function submitProfileForm() {
         .split(/[,，\s]+/)
         .map((item) => item.trim())
         .filter(Boolean)
-    }
-
-    if (!payload.name && !isEditing) {
-      throw new Error('请填写环境名称')
     }
 
     const data = isEditing
@@ -691,6 +773,29 @@ onUnmounted(() => {
 
   .profile-editor {
     margin-bottom: 1rem;
+  }
+
+  .field-required {
+    color: #db2828;
+    margin-left: 0.2rem;
+  }
+
+  .field-optional {
+    color: #999;
+    font-size: 0.85em;
+    font-weight: 400;
+    margin-left: 0.35rem;
+  }
+
+  .validation-hint {
+    margin-top: 0.35rem;
+    font-size: 0.85em;
+    color: #767676;
+    line-height: 1.45;
+  }
+
+  .validation-hint-error {
+    color: #9f3a38;
   }
 
   .profile-table {

@@ -2,6 +2,8 @@
 export const PLATFORM_NAME = 'Temu';
 export const TEMU_CREATE_URL = 'https://agentseller.temu.com/goods/create/category';
 export const TEMU_LOGIN_URL = 'https://seller.kuajingmaihuo.com/login';
+export const TEMU_SELLER_HOME_URL = 'https://agentseller.temu.com/';
+export const TEMU_USERINFO_API_URL = 'https://agentseller.temu.com/api/seller/auth/userInfo';
 export const TEMU_EDIT_URL_KEYWORD = '/goods/edit';
 export const TEMU_CATEGORY_URL_KEYWORD = '/goods/create/category';
 export const TEMU_LOGIN_URL_KEYWORDS = ['login', 'passport', 'auth'];

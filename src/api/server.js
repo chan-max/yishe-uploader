@@ -535,8 +535,8 @@ class ApiServer {
                 { method: 'POST', path: '/api/browser/check-port', description: '检测 CDP 端口' },
                 { method: 'POST', path: '/api/browser/open-platform', description: '在已连接浏览器中打开指定平台创作页' },
                 { method: 'POST', path: '/api/browser/open-link', description: '在已连接浏览器中打开指定链接' },
-                { method: 'GET', path: '/api/browser/small-features', description: '获取浏览器自动化端“小功能”目录' },
-                { method: 'POST', path: '/api/browser/small-features/run', description: '执行浏览器自动化端“小功能”' },
+                { method: 'GET', path: '/api/browser/small-features', description: '获取浏览器自动化端工具目录' },
+                { method: 'POST', path: '/api/browser/small-features/run', description: '执行浏览器自动化端工具' },
                 { method: 'POST', path: '/api/browser/open-user-data-dir', description: '在本机文件管理器中打开指定用户数据目录' },
                 { method: 'GET', path: '/api/browser/pages', description: '获取当前浏览器标签页列表' },
                 { method: 'POST', path: '/api/browser/debug', description: '对当前浏览器页面执行调试动作（goto/click/fill/text/eval 等）' },
@@ -855,14 +855,14 @@ class ApiServer {
                 '/api/browser/small-features': {
                     get: {
                         tags: ['Browser'],
-                        summary: '获取浏览器自动化端小功能目录',
-                        responses: { 200: { description: '小功能目录结果' } }
+                        summary: '获取浏览器自动化端工具目录',
+                        responses: { 200: { description: '工具目录结果' } }
                     }
                 },
                 '/api/browser/small-features/run': {
                     post: {
                         tags: ['Browser'],
-                        summary: '执行浏览器自动化端小功能',
+                        summary: '执行浏览器自动化端工具',
                         requestBody: {
                             required: true,
                             content: {
@@ -871,11 +871,12 @@ class ApiServer {
                                         type: 'object',
                                         required: ['featureKey'],
                                         properties: {
-                                            featureKey: { type: 'string', description: '小功能标识，如 temu-login' },
+                                            featureKey: { type: 'string', description: '工具标识，如 temu-login / temu-session-collect' },
                                             profileId: { type: 'string', description: '可选，指定执行环境' },
                                             keepPageOpen: { type: 'boolean', description: '执行后是否保留页面，默认 true' },
-                                            account: { type: 'string', description: '账号类小功能需要的账号' },
-                                            password: { type: 'string', description: '账号类小功能需要的密码' }
+                                            collectRegionCookies: { type: 'boolean', description: 'Temu 会话采集时是否补抓 global/us/eu 区域 cookies，默认 true' },
+                                            account: { type: 'string', description: '账号类工具需要的账号' },
+                                            password: { type: 'string', description: '账号类工具需要的密码' }
                                         }
                                     }
                                 }
@@ -1138,14 +1139,17 @@ class ApiServer {
                                 'application/json': {
                                     schema: {
                                         type: 'object',
-                                        required: ['platform', 'collectScene'],
+                                        required: ['taskType'],
                                         properties: {
                                             runId: { type: 'string', description: '运行 ID（由上游传入）' },
                                             taskId: { type: 'string', description: '任务 ID（由上游传入）' },
-                                            platform: { type: 'string', description: '平台标识，如 amazon、temu、aliexpress' },
-                                            collectScene: {
+                                            platform: {
                                                 type: 'string',
-                                                description: '采集场景标识，实际可选值以 /api/ecom-collect/capabilities 返回的场景 schema 为准',
+                                                description: '平台标识，可选；未传时会优先根据 taskType 自动推导',
+                                            },
+                                            taskType: {
+                                                type: 'string',
+                                                description: '任务类型标识，实际可选值以 /api/ecom-collect/capabilities 返回的 taskTypes schema 为准',
                                             },
                                             workspaceDir: { type: 'string', description: '客户端工作目录，截图会优先落在该目录下' },
                                             timeoutMs: { type: 'number', description: '单次运行超时时间，毫秒' },
@@ -1173,7 +1177,7 @@ class ApiServer {
                                             summary: 'Amazon 搜索采集',
                                             value: {
                                                 platform: 'amazon',
-                                                collectScene: 'search',
+                                                taskType: 'amazon.search',
                                                 configData: {
                                                     keyword: 'wireless earbuds',
                                                     keywords: ['wireless earbuds', 'bluetooth headphones'],
@@ -1187,7 +1191,7 @@ class ApiServer {
                                             summary: 'Amazon 商品详情采集',
                                             value: {
                                                 platform: 'amazon',
-                                                collectScene: 'product_detail',
+                                                taskType: 'amazon.product_detail',
                                                 configData: {
                                                     targetUrl: 'https://www.amazon.com/dp/B0C1234567',
                                                     captureSnapshots: false
@@ -1198,7 +1202,7 @@ class ApiServer {
                                             summary: 'Amazon 搜索联想词采集',
                                             value: {
                                                 platform: 'amazon',
-                                                collectScene: 'search_suggestions',
+                                                taskType: 'amazon.search_suggestions',
                                                 configData: {
                                                     marketplace: 'US',
                                                     keyword: 'wireless earbuds',
@@ -1211,7 +1215,7 @@ class ApiServer {
                                             summary: 'Google Trends 趋势热词采集',
                                             value: {
                                                 platform: 'google_trends',
-                                                collectScene: 'trend_keywords',
+                                                taskType: 'google_trends.trend_keywords',
                                                 configData: {
                                                     geo: 'US',
                                                     maxItems: 20,
@@ -1223,7 +1227,7 @@ class ApiServer {
                                             summary: 'Temu 店铺热门商品采集',
                                             value: {
                                                 platform: 'temu',
-                                                collectScene: 'shop_hot_products',
+                                                taskType: 'temu.shop_hot_products',
                                                 configData: {
                                                     targetUrl: 'https://www.temu.com/store.html?store_id=1000000000',
                                                     maxItems: 60,
@@ -2214,7 +2218,7 @@ class ApiServer {
                 data: listBrowserAutomationSmallFeatures()
             });
         } catch (error) {
-            this.sendResponse(res, 500, { success: false, message: error.message || '获取小功能目录失败' });
+            this.sendResponse(res, 500, { success: false, message: error.message || '获取工具目录失败' });
         }
     }
 
@@ -2231,7 +2235,7 @@ class ApiServer {
             const result = await runBrowserAutomationSmallFeature(featureKey, payload);
             this.sendResponse(res, 200, result);
         } catch (error) {
-            this.sendResponse(res, 500, { success: false, message: error.message || '执行小功能失败' });
+            this.sendResponse(res, 500, { success: false, message: error.message || '执行工具失败' });
         }
     }
 

@@ -26,10 +26,11 @@ import {
 } from './common/runtime.js';
 import { detectRiskKind } from './common/risk.js';
 import {
+    buildDefaultTaskTypeValue,
     getPlatformCapabilities,
     getPlatformCapability,
     getPlatformCatalog,
-    getPlatformConfig,
+    resolveCollectTaskConfig,
 } from './platforms/index.js';
 
 function mapBlockedRiskToStatus(riskKind) {
@@ -82,20 +83,24 @@ function buildCustomSceneExecutorContext({
     page,
     platform,
     collectScene,
+    taskType,
     taskConfig,
     runtime,
     platformConfig,
     platformCapability,
+    taskTypeCapability,
     sceneCapability,
 }) {
     return {
         page,
         platform,
         collectScene,
+        taskType,
         taskConfig,
         runtime,
         platformConfig,
         platformCapability,
+        taskTypeCapability,
         sceneCapability,
         helpers: {
             captureScreenshot,
@@ -127,6 +132,61 @@ async function normalizeRecordsByPlatform(records, platformConfig, contextFactor
     }
 
     return normalizedRecords;
+}
+
+function buildBuiltinTaskTypeExecutors({
+    page,
+    platform,
+    taskConfig,
+    runtime,
+    platformConfig,
+    platformCapability,
+}) {
+    const sceneExecutorFactories = {
+        search: () => collectSearchScene(page, platformConfig, taskConfig, runtime),
+        product_detail: () =>
+            collectDetailScene(
+                page,
+                platformConfig.productDetail || {},
+                taskConfig,
+                runtime,
+                'product-detail',
+                platformConfig,
+                'product_detail',
+            ),
+        shop_hot_products: () =>
+            collectListPageScene(
+                page,
+                platformConfig.shopHotProducts || {},
+                taskConfig,
+                runtime,
+                'shop-hot-products',
+                platformConfig,
+                'shop_hot_products',
+            ),
+    };
+    const executors = {};
+
+    if (Array.isArray(platformCapability?.taskTypes)) {
+        platformCapability.taskTypes.forEach((item) => {
+            const taskTypeValue = String(item?.value || item?.taskType || '').trim();
+            const collectScene = String(item?.collectScene || '').trim();
+            const executorFactory = sceneExecutorFactories[collectScene];
+
+            if (taskTypeValue && typeof executorFactory === 'function' && !executors[taskTypeValue]) {
+                executors[taskTypeValue] = executorFactory;
+            }
+        });
+    }
+
+    Object.entries(sceneExecutorFactories).forEach(([collectScene, executorFactory]) => {
+        const fallbackTaskType = buildDefaultTaskTypeValue(platform, collectScene);
+        if (fallbackTaskType && !executors[fallbackTaskType]) {
+            executors[fallbackTaskType] = executorFactory;
+        }
+    });
+
+    return executors;
 }
 
 async function collectSearchScene(page, platformConfig, taskConfig, runtime) {
@@ -441,23 +501,30 @@ export async function getEcomCollectCapabilities() {
 }
 
 export async function runEcomCollectTask(taskConfig = {}) {
-    const platform = String(taskConfig.platform || '').trim();
-    const collectScene = String(taskConfig.collectScene || '').trim();
-    const platformConfig = getPlatformConfig(platform);
-    const platformCapability = getPlatformCapability(platform);
-    const sceneCapability = Array.isArray(platformCapability?.scenes)
-        ? platformCapability.scenes.find((item) => item?.value === collectScene) || null
-        : null;
+    const resolvedTask = resolveCollectTaskConfig(taskConfig);
+    const platform = String(resolvedTask.platform || '').trim();
+    const collectScene = String(resolvedTask.collectScene || '').trim();
+    const taskType =
+        String(resolvedTask.taskType || taskConfig.taskType || '').trim() ||
+        buildDefaultTaskTypeValue(platform, collectScene);
+    const platformConfig = resolvedTask.platformConfig;
+    const platformCapability = resolvedTask.platformCapability || getPlatformCapability(platform);
+    const sceneCapability = resolvedTask.sceneCapability;
+    const taskTypeCapability = resolvedTask.taskTypeCapability;
 
     if (!platformConfig) {
         throw new Error(`暂不支持的平台: ${platform}`);
     }
-    if (!sceneCapability) {
-        throw new Error(`暂不支持的采集场景: ${collectScene}`);
+    if (!taskTypeCapability) {
+        throw new Error(`暂不支持的任务类型: ${taskType}`);
     }
-    if (sceneCapability.runnable === false) {
+    if (!sceneCapability) {
+        throw new Error(`任务类型未绑定执行场景: ${taskType}`);
+    }
+    if (taskTypeCapability?.runnable === false || sceneCapability.runnable === false) {
         throw new Error(
-            sceneCapability.reason ||
+            taskTypeCapability?.reason ||
+                sceneCapability.reason ||
                 `${platformCapability?.label || platform} 当前场景暂不可执行`,
         );
     }
@@ -498,54 +565,41 @@ export async function runEcomCollectTask(taskConfig = {}) {
             collectScene,
             taskConfig,
             runtime,
+            taskType,
         });
 
-        const sceneExecutors = {
-            search: () => collectSearchScene(page, platformConfig, taskConfig, runtime),
-            product_detail: () =>
-                collectDetailScene(
-                    page,
-                    platformConfig.productDetail || {},
-                    taskConfig,
-                    runtime,
-                    'product-detail',
-                    platformConfig,
-                    'product_detail',
-                ),
-            shop_hot_products: () =>
-                collectListPageScene(
-                    page,
-                    platformConfig.shopHotProducts || {},
-                    taskConfig,
-                    runtime,
-                    'shop-hot-products',
-                    platformConfig,
-                    'shop_hot_products',
-                ),
-        };
-
-        const customSceneExecutor = platformConfig?.customSceneExecutors?.[collectScene];
-        const sceneExecutor =
-            typeof customSceneExecutor === 'function'
+        const taskTypeExecutors = buildBuiltinTaskTypeExecutors({
+            page,
+            platform,
+            taskConfig,
+            runtime,
+            platformConfig,
+            platformCapability,
+        });
+        const customTaskTypeExecutor = platformConfig?.customTaskTypeExecutors?.[taskType];
+        const taskTypeExecutor =
+            typeof customTaskTypeExecutor === 'function'
                 ? () =>
-                    customSceneExecutor(
+                    customTaskTypeExecutor(
                         buildCustomSceneExecutorContext({
                             page,
                             platform,
                             collectScene,
+                            taskType,
                             taskConfig,
                             runtime,
                             platformConfig,
                             platformCapability,
+                            taskTypeCapability,
                             sceneCapability,
                         }),
                     )
-                : sceneExecutors[collectScene];
-        if (!sceneExecutor) {
-            throw new Error(`暂不支持的采集场景: ${collectScene}`);
+                : taskTypeExecutors[taskType];
+        if (!taskTypeExecutor) {
+            throw new Error(`暂不支持的任务类型: ${taskType}`);
         }
 
-        const result = await sceneExecutor();
+        const result = await taskTypeExecutor();
 
         await runPlatformHook(platformConfig, 'afterScene', {
             page,
@@ -553,6 +607,7 @@ export async function runEcomCollectTask(taskConfig = {}) {
             collectScene,
             taskConfig,
             runtime,
+            taskType,
             result,
         });
 
@@ -564,11 +619,13 @@ export async function runEcomCollectTask(taskConfig = {}) {
                 runId: taskConfig.runId || null,
                 taskId: taskConfig.taskId || null,
                 platform,
+                taskType,
                 collectScene,
                 records: Array.isArray(result.records) ? result.records : [],
                 snapshots: runtime.snapshots,
                 summary: {
                     ...(result.summary || {}),
+                    taskType,
                     visitedUrls: runtime.visitedUrls,
                     startedAt: runtime.startedAt,
                     finishedAt: nowIso(),
@@ -577,6 +634,7 @@ export async function runEcomCollectTask(taskConfig = {}) {
                 debugMeta: {
                     snapshotDir,
                     tempDir: snapshotDir,
+                    taskType,
                     workspaceDir: typeof taskConfig.workspaceDir === 'string' && taskConfig.workspaceDir.trim()
                         ? taskConfig.workspaceDir.trim()
                         : null,
@@ -615,10 +673,12 @@ export async function runEcomCollectTask(taskConfig = {}) {
                 runId: taskConfig.runId || null,
                 taskId: taskConfig.taskId || null,
                 platform,
+                taskType,
                 collectScene,
                 records: [],
                 snapshots: runtime.snapshots,
                 summary: {
+                    taskType,
                     visitedUrls: runtime.visitedUrls,
                     startedAt: runtime.startedAt,
                     finishedAt: nowIso(),
@@ -627,6 +687,7 @@ export async function runEcomCollectTask(taskConfig = {}) {
                 debugMeta: {
                     snapshotDir,
                     tempDir: snapshotDir,
+                    taskType,
                     workspaceDir: typeof taskConfig.workspaceDir === 'string' && taskConfig.workspaceDir.trim()
                         ? taskConfig.workspaceDir.trim()
                         : null,

@@ -304,8 +304,8 @@ const googleTrendsPlatform = {
     verification: {
         trend_keywords: 'verified',
     },
-    customSceneExecutors: {
-        trend_keywords: collectGoogleTrendsTrendKeywords,
+    customTaskTypeExecutors: {
+        'google_trends.trend_keywords': collectGoogleTrendsTrendKeywords,
     },
     capability: buildPlatformCapability({
         regions: ['global'],

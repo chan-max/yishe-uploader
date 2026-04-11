@@ -1026,8 +1026,8 @@ const amazonPlatform = {
         shop_hot_products: 'verified',
         search_suggestions: 'verified',
     },
-    customSceneExecutors: {
-        search_suggestions: collectAmazonSearchSuggestions,
+    customTaskTypeExecutors: {
+        'amazon.search_suggestions': collectAmazonSearchSuggestions,
     },
     hooks: {
         async normalizeRecord(context) {
