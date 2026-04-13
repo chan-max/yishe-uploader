@@ -85,31 +85,19 @@ function injectProfileBadgeScript(payload) {
 
   const profileId = normalizeText(payload?.profileId, "default");
   const profileName = normalizeText(payload?.profileName, profileId);
-  const account = normalizeText(payload?.account);
-  const platforms = Array.isArray(payload?.platforms)
-    ? payload.platforms.map((item) => normalizeText(item)).filter(Boolean)
-    : [];
-  const titleText = profileName;
-  const metaText = [account, platforms.slice(0, 2).join(" / ")]
-    .filter(Boolean)
-    .join("  ·  ");
+  const openedAtText = normalizeText(payload?.openedAtText, "--");
   const badgeState = (globalThis.__yisheBrowserAutomationProfileBadgeState =
     globalThis.__yisheBrowserAutomationProfileBadgeState || {});
 
   badgeState.payload = {
     profileId,
     profileName,
-    account,
-    platforms,
-    titleText,
-    metaText,
+    openedAtText,
   };
   globalThis.__yisheBrowserAutomationProfile = badgeState.payload;
 
   const BADGE_ID = "__yishe_browser_automation_profile_badge";
-  const BADGE_VERSION = "4";
-  const BASE_SHADOW =
-    "0 8px 20px rgba(0, 0, 0, 0.16), inset 0 1px 0 rgba(255,255,255,0.08)";
+  const BADGE_VERSION = "5";
 
   const ensureBadge = () => {
     if (!document?.documentElement) {
@@ -135,134 +123,106 @@ function injectProfileBadgeScript(payload) {
       badge.setAttribute("aria-hidden", "true");
       badge.style.cssText = [
         "position:fixed",
-        "right:12px",
-        "bottom:12px",
+        "right:10px",
+        "bottom:10px",
         "z-index:2147483647",
         "pointer-events:none",
+        "width:160px",
+        "padding:4px",
+        "border-radius:4px",
+        "background:linear-gradient(135deg, #f7ba2b 0%, #ea5358 100%)",
+        "box-shadow:0 8px 18px rgba(234, 83, 88, 0.18)",
+        "overflow:visible",
+        "font-family:'SF Pro Text','Segoe UI',Arial,sans-serif",
+        "user-select:none",
+        "box-sizing:border-box",
+      ].join(";");
+
+      const glow = document.createElement("div");
+      glow.setAttribute("data-role", "glow");
+      glow.style.cssText = [
+        "position:absolute",
+        "top:18px",
+        "left:8px",
+        "right:8px",
+        "bottom:-6px",
+        "border-radius:4px",
+        "background:linear-gradient(135deg, #f7ba2b 0%, #ea5358 100%)",
+        "filter:blur(12px)",
+        "opacity:0.28",
+        "z-index:0",
+        "pointer-events:none",
+      ].join(";");
+
+      const cardInfo = document.createElement("div");
+      cardInfo.setAttribute("data-role", "card-info");
+      cardInfo.style.cssText = [
+        "position:relative",
+        "z-index:1",
         "display:flex",
         "flex-direction:column",
         "gap:4px",
-        "min-width:132px",
-        "max-width:min(30vw, 200px)",
-        "padding:8px 10px 9px",
-        "border-radius:10px",
-        "border:1px solid rgba(255,255,255,0.12)",
-        "background:rgba(15,15,15,0.88)",
-        `box-shadow:${BASE_SHADOW}`,
-        "backdrop-filter:blur(8px)",
-        "-webkit-backdrop-filter:blur(8px)",
-        "overflow:hidden",
-        "font-family:'SF Pro Text','Segoe UI',Arial,sans-serif",
-        "line-height:1.2",
+        "width:100%",
+        "min-height:74px",
+        "padding:8px 10px",
+        "border-radius:4px",
+        "background:#181818",
+        "box-sizing:border-box",
         "color:#f8fafc",
-        "white-space:normal",
-        "user-select:none",
       ].join(";");
 
-      const accent = document.createElement("div");
-      accent.setAttribute("data-role", "accent");
-      accent.style.cssText = [
-        "position:absolute",
-        "left:0",
-        "top:0",
-        "right:0",
-        "height:1px",
-        "background:rgba(255,255,255,0.08)",
-        "pointer-events:none",
-      ].join(";");
-
-      const header = document.createElement("div");
-      header.setAttribute("data-role", "header");
-      header.style.cssText = [
-        "display:flex",
-        "align-items:center",
-        "justify-content:space-between",
-        "gap:6px",
-        "min-width:0",
-        "position:relative",
-        "z-index:1",
-      ].join(";");
-
-      const chips = document.createElement("div");
-      chips.setAttribute("data-role", "chips");
-      chips.style.cssText = [
-        "display:flex",
-        "align-items:center",
-        "gap:5px",
-        "min-width:0",
-        "flex-wrap:wrap",
-      ].join(";");
-
-      const flag = document.createElement("div");
-      flag.setAttribute("data-role", "flag");
-      flag.style.cssText = [
-        "display:inline-flex",
-        "align-items:center",
-        "height:18px",
-        "padding:0 7px",
-        "border-radius:999px",
-        "border:1px solid rgba(255, 255, 255, 0.14)",
-        "background:rgba(255, 255, 255, 0.06)",
-        "color:rgba(255,255,255,0.72)",
-        "font-size:9px",
-        "font-weight:700",
-        "letter-spacing:0.04em",
-        "line-height:1",
-      ].join(";");
-      flag.textContent = "自动化";
-
-      const idNode = document.createElement("div");
-      idNode.setAttribute("data-role", "id");
-      idNode.style.cssText = [
-        "display:inline-flex",
-        "align-items:center",
-        "min-height:18px",
-        "max-width:52%",
-        "padding:0 6px",
-        "border-radius:999px",
-        "border:1px solid rgba(255,255,255,0.08)",
-        "background:rgba(255,255,255,0.04)",
-        "color:rgba(255,255,255,0.66)",
-        "font-size:9px",
+      const eyebrow = document.createElement("div");
+      eyebrow.setAttribute("data-role", "eyebrow");
+      eyebrow.style.cssText = [
+        "font-size:8px",
         "font-weight:600",
-        "line-height:1",
-        "white-space:nowrap",
-        "overflow:hidden",
-        "text-overflow:ellipsis",
+        "letter-spacing:0.06em",
+        "color:rgba(255,255,255,0.56)",
+        "text-transform:uppercase",
+        "line-height:1.2",
       ].join(";");
+      eyebrow.textContent = "环境编号";
 
-      const title = document.createElement("div");
-      title.setAttribute("data-role", "title");
-      title.style.cssText = [
-        "position:relative",
-        "z-index:1",
-        "font-size:12px",
+      const number = document.createElement("div");
+      number.setAttribute("data-role", "number");
+      number.style.cssText = [
+        "font-size:17px",
         "font-weight:700",
+        "line-height:1.1",
         "color:#ffffff",
+        "letter-spacing:0.02em",
+      ].join(";");
+
+      const name = document.createElement("div");
+      name.setAttribute("data-role", "name");
+      name.style.cssText = [
+        "font-size:9px",
+        "font-weight:500",
+        "line-height:1.25",
+        "color:rgba(255,255,255,0.82)",
         "overflow:hidden",
         "text-overflow:ellipsis",
         "white-space:nowrap",
       ].join(";");
 
-      const meta = document.createElement("div");
-      meta.setAttribute("data-role", "meta");
-      meta.style.cssText = [
-        "position:relative",
-        "z-index:1",
-        "font-size:10px",
-        "color:rgba(255,255,255,0.58)",
+      const openedAt = document.createElement("div");
+      openedAt.setAttribute("data-role", "openedAt");
+      openedAt.style.cssText = [
+        "font-size:9px",
+        "font-weight:500",
+        "line-height:1.25",
+        "color:rgba(255,255,255,0.64)",
         "overflow:hidden",
         "text-overflow:ellipsis",
         "white-space:nowrap",
       ].join(";");
 
-      chips.appendChild(flag);
-      chips.appendChild(idNode);
-      header.appendChild(chips);
-      badge.appendChild(accent);
-      badge.appendChild(header);
-      badge.appendChild(title);
-      badge.appendChild(meta);
+      cardInfo.appendChild(eyebrow);
+      cardInfo.appendChild(number);
+      cardInfo.appendChild(name);
+      cardInfo.appendChild(openedAt);
+      badge.appendChild(glow);
+      badge.appendChild(cardInfo);
       mountTarget.appendChild(badge);
     } else if (badge.parentElement !== mountTarget) {
       mountTarget.appendChild(badge);
@@ -271,22 +231,21 @@ function injectProfileBadgeScript(payload) {
     const currentPayload = badgeState.payload || {};
     badge.dataset.profileId = currentPayload.profileId || "";
     badge.dataset.profileName = currentPayload.profileName || "";
-    badge.title = [currentPayload.profileName, currentPayload.profileId, currentPayload.account]
+    badge.title = [currentPayload.profileId, currentPayload.profileName, currentPayload.openedAtText]
       .filter(Boolean)
       .join(" | ");
 
-    const titleNode = badge.querySelector('[data-role="title"]');
-    const metaNode = badge.querySelector('[data-role="meta"]');
-    const idNode = badge.querySelector('[data-role="id"]');
-    if (titleNode) {
-      titleNode.textContent =
-        currentPayload.titleText || currentPayload.profileName || currentPayload.profileId || "";
+    const numberNode = badge.querySelector('[data-role="number"]');
+    const nameNode = badge.querySelector('[data-role="name"]');
+    const openedAtNode = badge.querySelector('[data-role="openedAt"]');
+    if (numberNode) {
+      numberNode.textContent = currentPayload.profileId || "default";
     }
-    if (metaNode) {
-      metaNode.textContent = currentPayload.metaText || "自动化窗口";
+    if (nameNode) {
+      nameNode.textContent = `环境名称 ${currentPayload.profileName || currentPayload.profileId || "--"}`;
     }
-    if (idNode) {
-      idNode.textContent = `#${currentPayload.profileId || "default"}`;
+    if (openedAtNode) {
+      openedAtNode.textContent = `打开时间 ${currentPayload.openedAtText || "--"}`;
     }
   };
 
@@ -450,12 +409,29 @@ function wrapBrowserHandle(profileId) {
   };
 }
 
+function formatProfileBadgeOpenedAt(value) {
+  if (!value) {
+    return "";
+  }
+
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return String(value || "").trim();
+  }
+
+  const pad = (input) => String(input).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(
+    date.getMinutes(),
+  )}:${pad(date.getSeconds())}`;
+}
+
 function buildProfileBadgePayload(profile) {
+  const session = getSession(profile?.id);
+  const openedAtText = formatProfileBadgeOpenedAt(session?.createdAt || session?.updatedAt || "");
   return {
     profileId: String(profile?.id || "").trim() || "default",
     profileName: String(profile?.name || profile?.id || "").trim() || "default",
-    account: String(profile?.account || "").trim() || "",
-    platforms: Array.isArray(profile?.platforms) ? profile.platforms : [],
+    openedAtText,
   };
 }
 
