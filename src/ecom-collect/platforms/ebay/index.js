@@ -4,6 +4,7 @@ import {
     buildSearchSceneCapability,
     buildSearchSuggestionsSceneCapability,
     buildShopHotProductsSceneCapability,
+    createOutputField,
     DEFAULT_SUPPORTED_SCENES,
 } from '../shared.js';
 import { buildKeywordList } from '../../common/extractors.js';
@@ -27,6 +28,47 @@ const EBAY_HTTP_HEADERS = {
     'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36',
     'accept-language': 'en-US,en;q=0.9',
 };
+
+const EBAY_PRODUCT_RECORD_FIELDS_EXTRA = [
+    createOutputField('itemId', 'eBay Item ID', {
+        description: 'eBay 商品唯一标识，适合做链接规范化和去重。',
+        stability: 'platform',
+        examples: ['143949885566'],
+    }),
+    createOutputField('originalSourceUrl', '原始链接', {
+        description: '保留规范化前的原始商品链接。',
+        valueType: 'url',
+        stability: 'platform',
+    }),
+];
+
+const EBAY_SUGGESTION_RECORD_FIELDS_EXTRA = [
+    createOutputField('sourceType', '来源类型', {
+        description: '当前记录属于搜索联想信号。',
+        stability: 'platform',
+        examples: ['keyword_suggestion'],
+    }),
+    createOutputField('signalType', '信号类型', {
+        description: '信号子类型，当前为 search_suggestion。',
+        stability: 'platform',
+        examples: ['search_suggestion'],
+    }),
+    createOutputField('marketplace', '站点代码', {
+        description: '当前联想词所属站点代码。',
+        stability: 'platform',
+        examples: ['US'],
+    }),
+    createOutputField('marketplaceLabel', '站点名称', {
+        description: '站点的人类可读名称。',
+        stability: 'platform',
+        examples: ['美国'],
+    }),
+    createOutputField('suggestionSource', '建议来源', {
+        description: '当前联想词来自 autosuggest API 还是 UI 下拉抓取。',
+        stability: 'platform',
+        examples: ['api'],
+    }),
+];
 
 function extractEbayItemId(value = '') {
     const text = String(value || '').trim();
@@ -404,6 +446,12 @@ const ebayPlatform = {
     capability: buildPlatformCapability({
         regions: ['global'],
         status: 'heuristic',
+        access: {
+            login: 'none',
+            captcha: 'possible',
+            antiBot: 'medium',
+            notes: ['eBay 大部分公开页面可访问，但高频列表翻页和详情采样时仍可能触发风险限制。'],
+        },
         overview:
             'eBay 已接入独立平台模块，优先覆盖搜索、商品详情、店铺/卖家商品列表三类核心页面。',
         notes: [
@@ -421,6 +469,13 @@ const ebayPlatform = {
             buildSearchSceneCapability({
                 verification: 'heuristic',
                 availability: 'heuristic',
+                recordFieldsExtra: EBAY_PRODUCT_RECORD_FIELDS_EXTRA,
+                access: {
+                    login: 'none',
+                    captcha: 'possible',
+                    antiBot: 'medium',
+                    notes: ['搜索页主要风险来自高频翻页和地区化结果差异。'],
+                },
                 keywordPlaceholder: '例如：wireless earbuds',
                 keywordsPlaceholder: '一行一个关键词，适合按品类分批跑',
                 overview: '进入 eBay 搜索结果页，提取商品卡片标题、价格、卖家等原始数据。',
@@ -445,6 +500,13 @@ const ebayPlatform = {
             buildSearchSuggestionsSceneCapability({
                 verification: 'verified',
                 availability: 'available',
+                recordFieldsExtra: EBAY_SUGGESTION_RECORD_FIELDS_EXTRA,
+                access: {
+                    login: 'none',
+                    captcha: 'none',
+                    antiBot: 'low',
+                    notes: ['联想词走公开 autosuggest 接口，适合低风险探词。'],
+                },
                 keywordPlaceholder: '例如：wireless earbuds',
                 keywordsPlaceholder: '一行一个种子词，也支持逗号分隔',
                 overview: '根据输入关键词抓取 eBay 公开搜索联想词，可作为热搜词和需求验证的轻量信号源。',
@@ -470,6 +532,13 @@ const ebayPlatform = {
             buildProductDetailSceneCapability({
                 verification: 'heuristic',
                 availability: 'heuristic',
+                recordFieldsExtra: EBAY_PRODUCT_RECORD_FIELDS_EXTRA,
+                access: {
+                    login: 'none',
+                    captcha: 'possible',
+                    antiBot: 'medium',
+                    notes: ['详情页通常可抓，但部分商品会有地区、年龄或卖家限制。'],
+                },
                 targetUrlPlaceholder: '填写 eBay 商品详情页链接',
                 overview: '打开 eBay 商品详情页，提取标题、价格、图集、卖家与描述相关原始信息。',
                 notes: [
@@ -491,6 +560,13 @@ const ebayPlatform = {
             buildShopHotProductsSceneCapability({
                 verification: 'heuristic',
                 availability: 'heuristic',
+                recordFieldsExtra: EBAY_PRODUCT_RECORD_FIELDS_EXTRA,
+                access: {
+                    login: 'none',
+                    captcha: 'possible',
+                    antiBot: 'medium',
+                    notes: ['卖家商品页适合小批量验证，过快翻页时容易进入访问限制。'],
+                },
                 targetUrlPlaceholder: '填写 eBay 店铺商品页、卖家商品页或类目列表链接',
                 overview: '打开 eBay 卖家或类目商品列表页，提取热门商品卡片原始数据。',
                 notes: [

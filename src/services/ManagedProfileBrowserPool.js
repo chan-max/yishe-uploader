@@ -1293,6 +1293,15 @@ export async function closeManagedProfileBrowser(profileId) {
   }
 }
 
+export function forgetManagedProfileBrowserSession(profileId) {
+  const normalizedProfileId = String(profileId || "").trim();
+  if (!normalizedProfileId) {
+    return false;
+  }
+
+  return sessions.delete(normalizedProfileId);
+}
+
 export async function focusManagedProfileBrowser(profileId) {
   const targetProfile = resolveProfile(profileId);
   const session = getSession(targetProfile.id);

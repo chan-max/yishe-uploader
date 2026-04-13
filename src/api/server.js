@@ -128,10 +128,6 @@ function getDefaultCdpUserDataDir() {
     return path.resolve(getBrowserProfilesWorkspaceDir(), 'cdp-user-data');
 }
 
-function sleep(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 function normalizeSourceId(value) {
     const normalized = String(value || '').trim();
     return normalized || undefined;
@@ -173,46 +169,6 @@ function buildSourcesFromQueryBody(body = {}) {
     }
 
     return [];
-}
-
-async function checkCdpEndpointAvailable(endpoint) {
-    try {
-        const targetUrl = new URL('/json/version', endpoint).toString();
-        const httpModule = targetUrl.startsWith('https:') ? await import('https') : await import('http');
-        return await new Promise((resolve) => {
-            const req = httpModule.default.get(targetUrl, { timeout: 3000 }, (resp) => {
-                let data = '';
-                resp.on('data', (chunk) => { data += chunk; });
-                resp.on('end', () => {
-                    try {
-                        const json = JSON.parse(data);
-                        resolve({
-                            ok: true,
-                            endpoint,
-                            browser: json.Browser || json.browser || ''
-                        });
-                    } catch {
-                        resolve({
-                            ok: true,
-                            endpoint,
-                            browser: ''
-                        });
-                    }
-                });
-            });
-            req.on('error', (error) => resolve({ ok: false, endpoint, error: error?.message || '连接失败' }));
-            req.on('timeout', () => {
-                req.destroy();
-                resolve({ ok: false, endpoint, error: '连接超时' });
-            });
-        });
-    } catch (error) {
-        return {
-            ok: false,
-            endpoint,
-            error: error?.message || '检测 CDP 端点失败'
-        };
-    }
 }
 
 /**
@@ -720,11 +676,12 @@ class ApiServer {
                                     schema: {
                                         type: 'object',
                                         properties: {
-                                            mode: { type: 'string', enum: ['persistent', 'cdp'], description: '浏览器来源。persistent=系统 Chrome（默认，支持绑定受管环境目录），cdp=连接现有调试端口 Chrome' },
+                                            mode: { type: 'string', enum: ['cdp'], description: '浏览器连接模式，当前仅支持 cdp' },
+                                            profileId: { type: 'string', description: '可选：受管环境 ID；未传时默认绑定当前活动环境' },
                                             cdpEndpoint: { type: 'string', description: '如 http://127.0.0.1:9222' },
-                                            port: { type: 'number', description: 'CDP 调试端口，默认 9222（仅 cdp 模式需要）' },
-                                            cdpUserDataDir: { type: 'string', description: '兼容字段：浏览器 User Data 目录' },
-                                            userDataDir: { type: 'string', description: '浏览器 User Data 目录；persistent 模式下可使用，传 profileId 时会优先绑定到受管环境目录' },
+                                            port: { type: 'number', description: 'CDP 调试端口，默认 9222（仅未绑定 profileId 的直连场景需要）' },
+                                            cdpUserDataDir: { type: 'string', description: '可选：CDP 直连时的浏览器 User Data 目录' },
+                                            userDataDir: { type: 'string', description: '兼容字段：等同于 cdpUserDataDir' },
                                             headless: { type: 'boolean', description: '是否无头模式，默认false（可通过HEADLESS环境变量设置）' }
                                         }
                                     }
@@ -871,8 +828,9 @@ class ApiServer {
                                         type: 'object',
                                         required: ['featureKey'],
                                         properties: {
-                                            featureKey: { type: 'string', description: '工具标识，如 temu-login / temu-session-collect' },
+                                            featureKey: { type: 'string', description: '工具标识，如 temu-session-acquire / temu-login / temu-session-collect' },
                                             profileId: { type: 'string', description: '可选，指定执行环境' },
+                                            acquireMode: { type: 'string', description: 'Temu 会话获取方式，可选 direct / login' },
                                             keepPageOpen: { type: 'boolean', description: '执行后是否保留页面，默认 true' },
                                             collectRegionCookies: { type: 'boolean', description: 'Temu 会话采集时是否补抓 global/us/eu 区域 cookies，默认 true' },
                                             account: { type: 'string', description: '账号类工具需要的账号' },
@@ -1782,7 +1740,7 @@ class ApiServer {
 
     /**
      * 连接浏览器
-     * 默认使用本地 Chrome（persistent 模式）；传 profileId 时会优先绑定到受管环境目录
+     * 当前统一使用 CDP 模式；未传 profileId 时默认绑定当前活动环境
      */
     async handleBrowserConnect(req, res) {
         try {
@@ -1790,15 +1748,8 @@ class ApiServer {
             const requestedMode = String(body?.mode || '').trim().toLowerCase();
             const headless = body.headless === true ? true : (body.headless === false ? false : undefined);
             const profileId = String(body?.profileId || '').trim() || undefined;
-            const mode = profileId
-                ? 'cdp'
-                : (requestedMode === 'cdp' ? 'cdp' : 'persistent');
-            if (requestedMode === 'bundled') {
-                logger.warn('API connect 收到已停用的 bundled 模式请求，已自动改为 persistent，本地 Chrome 将被使用');
-            } else if (requestedMode && !['persistent', 'cdp'].includes(requestedMode)) {
-                logger.warn(`API connect 收到未知浏览器模式 "${requestedMode}"，已自动改为 persistent`);
-            } else if (profileId && requestedMode === 'persistent') {
-                logger.info(`环境 ${profileId} 的浏览器连接已切换为独立 CDP 端口模式`);
+            if (requestedMode && requestedMode !== 'cdp') {
+                logger.warn(`API connect 收到已废弃浏览器模式 "${requestedMode}"，已统一改为 cdp`);
             }
             await checkAndReconnectBrowser({ reconnect: false, profileId });
             const statusBefore = await getBrowserStatus({ profileId });
@@ -1806,45 +1757,12 @@ class ApiServer {
                 this.sendResponse(res, 200, { success: true, data: statusBefore });
                 return;
             }
-
-            if (mode === 'cdp') {
-                if (profileId) {
-                    await getOrCreateBrowser({ ...body, mode: 'cdp', profileId, headless });
-                } else {
-                    const explicitCdp = body && body.cdpEndpoint;
-                    if (explicitCdp) {
-                        await getOrCreateBrowser({ ...body, mode: 'cdp', headless });
-                    } else {
-                        const port = Number(body.port) || 9222;
-                        const userDataDir = (body.cdpUserDataDir || body.userDataDir || getDefaultCdpUserDataDir()).trim();
-                        const cdpEndpoint = `http://127.0.0.1:${port}`;
-                        const existingCdp = await checkCdpEndpointAvailable(cdpEndpoint);
-
-                        if (existingCdp.ok) {
-                            logger.info(`API connect 检测到现有 CDP 浏览器，直接复用: ${cdpEndpoint}`);
-                            await getOrCreateBrowser({ mode: 'cdp', cdpEndpoint, headless });
-                        } else {
-                            logger.info('API connect 未检测到可复用 CDP 浏览器，启动新浏览器再连接, headless:', headless);
-                            launchWithDebugPort({ port, userDataDir, headless });
-                            await sleep(3500);
-                            await getOrCreateBrowser({ mode: 'cdp', cdpEndpoint, headless });
-                        }
-                    }
-                }
-            } else if (mode === 'persistent') {
-                const explicitUserDataDir = String(body.cdpUserDataDir || body.userDataDir || '').trim();
-                const connectOptions = {
-                    mode: 'persistent',
-                    profileId,
-                    headless,
-                    chromeExecutablePath: body.chromeExecutablePath,
-                    chromeProfileDir: body.chromeProfileDir,
-                };
-                if (explicitUserDataDir) {
-                    connectOptions.chromeUserDataDir = explicitUserDataDir;
-                }
-                await getOrCreateBrowser(connectOptions);
-            }
+            await getOrCreateBrowser({
+                ...body,
+                mode: 'cdp',
+                profileId,
+                headless,
+            });
             const status = await getBrowserStatus({ profileId });
             this.sendResponse(res, 200, { success: true, data: status });
         } catch (error) {
@@ -1926,7 +1844,7 @@ class ApiServer {
     async handleBrowserProfileDelete(req, res, reqPath) {
         try {
             const profileId = this.extractProfileIdFromPath(reqPath);
-            const result = deleteManagedBrowserProfile(profileId);
+            const result = await deleteManagedBrowserProfile(profileId);
             this.sendResponse(res, 200, {
                 success: true,
                 data: result,

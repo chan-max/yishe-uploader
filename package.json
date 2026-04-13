@@ -9,6 +9,9 @@
         "dev:no-watch": "npm run web:build && node src/api/server.js",
         "web:build": "vite build --config web/vite.config.js",
         "ecom:smoke": "node scripts/ecom-smoke.js",
+        "ecom:fields": "node scripts/ecom-field-catalog.js",
+        "ecom:report": "node scripts/ecom-field-catalog.js --output docs/ecom-platform-capability-report.md",
+        "ecom:report:json": "node scripts/ecom-field-catalog.js --json --output docs/ecom-platform-capability-report.json",
         "build:exe": "node scripts/build-exe.js",
         "build:installer": "node scripts/build-installer.js",
         "build:dist": "npm run build:exe && npm run build:installer"

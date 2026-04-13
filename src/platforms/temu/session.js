@@ -4,9 +4,6 @@ import {
     TEMU_USERINFO_API_URL
 } from './constants.js';
 import {
-    clickClickableByText
-} from './page.js';
-import {
     logger
 } from '../../utils/logger.js';
 
@@ -21,35 +18,54 @@ const TEMU_REGION_HOSTS = {
     us: 'agentseller-us.temu.com',
     eu: 'agentseller-eu.temu.com'
 };
-const TEMU_REGION_CLICK_LABELS = {
-    us: ['United States', 'US', 'United States Site', '美国', '美区'],
-    eu: ['Europe', 'EU', 'European Site', '欧洲', '欧区']
+const TEMU_REGION_COOKIE_DOMAINS = {
+    global: ['temu.com', 'agentseller.temu.com'],
+    us: ['temu.com', 'agentseller-us.temu.com'],
+    eu: ['temu.com', 'agentseller-eu.temu.com']
 };
+const TEMU_REGION_SWITCHER_TEXT_MARKERS = ['全球', '美国', '欧区', '商家中心'];
 const TEMU_REGION_CLICK_INDEX = {
     us: 1,
     eu: 2
 };
 const TEMU_REGION_CARD_SELECTOR = 'a.index-module__drItem___kEdZY';
-const TEMU_REQUEST_CAPTURE_SELECTOR = 'a,button,[role="button"],span,div,label,p';
 
 function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function normalizeMatcherText(value = '') {
+    return String(value || '').replace(/\s+/g, '');
+}
+
+function normalizeCookieDomain(value = '') {
+    const normalized = String(value || '').trim().toLowerCase();
+    return normalized.startsWith('.') ? normalized.slice(1) : normalized;
+}
+
+function filterCookieEntries(cookieEntries = [], domainKeyword = '') {
+    const safeDomainKeywords = Array.isArray(domainKeyword)
+        ? domainKeyword.map((item) => normalizeCookieDomain(item)).filter(Boolean)
+        : [normalizeCookieDomain(domainKeyword)].filter(Boolean);
+
+    return cookieEntries.filter((cookie) => {
+        if (!cookie?.name) {
+            return false;
+        }
+
+        if (!safeDomainKeywords.length) {
+            return true;
+        }
+
+        const cookieDomain = normalizeCookieDomain(cookie.domain);
+        return !!cookieDomain && safeDomainKeywords.includes(cookieDomain);
+    });
+}
+
 function normalizeCookieEntries(cookieEntries = [], domainKeyword = '') {
     const result = {};
-    const safeDomainKeyword = String(domainKeyword || '').trim();
 
-    for (const cookie of cookieEntries) {
-        if (!cookie?.name) {
-            continue;
-        }
-
-        const cookieDomain = String(cookie.domain || '');
-        if (safeDomainKeyword && !cookieDomain.includes(safeDomainKeyword)) {
-            continue;
-        }
-
+    for (const cookie of filterCookieEntries(cookieEntries, domainKeyword)) {
         result[cookie.name] = cookie.value;
     }
 
@@ -297,26 +313,107 @@ async function fetchTemuUserInfo(headersTemplate = {}, cookies = {}) {
     };
 }
 
-async function attemptRegionSelectionClick(page, regionKey) {
-    const labels = TEMU_REGION_CLICK_LABELS[regionKey] || [];
-    const clickedByText = await clickClickableByText(page, labels, {
-        selector: TEMU_REQUEST_CAPTURE_SELECTOR,
-        exact: false
-    });
-    if (clickedByText) {
-        return {
-            clicked: true,
-            strategy: 'label_click',
-            detail: clickedByText.text
-        };
+async function findRegionSwitcherContainer(page) {
+    const locator = page.locator('div');
+    const containerIndex = await locator.evaluateAll((nodes, markers) => {
+        const normalizeText = (value = '') => String(value || '').replace(/\s+/g, '');
+        const candidates = [];
+
+        for (const [index, node] of nodes.entries()) {
+            const text = normalizeText(node.textContent || '');
+            if (!markers.every((marker) => text.includes(marker))) {
+                continue;
+            }
+
+            const style = window.getComputedStyle(node);
+            const isVisible = node.getClientRects().length > 0
+                && style.display !== 'none'
+                && style.visibility !== 'hidden';
+
+            candidates.push({
+                index,
+                isVisible,
+                textLength: text.length,
+                childCount: node.children.length,
+                descendantCount: node.querySelectorAll('*').length
+            });
+        }
+
+        if (!candidates.length) {
+            return -1;
+        }
+
+        candidates.sort((left, right) => {
+            const leftVisibilityPenalty = left.isVisible ? 0 : 1;
+            const rightVisibilityPenalty = right.isVisible ? 0 : 1;
+            const leftPenalty = left.childCount >= 3 ? 0 : 1;
+            const rightPenalty = right.childCount >= 3 ? 0 : 1;
+            return leftVisibilityPenalty - rightVisibilityPenalty
+                || leftPenalty - rightPenalty
+                || left.textLength - right.textLength
+                || left.descendantCount - right.descendantCount
+                || left.index - right.index;
+        });
+
+        return candidates[0].index;
+    }, TEMU_REGION_SWITCHER_TEXT_MARKERS);
+
+    if (containerIndex < 0) {
+        return null;
     }
 
+    return {
+        index: containerIndex,
+        locator: locator.nth(containerIndex)
+    };
+}
+
+async function attemptRegionSelectionClick(page, regionKey) {
     const fallbackIndex = TEMU_REGION_CLICK_INDEX[regionKey];
     if (fallbackIndex === undefined) {
         return {
             clicked: false,
             strategy: 'not_configured'
         };
+    }
+
+    try {
+        const container = await findRegionSwitcherContainer(page);
+        if (container?.locator) {
+            const childLocator = container.locator.locator(':scope > *');
+            const childCount = await childLocator.count();
+            if (childCount > fallbackIndex) {
+                const target = childLocator.nth(fallbackIndex);
+                const childText = normalizeMatcherText(await target.innerText().catch(() => ''));
+
+                await target.scrollIntoViewIfNeeded().catch(() => { });
+
+                try {
+                    await target.click({
+                        timeout: 5_000
+                    });
+                } catch {
+                    await target.click({
+                        timeout: 5_000,
+                        force: true
+                    });
+                }
+
+                return {
+                    clicked: true,
+                    strategy: 'text_container_child',
+                    detail: `div[${container.index}] child[${fallbackIndex}] ${childText}`.trim()
+                };
+            }
+
+            return {
+                clicked: false,
+                strategy: 'text_container_child_missing',
+                detail: `div[${container.index}] childCount=${childCount}`
+            };
+        }
+    } catch {
+        // ignore container-based click errors and continue to fallback
     }
 
     try {
@@ -343,6 +440,7 @@ async function attemptRegionSelectionClick(page, regionKey) {
 async function collectRegionCookies(context, regionKey) {
     const regionHost = TEMU_REGION_HOSTS[regionKey];
     const regionUrl = TEMU_REGION_URLS[regionKey];
+    const regionCookieDomains = TEMU_REGION_COOKIE_DOMAINS[regionKey] || [regionHost];
     let page = null;
 
     try {
@@ -354,22 +452,22 @@ async function collectRegionCookies(context, regionKey) {
         await page.waitForTimeout(3_000);
 
         let strategy = 'direct_url';
-        let regionCookies = normalizeCookieEntries(await context.cookies(), regionHost);
+        let regionCookies = normalizeCookieEntries(await context.cookies(), regionCookieDomains);
 
         if (!Object.keys(regionCookies).length) {
             const clickResult = await attemptRegionSelectionClick(page, regionKey);
             if (clickResult.clicked) {
                 strategy = clickResult.strategy;
                 await page.waitForTimeout(3_000);
-                regionCookies = normalizeCookieEntries(await context.cookies(), regionHost);
+                regionCookies = normalizeCookieEntries(await context.cookies(), regionCookieDomains);
             }
         }
 
         if (!Object.keys(regionCookies).length) {
             const currentUrl = String(page.url() || '');
             if (currentUrl.includes(regionHost)) {
-                strategy = `${strategy}+all_context_fallback`;
-                regionCookies = normalizeCookieEntries(await context.cookies());
+                strategy = `${strategy}+cookie_domain_retry`;
+                regionCookies = normalizeCookieEntries(await context.cookies(), regionCookieDomains);
             }
         }
 
@@ -434,7 +532,10 @@ export async function collectTemuSessionBundle(page, options = {}) {
         }
 
         const allCookies = await context.cookies();
-        const cookiesGlobal = normalizeCookieEntries(allCookies);
+        const cookiesGlobal = normalizeCookieEntries(
+            allCookies,
+            TEMU_REGION_COOKIE_DOMAINS.global
+        );
         if (!Object.keys(cookiesGlobal).length) {
             return {
                 success: false,
@@ -505,6 +606,15 @@ export async function collectTemuSessionBundle(page, options = {}) {
             }
         }
 
+        const temuCookieEntries = filterCookieEntries(
+            allCookies,
+            Array.from(new Set([
+                ...TEMU_REGION_COOKIE_DOMAINS.global,
+                ...TEMU_REGION_COOKIE_DOMAINS.us,
+                ...TEMU_REGION_COOKIE_DOMAINS.eu
+            ]))
+        );
+
         return {
             success: true,
             sessionBundle: {
@@ -539,7 +649,7 @@ export async function collectTemuSessionBundle(page, options = {}) {
                 cookies_global: cookiesGlobal,
                 cookies_us: regionCollection.us.cookies || {},
                 cookies_eu: regionCollection.eu.cookies || {},
-                cookieDomains: summarizeCookieDomains(allCookies),
+                cookieDomains: summarizeCookieDomains(temuCookieEntries),
                 requestCapture: {
                     requestCount: trafficCapture.state.requestCount,
                     lastRequestUrl: trafficCapture.state.lastRequestUrl,

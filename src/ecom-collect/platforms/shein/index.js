@@ -80,6 +80,12 @@ const sheinPlatform = {
     capability: buildPlatformCapability({
         regions: ['global'],
         status: 'partial',
+        access: {
+            login: 'optional',
+            captcha: 'likely',
+            antiBot: 'high',
+            notes: ['SHEIN 当前最主要的问题是验证码和访问限制，适合把风险识别结果直接暴露给上层。'],
+        },
         overview:
             'SHEIN 当前更推荐详情场景，搜索与店铺页虽然已有实现，但更容易受验证码或风控影响。',
         notes: [
@@ -95,6 +101,12 @@ const sheinPlatform = {
             buildSearchSceneCapability({
                 verification: 'heuristic',
                 availability: 'heuristic',
+                access: {
+                    login: 'none',
+                    captcha: 'blocking',
+                    antiBot: 'high',
+                    notes: ['搜索页当前实测会跳到 risk/challenge，应尽快返回 captcha 风险结果。'],
+                },
                 keywordPlaceholder: '例如：phone case',
                 overview: '搜索场景可用，但要预期存在验证码风险。',
                 notes: ['如果稳定性下降，可先只保留详情场景对外。'],
@@ -116,6 +128,12 @@ const sheinPlatform = {
             buildProductDetailSceneCapability({
                 verification: 'heuristic',
                 availability: 'available',
+                access: {
+                    login: 'optional',
+                    captcha: 'possible',
+                    antiBot: 'medium',
+                    notes: ['详情页比搜索更稳定，但仍建议保留风控截图与失败原因。'],
+                },
                 targetUrlPlaceholder: '填写 SHEIN 商品详情页链接',
                 overview: '详情页是当前优先推荐场景。',
                 notes: ['详情页通常更容易拿到图片、规格与页面标题原始数据。'],
@@ -135,6 +153,12 @@ const sheinPlatform = {
             buildShopHotProductsSceneCapability({
                 verification: 'heuristic',
                 availability: 'heuristic',
+                access: {
+                    login: 'optional',
+                    captcha: 'likely',
+                    antiBot: 'high',
+                    notes: ['列表和店铺流场景更容易被验证码覆盖，优先保证风险退出而不是强行补交互。'],
+                },
                 targetUrlPlaceholder: '填写 SHEIN 店铺页或分类页链接',
                 overview: '店铺热门商品场景可用，但仍需要结合真实页面继续调试。',
                 notes: ['如果页面结构变化，可优先修复卡片根节点与链接定位。'],

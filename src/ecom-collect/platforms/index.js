@@ -148,6 +148,12 @@ function buildTaskTypeCapability(platformValue, platformLabel, scene, override =
                 override.verificationLabel || scene?.verificationLabel || '',
             ).trim() || undefined,
         reason: String(override.reason || scene?.reason || '').trim() || null,
+        access:
+            override?.access && typeof override.access === 'object'
+                ? cloneValue(override.access)
+                : scene?.access && typeof scene.access === 'object'
+                    ? cloneValue(scene.access)
+                    : undefined,
         fields: Array.isArray(overridesToFields(override, scene))
             ? overridesToFields(override, scene)
             : [],
@@ -187,6 +193,7 @@ function buildPlatformTaskTypes(platformValue, platformLabel, scenes, taskTypes)
             verification: scene?.verification,
             verificationLabel: scene?.verificationLabel,
             reason: scene?.reason,
+            access: scene?.access,
             fields: scene?.fields,
             docs: scene?.docs,
         }));
@@ -220,6 +227,7 @@ export function getPlatformCatalog() {
         statusLabel: item.statusLabel,
         runnable: item.runnable,
         reason: item.reason,
+        access: item.access || undefined,
         scenes: Array.isArray(item.scenes) ? item.scenes : [],
         taskTypes: Array.isArray(item.taskTypes) ? item.taskTypes : [],
         docs: item.docs || {},
@@ -280,6 +288,10 @@ function normalizePlatformCapability(item) {
                 : taskTypes.some((taskType) => taskType?.runnable !== false) ||
                   scenes.some((scene) => scene?.runnable !== false),
         reason: String(capability.reason || '').trim() || null,
+        access:
+            capability.access && typeof capability.access === 'object'
+                ? cloneValue(capability.access)
+                : undefined,
         supportedScenes,
         scenes,
         supportedTaskTypes,

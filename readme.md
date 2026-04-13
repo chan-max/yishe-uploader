@@ -157,22 +157,14 @@ yishe-auto-browser/
 
 ### 浏览器配置
 
-系统支持两种浏览器连接模式：
+系统当前统一使用 **CDP 模式**：
 
-1. **持久化模式（默认）**: 使用本地 Chrome；传入 `profileId` 时，会优先绑定到多环境里该环境自己的用户数据目录
-   ```bash
-   BROWSER_MODE=persistent
-   CHROME_USER_DATA_DIR=/path/to/chrome/user/data
-   CHROME_PROFILE_DIR=Default
-   ```
+```bash
+BROWSER_MODE=cdp
+CDP_ENDPOINT=http://127.0.0.1:9222
+```
 
-2. **CDP 模式**: 连接已启动的 Chrome 实例
-   ```bash
-   BROWSER_MODE=cdp
-   CDP_ENDPOINT=http://127.0.0.1:9222
-   ```
-
-默认持久化模式在传入 `profileId` 时会直接使用对应环境自己的用户数据目录；CDP 独立目录默认统一收敛到工作目录 `C:\temp\yishe-auto-browser-workspace`（非 Windows 为 `~/.yishe-auto-browser/workspace`）。如需覆盖 CDP 目录，仍可通过 `YISHE_AUTO_BROWSER_CDP_USER_DATA_DIR` 或 `UPLOADER_CDP_USER_DATA_DIR` 指定。
+默认情况下会优先绑定当前活动环境；每个受管环境使用自己的 `debugPort` 和 `userDataDir` 维持登录态。未绑定环境时，CDP 独立目录默认统一收敛到工作目录 `C:\temp\yishe-auto-browser-workspace`（非 Windows 为 `~/.yishe-auto-browser/workspace`）。如需覆盖默认目录，仍可通过 `YISHE_AUTO_BROWSER_CDP_USER_DATA_DIR` 或 `UPLOADER_CDP_USER_DATA_DIR` 指定。
 
 ## 📄 许可证
 

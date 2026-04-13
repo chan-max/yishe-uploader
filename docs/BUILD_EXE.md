@@ -85,8 +85,8 @@ dist/installers/
 ## 运行要求
 
 - 目标机器需要已安装本地 `Chrome`
-- 程序默认使用 `persistent` 模式连接本地 Chrome
-- 如需连接远程调试端口，可使用 `cdp` 模式
+- 程序统一使用 `cdp` 模式连接本地 Chrome
+- 默认会优先绑定当前活动环境对应的调试端口
 
 当前直连文件不附带浏览器二进制，因此不会再生成或分发 `pw-browsers/`。
 
@@ -133,8 +133,6 @@ npm run build:dist
 支持以下覆盖项：
 
 - `FRONTEND_DIST`: 自定义前端静态资源目录
-- `CHROME_USER_DATA_DIR`: 持久化模式下自定义用户数据目录
-- `CHROME_PROFILE_DIR`: 持久化模式下指定 Chrome Profile
 - `CHROME_EXECUTABLE_PATH`: 自定义本地 Chrome 可执行文件路径
 - `YISHE_AUTO_BROWSER_CDP_USER_DATA_DIR` / `UPLOADER_CDP_USER_DATA_DIR`: 指定 Chrome CDP 用户数据目录
 
@@ -146,8 +144,7 @@ npm run build:dist
 
 1. 本机 Chrome 是否已安装
 2. 当前 Chrome 是否已完全关闭，避免 profile 被占用
-3. `CHROME_PROFILE_DIR` 是否配置正确
-4. `CHROME_EXECUTABLE_PATH` 是否指向真实可执行文件
+3. `CHROME_EXECUTABLE_PATH` 是否指向真实可执行文件
 
 ### 问题：前端页面打不开
 

@@ -1,14 +1,11 @@
 /**
  * 浏览器服务 - 管理 Playwright 浏览器实例
  *
- * 默认目标：使用本地 Chrome，并优先复用受管环境目录中的 user data 维持多环境登录态
+ * 当前浏览器接入层已经统一为 CDP 模式：
+ * - 受管环境默认通过各自的 debug port 启动并连接
+ * - 显式传入 cdpEndpoint/userDataDir 时，也只走 CDP 直连
  *
- * 支持两种模式（通过环境变量选择）：
- * - BROWSER_MODE=persistent (默认): launchPersistentContext 使用系统 Chrome，可绑定受管环境目录
- * - BROWSER_MODE=cdp: connectOverCDP 连接已开启远程调试端口的 Chrome（需你用 --remote-debugging-port 启动）
- *
- * 兼容说明：
- * - 旧的 bundled 模式已停用；若收到 bundled，会自动回退为 persistent。
+ * 旧的多模式接入已经移除，当前仅保留 CDP。
  */
 
 import { spawn, exec } from 'child_process';
@@ -18,7 +15,6 @@ import {
 } from 'path';
 import {
     existsSync,
-    rmSync,
     mkdirSync,
     readFileSync
 } from 'fs';
@@ -31,7 +27,6 @@ import {
 import {
     getPlaywrightChromium
 } from '../utils/playwrightRuntime.js';
-import os from 'os';
 import AdmZip from 'adm-zip';
 import fs from 'fs-extra';
 import http from 'http';
@@ -53,20 +48,19 @@ import {
     closeManagedProfileBrowser,
     createProfileBrowserPage,
     focusManagedProfileBrowser,
+    forgetManagedProfileBrowserSession,
     getManagedProfileBrowserPage,
     getManagedProfileBrowserStatus,
     getOrCreateManagedProfileBrowser,
-    hasManagedProfileBrowser,
     isManagedProfileBrowserAvailable,
     listManagedProfileBrowserPages,
     updateManagedProfileBrowserActivity
 } from './ManagedProfileBrowserPool.js';
 
 // 全局：Playwright Browser / BrowserContext
-let browserInstance = null;    // playwright Browser（cdp模式使用）
-let contextInstance = null;    // playwright BrowserContext（persistent/cdp 都会有）
-let currentUserDataDir = null; // 当前 user data dir（persistent）
-let currentProfileDir = null;
+let browserInstance = null;    // playwright Browser（CDP 模式使用）
+let contextInstance = null;    // playwright BrowserContext
+let currentUserDataDir = null; // 当前 user data dir（CDP）
 let currentExecutablePath = null;
 let currentMode = null;
 let currentBrowserName = null;
@@ -76,7 +70,7 @@ let currentManagedProfileId = null;
 let connectPromise = null;
 let lastConnectError = null;
 let currentBrowserOptions = {};
-let hasLoggedBundledModeFallback = false;
+let hasLoggedLegacyModeFallback = false;
 const FOCUS_TRACKER_SCRIPT = `
 (() => {
   if (globalThis.__yisheFocusTrackerInstalled) {
@@ -166,17 +160,6 @@ function getDefaultExecutablePath() {
     return '/usr/bin/google-chrome';
 }
 
-function getDefaultUserDataDir() {
-    if (process.platform === 'win32') {
-        const localAppData = process.env.LOCALAPPDATA || pathJoin(os.homedir(), 'AppData', 'Local');
-        return pathJoin(localAppData, 'Google', 'Chrome', 'User Data');
-    }
-    if (process.platform === 'darwin') {
-        return pathJoin(os.homedir(), 'Library', 'Application Support', 'Google', 'Chrome');
-    }
-    return pathJoin(os.homedir(), '.config', 'google-chrome');
-}
-
 /**
  * 获取默认的 CDP User Data 目录（独立目录，避免与系统 Chrome 冲突）
  */
@@ -191,24 +174,15 @@ function getCdpDefaultUserDataDir() {
 
 function normalizeBrowserMode(value, { source = '浏览器模式' } = {}) {
     const rawMode = String(value || '').trim().toLowerCase();
-    if (!rawMode) {
-        return 'persistent';
+    if (!rawMode || rawMode === 'cdp') {
+        return 'cdp';
     }
 
-    if (rawMode === 'bundled') {
-        if (!hasLoggedBundledModeFallback) {
-            logger.warn(`${source} 的 bundled 模式已停用，已自动改为 persistent，本地 Chrome 将被使用`);
-            hasLoggedBundledModeFallback = true;
-        }
-        return 'persistent';
+    if (!hasLoggedLegacyModeFallback) {
+        logger.warn(`${source} 已收口为 cdp 模式，收到 "${rawMode}" 时将自动改为 cdp`);
+        hasLoggedLegacyModeFallback = true;
     }
-
-    if (rawMode === 'persistent' || rawMode === 'cdp') {
-        return rawMode;
-    }
-
-    logger.warn(`${source} 配置了未知值 "${rawMode}"，已自动回退为 persistent`);
-    return 'persistent';
+    return 'cdp';
 }
 
 function getBrowserMode() {
@@ -240,56 +214,105 @@ function normalizePathLike(value) {
     }
 }
 
-function resolvePersistentProfileSelection(options = {}) {
+function resolveManagedProfile(profileId) {
+    const normalizedProfileId = String(profileId || '').trim();
+    if (!normalizedProfileId) {
+        return null;
+    }
+
+    const profile = getBrowserProfile(normalizedProfileId);
+    if (!profile) {
+        throw new Error(`指定环境不存在: ${normalizedProfileId}`);
+    }
+
+    return profile;
+}
+
+function hasExplicitDirectCdpSelection(options = {}) {
+    const explicitEndpoint = String(options?.cdpEndpoint || '').trim();
+    const explicitUserDataDir = normalizePathLike(
+        options?.cdpUserDataDir ||
+        options?.userDataDir ||
+        null
+    );
+    const explicitPort = Number(options?.port || options?.debugPort);
+    return !!(
+        explicitEndpoint ||
+        explicitUserDataDir ||
+        (Number.isFinite(explicitPort) && explicitPort > 0)
+    );
+}
+
+function resolvePreferredManagedProfile(options = {}) {
     const explicitProfileId = String(options.profileId || '').trim();
     if (explicitProfileId) {
-        const profile = getBrowserProfile(explicitProfileId);
-        if (!profile) {
-            throw new Error(`指定环境不存在: ${explicitProfileId}`);
+        return resolveManagedProfile(explicitProfileId);
+    }
+
+    if (hasExplicitDirectCdpSelection(options)) {
+        return null;
+    }
+
+    return getActiveBrowserProfile() || ensureDefaultBrowserProfile();
+}
+
+function normalizeManagedBrowserActionOptions(options = {}) {
+    const normalizedOptions =
+        options && typeof options === 'object' ? { ...options } : {};
+    const keepCurrentDirectConnection =
+        !String(normalizedOptions.profileId || '').trim() &&
+        !hasExplicitDirectCdpSelection(normalizedOptions) &&
+        currentBrowserOptions &&
+        Object.keys(currentBrowserOptions).length > 0 &&
+        !String(currentBrowserOptions.profileId || '').trim() &&
+        hasExplicitDirectCdpSelection(currentBrowserOptions);
+    if (keepCurrentDirectConnection) {
+        return normalizedOptions;
+    }
+    if (!String(normalizedOptions.profileId || '').trim()) {
+        const profile = resolvePreferredManagedProfile(normalizedOptions);
+        if (profile?.id) {
+            normalizedOptions.profileId = profile.id;
         }
+    }
+    return normalizedOptions;
+}
+
+function normalizeBrowserConnectionOptions(options = {}) {
+    const normalizedOptions = normalizeManagedBrowserActionOptions(options);
+    normalizedOptions.mode = normalizeBrowserMode(
+        normalizedOptions.mode || getBrowserMode(),
+        { source: '浏览器连接模式' },
+    );
+    return normalizedOptions;
+}
+
+function parseCdpEndpoint(endpoint = 'http://127.0.0.1:9222') {
+    try {
+        const url = new URL(endpoint);
+        const port = Number(url.port || (url.protocol === 'https:' ? 443 : 80));
         return {
-            profileId: profile.id,
-            userDataDir: profile.userDataDir,
-            profile,
-            source: 'profile',
+            endpoint: url.toString().replace(/\/$/, ''),
+            hostname: String(url.hostname || '').trim().toLowerCase(),
+            port: Number.isFinite(port) && port > 0 ? port : null,
+            isLocal: ['127.0.0.1', 'localhost', '0.0.0.0'].includes(
+                String(url.hostname || '').trim().toLowerCase(),
+            ),
+        };
+    } catch {
+        return {
+            endpoint: String(endpoint || '').trim(),
+            hostname: '',
+            port: null,
+            isLocal: false,
         };
     }
-
-    const explicitUserDataDir = normalizePathLike(options.chromeUserDataDir || process.env.CHROME_USER_DATA_DIR);
-    if (explicitUserDataDir) {
-        return {
-            profileId: null,
-            userDataDir: explicitUserDataDir,
-            profile: null,
-            source: 'explicit-user-data',
-        };
-    }
-
-    const activeProfile = getActiveBrowserProfile() || ensureDefaultBrowserProfile();
-    if (activeProfile?.userDataDir) {
-        return {
-            profileId: activeProfile.id,
-            userDataDir: activeProfile.userDataDir,
-            profile: activeProfile,
-            source: 'active-profile',
-        };
-    }
-
-    return {
-        profileId: null,
-        userDataDir: getDefaultUserDataDir(),
-        profile: null,
-        source: 'system-default',
-    };
 }
 
 function resolveCdpProfileSelection(options = {}) {
     const explicitProfileId = String(options.profileId || '').trim();
     if (explicitProfileId) {
-        const profile = getBrowserProfile(explicitProfileId);
-        if (!profile) {
-            throw new Error(`指定环境不存在: ${explicitProfileId}`);
-        }
+        const profile = resolveManagedProfile(explicitProfileId);
         return {
             profileId: profile.id,
             userDataDir: profile.userDataDir,
@@ -322,24 +345,12 @@ function resolveCdpProfileSelection(options = {}) {
 }
 
 function resolveDesiredConnectionState(options = {}) {
-    const mode = normalizeBrowserMode(options.mode || getBrowserMode(), { source: '浏览器连接模式' });
-    if (mode === 'cdp') {
-        const cdpSelection = resolveCdpProfileSelection(options);
-        return {
-            mode,
-            cdpEndpoint: String(options.cdpEndpoint || process.env.CDP_ENDPOINT || 'http://127.0.0.1:9222').trim(),
-            userDataDir: normalizePathLike(cdpSelection.userDataDir),
-            profileId: cdpSelection.profileId || null,
-        };
-    }
-
-    const persistentSelection = resolvePersistentProfileSelection(options);
+    const cdpSelection = resolveCdpProfileSelection(options);
     return {
-        mode,
-        userDataDir: normalizePathLike(persistentSelection.userDataDir),
-        profileId: persistentSelection.profileId || null,
-        profileDir: String(options.chromeProfileDir || process.env.CHROME_PROFILE_DIR || 'Default').trim() || 'Default',
-        executablePath: normalizePathLike(options.chromeExecutablePath || process.env.CHROME_EXECUTABLE_PATH || getDefaultExecutablePath()),
+        mode: 'cdp',
+        cdpEndpoint: String(options.cdpEndpoint || process.env.CDP_ENDPOINT || 'http://127.0.0.1:9222').trim(),
+        userDataDir: normalizePathLike(cdpSelection.userDataDir),
+        profileId: cdpSelection.profileId || null,
     };
 }
 
@@ -364,8 +375,6 @@ async function shouldReconnectForOptions(options = {}) {
         mode: currentMode,
         userDataDir: normalizePathLike(currentUserDataDir),
         profileId: currentManagedProfileId || null,
-        profileDir: String(currentProfileDir || '').trim() || null,
-        executablePath: normalizePathLike(currentExecutablePath),
         cdpEndpoint: String(currentCdpEndpoint || '').trim() || null,
     };
 
@@ -379,43 +388,8 @@ async function shouldReconnectForOptions(options = {}) {
             || (desired.profileId || null) !== (current.profileId || null);
     }
 
-    if (desired.mode === 'persistent') {
-        return desired.userDataDir !== current.userDataDir
-            || (desired.profileId || null) !== (current.profileId || null)
-            || desired.profileDir !== current.profileDir
-            || desired.executablePath !== current.executablePath;
-    }
-
     return desired.userDataDir !== current.userDataDir
         || (desired.profileId || null) !== (current.profileId || null);
-}
-
-function buildPersistentLaunchOptions({ profileDir, executablePath, headless = false }) {
-    const args = [
-        '--no-first-run',
-        '--no-default-browser-check',
-        '--disable-background-timer-throttling',
-        '--disable-backgrounding-occluded-windows',
-        '--disable-renderer-backgrounding',
-        ...(profileDir ? [`--profile-directory=${profileDir}`] : []),
-        ...(!headless ? ['--start-maximized'] : [])
-    ];
-    
-    const launchOptions = {
-        headless: headless,
-        executablePath: executablePath,
-        args,
-        ignoreHTTPSErrors: true
-    };
-    
-    // 仅在有界面模式下设置 viewport，无头模式需要显式设置
-    if (headless) {
-        launchOptions.viewport = { width: 1920, height: 1080 };
-    } else {
-        launchOptions.viewport = null;
-    }
-    
-    return launchOptions;
 }
 
 /**
@@ -642,8 +616,8 @@ function tryListProfiles(userDataDir) {
  * 启动带远程调试端口的 Chrome（仅 --remote-debugging-port，使用指定 user-data-dir 保持登录态）
  * 支持无头模式通过 headless 参数或 HEADLESS 环境变量
  */
-export function launchWithDebugPort({ port = 9222, headless = null, userDataDir = null } = {}) {
-    const exe = getDefaultExecutablePath();
+export function launchWithDebugPort({ port = 9222, headless = null, userDataDir = null, executablePath = null } = {}) {
+    const exe = String(executablePath || getDefaultExecutablePath()).trim();
     if (!exe || !existsSync(exe)) {
         throw new Error(`未找到 Chrome 可执行文件: ${exe}，请确认已安装 Google Chrome`);
     }
@@ -680,7 +654,14 @@ export function launchWithDebugPort({ port = 9222, headless = null, userDataDir 
     const pid = child.pid;
     const modeStr = useHeadless ? '无头' : '有界面';
     logger.info(`已启动 Chrome pid=${pid} port=${port}，模式: ${modeStr}，user-data-dir: ${finalUserDataDir}`);
-    return { port, browserName: 'chrome', pid, headless: useHeadless, userDataDir: finalUserDataDir };
+    return {
+        port,
+        browserName: 'chrome',
+        pid,
+        headless: useHeadless,
+        userDataDir: finalUserDataDir,
+        executablePath: exe,
+    };
 }
 
 /**
@@ -770,20 +751,20 @@ export async function detectExistingBrowser() {
  * 获取或创建浏览器实例
  */
 export async function getOrCreateBrowser(options = {}) {
-    if (shouldUseManagedProfilePool(options)) {
-        return await getOrCreateManagedProfileBrowser(options);
+    let normalizedOptions = {};
+    if (options && Object.keys(options).length > 0) {
+        normalizedOptions = normalizeBrowserConnectionOptions(options);
+    } else if (currentBrowserOptions && Object.keys(currentBrowserOptions).length > 0) {
+        normalizedOptions = { ...currentBrowserOptions };
+    } else {
+        normalizedOptions = normalizeBrowserConnectionOptions({});
     }
 
-    // Only update options if provided; otherwise keep using the successful options from before
-    if (options && Object.keys(options).length > 0) {
-        currentBrowserOptions = {
-            ...options,
-            mode: normalizeBrowserMode(options.mode || getBrowserMode(), { source: '浏览器连接模式' }),
-        };
-    } else if (!currentBrowserOptions || Object.keys(currentBrowserOptions).length === 0) {
-        // Fallback or initialization if absolutely no options exist
-        currentBrowserOptions = { mode: getBrowserMode() };
+    if (shouldUseManagedProfilePool(normalizedOptions)) {
+        return await getOrCreateManagedProfileBrowser(normalizedOptions);
     }
+
+    currentBrowserOptions = { ...normalizedOptions };
     options = { ...currentBrowserOptions };
 
     // 并发保护：多次点击只跑一次连接
@@ -805,30 +786,11 @@ export async function getOrCreateBrowser(options = {}) {
         return existingBrowser;
     }
 
-    const resolvedMode = normalizeBrowserMode(options.mode || getBrowserMode(), { source: '浏览器连接模式' });
-
-    // 冷启动场景：仅在显式请求 CDP 模式时尝试接管现有 CDP 浏览器
-    const requestedMode = String(options.mode || '').trim().toLowerCase();
-    const shouldProbeCdp = resolvedMode === 'cdp' && (!requestedMode || requestedMode === 'cdp');
-    if (shouldProbeCdp) {
-        const endpoint = options.cdpEndpoint || process.env.CDP_ENDPOINT || 'http://127.0.0.1:9222';
-        const cdpStatus = await checkCdpEndpointAvailable(endpoint);
-        if (cdpStatus.ok) {
-            logger.info(`检测到可复用的现有 CDP 浏览器，优先接管: ${endpoint}`);
-            options = {
-                ...options,
-                mode: 'cdp',
-                cdpEndpoint: endpoint
-            };
-        }
-    }
-
     // 创建新的浏览器实例
     logger.info('启动新的浏览器实例...');
 
     try {
-        const mode = resolvedMode;
-        currentMode = mode;
+        currentMode = 'cdp';
         currentBrowserName = 'chrome';
         currentBrowserVersion = null;
         lastConnectError = null;
@@ -838,107 +800,63 @@ export async function getOrCreateBrowser(options = {}) {
             const chromium = await getPlaywrightChromium();
             logger.info(`getOrCreateBrowser - options.headless: ${options.headless}, 最终使用 headless: ${headless}`);
             const modeStr = headless ? '无头' : '有界面';
+            const cdpSelection = resolveCdpProfileSelection(options);
+            const parsedEndpoint = parseCdpEndpoint(
+                options.cdpEndpoint || process.env.CDP_ENDPOINT || 'http://127.0.0.1:9222'
+            );
+            const endpoint = parsedEndpoint.endpoint || String(options.cdpEndpoint || process.env.CDP_ENDPOINT || 'http://127.0.0.1:9222').trim();
+            const existingCdp = await checkCdpEndpointAvailable(endpoint);
 
-            if (mode === 'cdp') {
-                currentBrowserName = 'chrome';
-                const endpoint = options.cdpEndpoint || process.env.CDP_ENDPOINT || 'http://127.0.0.1:9222';
-                const cdpSelection = resolveCdpProfileSelection(options);
-                currentCdpEndpoint = endpoint;
-                currentUserDataDir = cdpSelection.userDataDir;
-                currentManagedProfileId = cdpSelection.profileId || null;
-                currentProfileDir = null;
-                currentExecutablePath = null;
-                if (currentManagedProfileId) {
-                    switchBrowserProfile(currentManagedProfileId);
-                }
-                logger.info(`使用 CDP 模式连接浏览器 (${modeStr}):`, endpoint);
-                // Chrome 启动后端口可能需几秒才就绪，重试连接
-                const maxRetries = 10;
-                const retryDelayMs = 2000;
-                let lastErr;
-                for (let i = 0; i < maxRetries; i++) {
-                    try {
-                        browserInstance = await withTimeout(chromium.connectOverCDP(endpoint), 15000, 'connectOverCDP');
-                        break;
-                    } catch (e) {
-                        lastErr = e;
-                        if (i < maxRetries - 1) {
-                            logger.info(`CDP 连接失败，${retryDelayMs / 1000} 秒后重试 (${i + 1}/${maxRetries})...`);
-                            await new Promise(r => setTimeout(r, retryDelayMs));
-                        } else {
-                            throw new Error(
-                                `连接 Chrome 失败 (ECONNREFUSED)。请确保：(1) 点击「启动并连接」前已完全关闭所有 Chrome 进程（含任务管理器、系统托盘）；` +
-                                `(2) 若 Chrome 已打开，请先关闭再重新点击。原错误: ${e.message}`
-                            );
-                        }
-                    }
-                }
-                const contextOptions = { devtools: !headless };
-                if (headless) {
-                    contextOptions.viewport = { width: 1920, height: 1080 };
-                }
-                contextInstance = browserInstance.contexts()[0] || await browserInstance.newContext(contextOptions);
-                await installBrowserContextPatches(contextInstance);
-                await setBrowserWindowMaximized(contextInstance, headless);
-
-                browserStatus.isInitialized = true;
-                browserStatus.isConnected = true;
-                browserStatus.lastActivity = Date.now();
-                browserStatus.pageCount = (await getVisiblePagesDetailed()).length;
-                currentBrowserVersion = resolveActiveBrowserVersion();
-                if (currentManagedProfileId) {
-                    markBrowserProfileUsed(currentManagedProfileId, {
-                        browserVersion: currentBrowserVersion || '',
-                        lastUsedAt: new Date().toISOString(),
-                    });
-                }
-
-                return;
-            }
-
-            // persistent：复用系统 Chrome 的 user data（包含 cookie/session）
-            const persistentSelection = resolvePersistentProfileSelection(options);
-            const chromeUserDataDir = persistentSelection.userDataDir;
-            const profileDir = options.chromeProfileDir || process.env.CHROME_PROFILE_DIR || 'Default';
-            const executablePath = options.chromeExecutablePath || process.env.CHROME_EXECUTABLE_PATH || getDefaultExecutablePath();
-
-            currentBrowserName = 'chrome';
-            currentUserDataDir = chromeUserDataDir;
-            currentProfileDir = profileDir;
-            currentExecutablePath = executablePath;
-            currentCdpEndpoint = null;
-            currentManagedProfileId = persistentSelection.profileId || null;
+            currentCdpEndpoint = endpoint;
+            currentUserDataDir = cdpSelection.userDataDir;
+            currentManagedProfileId = cdpSelection.profileId || null;
+            currentExecutablePath = String(options.chromeExecutablePath || '').trim() || null;
             if (currentManagedProfileId) {
                 switchBrowserProfile(currentManagedProfileId);
             }
 
-            logger.info(
-                `使用 persistent 模式启动 (${currentManagedProfileId ? '本机 Chrome + 受管环境目录' : '复用本机 Chrome profile'}, ${modeStr})`
-            );
-            logger.info('user data dir:', chromeUserDataDir);
-            logger.info('profile dir:', profileDir);
-            logger.info('executable:', executablePath);
-            if (currentManagedProfileId) {
-                logger.info('profile id:', currentManagedProfileId);
-            }
-
-            try {
-                contextInstance = await withTimeout(
-                    chromium.launchPersistentContext(
-                        chromeUserDataDir,
-                        buildPersistentLaunchOptions({ profileDir, executablePath, headless })
-                    ),
-                    60000,
-                    'launchPersistentContext'
-                );
-            } catch (e) {
-                // 常见：浏览器正在运行导致 profile 被占用
+            if (existingCdp.ok) {
+                logger.info(`检测到可复用的现有 CDP 浏览器，优先接管 (${modeStr}): ${endpoint}`);
+            } else if (parsedEndpoint.isLocal && parsedEndpoint.port) {
+                logger.info(`未检测到可复用 CDP 浏览器，启动本地 Chrome 后重试 (${modeStr}): ${endpoint}`);
+                const launched = launchWithDebugPort({
+                    port: parsedEndpoint.port,
+                    headless,
+                    userDataDir: cdpSelection.userDataDir,
+                    executablePath: options.chromeExecutablePath,
+                });
+                currentExecutablePath = launched.executablePath || currentExecutablePath;
+                await new Promise((resolve) => setTimeout(resolve, 3500));
+            } else {
                 throw new Error(
-                    `启动 Chrome 失败（常见原因：Chrome 正在运行占用 profile，或 profileDir 选错）。` +
-                    `请先完全关闭 Chrome（含后台进程），并确认 profileDir（Default/Profile 1...）。原错误: ${e.message}`
+                    `未检测到可接管的 CDP 浏览器: ${existingCdp.error || endpoint}`
                 );
             }
 
+            logger.info(`使用 CDP 模式连接浏览器 (${modeStr}):`, endpoint);
+            const maxRetries = 10;
+            const retryDelayMs = 2000;
+            for (let i = 0; i < maxRetries; i++) {
+                try {
+                    browserInstance = await withTimeout(chromium.connectOverCDP(endpoint), 15000, 'connectOverCDP');
+                    break;
+                } catch (e) {
+                    if (i < maxRetries - 1) {
+                        logger.info(`CDP 连接失败，${retryDelayMs / 1000} 秒后重试 (${i + 1}/${maxRetries})...`);
+                        await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+                    } else {
+                        throw new Error(
+                            `连接 Chrome 失败，请确认 CDP 浏览器已启动并监听 ${endpoint}。原错误: ${e.message}`
+                        );
+                    }
+                }
+            }
+
+            const contextOptions = { devtools: !headless };
+            if (headless) {
+                contextOptions.viewport = { width: 1920, height: 1080 };
+            }
+            contextInstance = browserInstance.contexts()[0] || await browserInstance.newContext(contextOptions);
             await installBrowserContextPatches(contextInstance);
             await setBrowserWindowMaximized(contextInstance, headless);
 
@@ -953,6 +871,8 @@ export async function getOrCreateBrowser(options = {}) {
                     lastUsedAt: new Date().toISOString(),
                 });
             }
+
+            return;
         })();
 
         try {
@@ -988,11 +908,14 @@ export async function checkAndReconnectBrowser(options = {}) {
         reconnect: options.reconnect === true,
     }).catch(() => null);
 
-    const {
-        reconnect = false,
-        cdpEndpoint = currentCdpEndpoint || process.env.CDP_ENDPOINT || 'http://127.0.0.1:9222',
-        headless = undefined
-    } = options;
+    const { reconnect = false, headless = undefined } = options;
+    const reconnectOptions = {
+        ...currentBrowserOptions,
+        ...(options && typeof options === 'object' ? options : {}),
+        mode: 'cdp',
+        ...(headless !== undefined ? { headless } : {}),
+    };
+    delete reconnectOptions.reconnect;
 
     if (!contextInstance && !browserInstance) {
         if (managedResult?.available) {
@@ -1003,26 +926,11 @@ export async function checkAndReconnectBrowser(options = {}) {
             return { available: false, message: '无浏览器实例' };
         }
 
-        const cdpStatus = await checkCdpEndpointAvailable(cdpEndpoint);
-        if (!cdpStatus.ok) {
-            return {
-                available: false,
-                reconnected: false,
-                message: `未检测到可接管的 CDP 浏览器: ${cdpStatus.error || cdpEndpoint}`
-            };
-        }
-
         try {
-            logger.info(`检测到可复用的 CDP 浏览器，开始自动接管: ${cdpEndpoint}`);
-            await getOrCreateBrowser({
-                ...currentBrowserOptions,
-                mode: 'cdp',
-                cdpEndpoint,
-                ...(headless !== undefined ? { headless } : {})
-            });
+            await getOrCreateBrowser(reconnectOptions);
             const ok = await isBrowserAvailable();
             if (ok) {
-                logger.info('已成功自动接管现有 CDP 浏览器');
+                logger.info('已成功自动连接 CDP 浏览器');
                 return {
                     available: true,
                     reconnected: true,
@@ -1065,17 +973,7 @@ export async function checkAndReconnectBrowser(options = {}) {
 
     if (reconnect) {
         try {
-            const cdpStatus = await checkCdpEndpointAvailable(cdpEndpoint);
-            if (cdpStatus.ok) {
-                await getOrCreateBrowser({
-                    ...currentBrowserOptions,
-                    mode: 'cdp',
-                    cdpEndpoint,
-                    ...(headless !== undefined ? { headless } : {})
-                });
-            } else {
-                await getOrCreateBrowser(currentBrowserOptions);
-            }
+            await getOrCreateBrowser(reconnectOptions);
             const ok = await isBrowserAvailable();
             if (ok) {
                 logger.info('浏览器已重新连接');
@@ -1127,7 +1025,6 @@ export async function getBrowserStatus(options = {}) {
             browserVersion: currentBrowserVersion || managedStatus?.connection?.browserVersion || null,
             executablePath: currentExecutablePath,
             userDataDir: currentUserDataDir || managedStatus?.connection?.userDataDir || null,
-            profileDir: currentProfileDir,
             profileId: currentManagedProfileId || managedStatus?.connection?.profileId || null,
             activeProfileId: profilesState.activeProfileId || managedStatus?.connection?.activeProfileId || null,
             cdpEndpoint: currentCdpEndpoint || managedStatus?.connection?.cdpEndpoint || null,
@@ -1320,8 +1217,9 @@ async function getVisiblePagesDetailed() {
 }
 
 export async function listBrowserPages(options = {}) {
-    if (shouldUseManagedProfilePool(options)) {
-        return await listManagedProfileBrowserPages(options?.profileId);
+    const normalizedOptions = normalizeManagedBrowserActionOptions(options);
+    if (shouldUseManagedProfilePool(normalizedOptions)) {
+        return await listManagedProfileBrowserPages(normalizedOptions?.profileId);
     }
 
     const pages = await getVisiblePagesDetailed();
@@ -1337,8 +1235,9 @@ export async function listBrowserPages(options = {}) {
 }
 
 export async function getBrowserPage(pageIndex, options = {}) {
-    if (shouldUseManagedProfilePool(options)) {
-        return await getManagedProfileBrowserPage(options?.profileId, pageIndex);
+    const normalizedOptions = normalizeManagedBrowserActionOptions(options);
+    if (shouldUseManagedProfilePool(normalizedOptions)) {
+        return await getManagedProfileBrowserPage(normalizedOptions?.profileId, pageIndex);
     }
 
     const pages = await getVisiblePagesDetailed();
@@ -1354,19 +1253,21 @@ export async function getBrowserPage(pageIndex, options = {}) {
 }
 
 export async function createBrowserPage(options = {}) {
-    if (shouldUseManagedProfilePool(options)) {
-        return await createProfileBrowserPage(options?.profileId, options);
+    const normalizedOptions = normalizeManagedBrowserActionOptions(options);
+    if (shouldUseManagedProfilePool(normalizedOptions)) {
+        return await createProfileBrowserPage(normalizedOptions?.profileId, normalizedOptions);
     }
 
-    return await newPageWithReconnect(currentBrowserOptions, options);
+    return await newPageWithReconnect(currentBrowserOptions, normalizedOptions);
 }
 
 /**
  * 更新浏览器活动状态
  */
 export function updateBrowserActivity(options = {}) {
-    if (shouldUseManagedProfilePool(options)) {
-        return updateManagedProfileBrowserActivity(options?.profileId);
+    const normalizedOptions = normalizeManagedBrowserActionOptions(options);
+    if (shouldUseManagedProfilePool(normalizedOptions)) {
+        return updateManagedProfileBrowserActivity(normalizedOptions?.profileId);
     }
 
     browserStatus.lastActivity = Date.now();
@@ -1431,7 +1332,6 @@ export async function closeBrowser(options = {}) {
         browserStatus.isConnected = false;
         browserStatus.pageCount = 0;
         currentUserDataDir = null;
-        currentProfileDir = null;
         currentExecutablePath = null;
         currentCdpEndpoint = null;
         currentManagedProfileId = null;
@@ -1442,8 +1342,9 @@ export async function closeBrowser(options = {}) {
 }
 
 export async function focusBrowser(options = {}) {
-    if (shouldUseManagedProfilePool(options)) {
-        return await focusManagedProfileBrowser(options?.profileId);
+    const normalizedOptions = normalizeManagedBrowserActionOptions(options);
+    if (shouldUseManagedProfilePool(normalizedOptions)) {
+        return await focusManagedProfileBrowser(normalizedOptions?.profileId);
     }
 
     throw new Error('当前浏览器模式暂不支持聚焦窗口');
@@ -1473,7 +1374,7 @@ export async function forceCloseBrowserByPort({ port = 9222 } = {}) {
  * 清除用户数据
  */
 export async function clearUserData() {
-    if (shouldUseManagedProfilePool()) {
+    try {
         const profile = getActiveBrowserProfile() || ensureDefaultBrowserProfile();
         const userDataDir = profile?.userDataDir;
         if (!userDataDir) {
@@ -1484,36 +1385,6 @@ export async function clearUserData() {
         fs.emptyDirSync(userDataDir);
         logger.info(`已清空用户数据目录: ${userDataDir}`);
         return { success: true, userDataDir };
-    }
-
-    try {
-        // 先关闭浏览器
-        await closeBrowser();
-
-        // ⚠️ 保护：避免误删你真实 Chrome 的 user data。
-        // 如确需清理，请通过环境变量明确指定目录。
-        const userDataDir = process.env.CLEAR_USER_DATA_DIR;
-        if (!userDataDir) {
-            throw new Error('为避免误删本机 Chrome 数据，请通过环境变量 CLEAR_USER_DATA_DIR 指定要清除的目录');
-        }
-
-        // 删除用户数据目录
-        if (existsSync(userDataDir)) {
-            rmSync(userDataDir, {
-                recursive: true,
-                force: true
-            });
-            logger.info('用户数据目录已删除:', userDataDir);
-        }
-
-        // 重置当前用户数据目录
-        currentUserDataDir = null;
-        currentManagedProfileId = null;
-
-        return {
-            success: true,
-            userDataDir
-        };
     } catch (error) {
         logger.error('清除用户数据失败:', error);
         throw error;
@@ -1662,9 +1533,16 @@ export function updateManagedBrowserProfile(profileId, payload = {}) {
     return updateBrowserProfile(profileId, payload);
 }
 
-export function deleteManagedBrowserProfile(profileId) {
-    if (hasManagedProfileBrowser(profileId)) {
-        throw new Error('当前环境正在使用中，请先关闭浏览器后再删除');
+export async function deleteManagedBrowserProfile(profileId) {
+    const normalizedProfileId = String(profileId || '').trim();
+    if (!normalizedProfileId) {
+        throw new Error('缺少 profileId');
+    }
+
+    await closeManagedProfileBrowser(normalizedProfileId);
+    forgetManagedProfileBrowserSession(normalizedProfileId);
+    if (currentManagedProfileId === normalizedProfileId) {
+        currentManagedProfileId = null;
     }
     return deleteBrowserProfile(profileId);
 }
@@ -1678,7 +1556,7 @@ export function switchManagedBrowserProfile(profileId) {
  */
 export async function cleanup() {
     await closeManagedProfileBrowser();
-    await closeBrowser({ mode: 'persistent' });
+    await closeBrowser();
 }
 
 // 导出默认的浏览器服务类
@@ -1751,9 +1629,16 @@ export class BrowserService {
         return updateBrowserProfile(profileId, payload);
     }
 
-    static deleteProfile(profileId) {
-        if (hasManagedProfileBrowser(profileId)) {
-            throw new Error('当前环境正在使用中，请先关闭浏览器后再删除');
+    static async deleteProfile(profileId) {
+        const normalizedProfileId = String(profileId || '').trim();
+        if (!normalizedProfileId) {
+            throw new Error('缺少 profileId');
+        }
+
+        await closeManagedProfileBrowser(normalizedProfileId);
+        forgetManagedProfileBrowserSession(normalizedProfileId);
+        if (currentManagedProfileId === normalizedProfileId) {
+            currentManagedProfileId = null;
         }
         return deleteBrowserProfile(profileId);
     }

@@ -1,5 +1,9 @@
 import { getOrCreateBrowser } from '../services/BrowserService.js';
 import {
+    ensureDefaultBrowserProfile,
+    getActiveBrowserProfile,
+} from '../services/BrowserProfileService.js';
+import {
     DEFAULT_MAX_ITEMS,
     DEFAULT_MAX_PAGES,
     DEFAULT_PAGE_TIMEOUT_MS,
@@ -69,6 +73,92 @@ function shouldCaptureSnapshots(taskConfig = {}) {
 
     const normalized = String(value || '').trim().toLowerCase();
     return ['1', 'true', 'yes', 'on'].includes(normalized);
+}
+
+function resolveCollectProfileId(taskConfig = {}) {
+    const explicitProfileId = String(
+        taskConfig.profileId ||
+        taskConfig.configData?.profileId ||
+        ''
+    ).trim();
+    if (explicitProfileId) {
+        return explicitProfileId;
+    }
+
+    const explicitCdpEndpoint = String(
+        taskConfig.cdpEndpoint ||
+        taskConfig.configData?.cdpEndpoint ||
+        ''
+    ).trim();
+    const explicitCdpUserDataDir = String(
+        taskConfig.cdpUserDataDir ||
+        taskConfig.userDataDir ||
+        taskConfig.configData?.cdpUserDataDir ||
+        taskConfig.configData?.userDataDir ||
+        ''
+    ).trim();
+    const explicitDebugPort = Number(
+        taskConfig.port ||
+        taskConfig.debugPort ||
+        taskConfig.configData?.port ||
+        taskConfig.configData?.debugPort
+    );
+    if (
+        explicitCdpEndpoint ||
+        explicitCdpUserDataDir ||
+        (Number.isFinite(explicitDebugPort) && explicitDebugPort > 0)
+    ) {
+        return null;
+    }
+
+    const activeProfile = getActiveBrowserProfile() || ensureDefaultBrowserProfile();
+    return String(activeProfile?.id || '').trim() || null;
+}
+
+function resolveCollectBrowserConnectionOptions(taskConfig = {}) {
+    const profileId = resolveCollectProfileId(taskConfig);
+    const cdpEndpoint = String(
+        taskConfig.cdpEndpoint ||
+        taskConfig.configData?.cdpEndpoint ||
+        process.env.CDP_ENDPOINT ||
+        ''
+    ).trim();
+    const cdpUserDataDir = String(
+        taskConfig.cdpUserDataDir ||
+        taskConfig.userDataDir ||
+        taskConfig.configData?.cdpUserDataDir ||
+        taskConfig.configData?.userDataDir ||
+        process.env.YISHE_AUTO_BROWSER_CDP_USER_DATA_DIR ||
+        process.env.UPLOADER_CDP_USER_DATA_DIR ||
+        ''
+    ).trim();
+    const port = Number(
+        taskConfig.port ||
+        taskConfig.debugPort ||
+        taskConfig.configData?.port ||
+        taskConfig.configData?.debugPort
+    );
+
+    const options = {
+        mode: 'cdp',
+    };
+
+    if (profileId) {
+        options.profileId = profileId;
+        return options;
+    }
+
+    if (cdpEndpoint) {
+        options.cdpEndpoint = cdpEndpoint;
+    }
+    if (cdpUserDataDir) {
+        options.cdpUserDataDir = cdpUserDataDir;
+    }
+    if (Number.isFinite(port) && port > 0) {
+        options.port = port;
+    }
+
+    return options;
 }
 
 async function runPlatformHook(platformConfig, hookName, context) {
@@ -548,7 +638,9 @@ export async function runEcomCollectTask(taskConfig = {}) {
         captureSnapshots,
     };
 
-    const browserOrContext = await getOrCreateBrowser();
+    const browserConnectionOptions = resolveCollectBrowserConnectionOptions(taskConfig);
+    const collectProfileId = String(browserConnectionOptions.profileId || '').trim() || null;
+    const browserOrContext = await getOrCreateBrowser(browserConnectionOptions);
     const page = await browserOrContext.newPage();
 
     try {
@@ -625,6 +717,8 @@ export async function runEcomCollectTask(taskConfig = {}) {
                 snapshots: runtime.snapshots,
                 summary: {
                     ...(result.summary || {}),
+                    profileId: collectProfileId,
+                    cdpEndpoint: String(browserConnectionOptions.cdpEndpoint || process.env.CDP_ENDPOINT || '').trim() || null,
                     taskType,
                     visitedUrls: runtime.visitedUrls,
                     startedAt: runtime.startedAt,
@@ -634,6 +728,8 @@ export async function runEcomCollectTask(taskConfig = {}) {
                 debugMeta: {
                     snapshotDir,
                     tempDir: snapshotDir,
+                    profileId: collectProfileId,
+                    cdpEndpoint: String(browserConnectionOptions.cdpEndpoint || process.env.CDP_ENDPOINT || '').trim() || null,
                     taskType,
                     workspaceDir: typeof taskConfig.workspaceDir === 'string' && taskConfig.workspaceDir.trim()
                         ? taskConfig.workspaceDir.trim()
@@ -678,6 +774,8 @@ export async function runEcomCollectTask(taskConfig = {}) {
                 records: [],
                 snapshots: runtime.snapshots,
                 summary: {
+                    profileId: collectProfileId,
+                    cdpEndpoint: String(browserConnectionOptions.cdpEndpoint || process.env.CDP_ENDPOINT || '').trim() || null,
                     taskType,
                     visitedUrls: runtime.visitedUrls,
                     startedAt: runtime.startedAt,
@@ -687,6 +785,8 @@ export async function runEcomCollectTask(taskConfig = {}) {
                 debugMeta: {
                     snapshotDir,
                     tempDir: snapshotDir,
+                    profileId: collectProfileId,
+                    cdpEndpoint: String(browserConnectionOptions.cdpEndpoint || process.env.CDP_ENDPOINT || '').trim() || null,
                     taskType,
                     workspaceDir: typeof taskConfig.workspaceDir === 'string' && taskConfig.workspaceDir.trim()
                         ? taskConfig.workspaceDir.trim()

@@ -5,6 +5,7 @@ import {
     buildSearchSuggestionsSceneCapability,
     buildShopHotProductsSceneCapability,
     buildSelectField,
+    createOutputField,
     DEFAULT_SUPPORTED_SCENES,
 } from '../shared.js';
 import { DEFAULT_PAGE_TIMEOUT_MS } from '../../common/constants.js';
@@ -88,6 +89,161 @@ const AMAZON_MARKETPLACE_OPTIONS = Object.values(AMAZON_MARKETPLACE_CONFIGS).map
     value: item.code,
     description: `${item.label} 站点搜索联想词`,
 }));
+
+const AMAZON_SEARCH_RECORD_FIELDS_EXTRA = [
+    createOutputField('asin', 'ASIN', {
+        description: 'Amazon 商品唯一标识，适合用于跨列表和详情关联。',
+        stability: 'platform',
+        examples: ['B0C1234567'],
+    }),
+    createOutputField('originalSourceUrl', '原始链接', {
+        description: '保留跳转前或带追踪参数的原始页面链接。',
+        valueType: 'url',
+        stability: 'platform',
+    }),
+    createOutputField('detailFetchStatus', '详情补抓状态', {
+        description: 'search 场景补抓详情页时的执行状态，如 success / blocked / failed。',
+        stability: 'platform',
+        examples: ['success'],
+    }),
+    createOutputField('detailFetchError', '详情补抓异常', {
+        description: '详情页补抓失败时的错误摘要。',
+        stability: 'platform',
+    }),
+    createOutputField('detailRisk', '详情风险对象', {
+        description: '命中登录、验证码或风控时返回的风险对象。',
+        valueType: 'object',
+        stability: 'platform',
+    }),
+    createOutputField('listingData', '列表原始对象', {
+        description: '列表页原始卡片快照，便于和详情页补抓结果对照。',
+        valueType: 'object',
+        stability: 'platform',
+    }),
+    createOutputField('detailData', '详情原始对象', {
+        description: '详情页保真结果，search 场景会在补抓成功后挂载在这里。',
+        valueType: 'object',
+        stability: 'platform',
+    }),
+    createOutputField('detailRecordKey', '详情记录标识', {
+        description: '详情页层级的记录主键。',
+        stability: 'platform',
+    }),
+    createOutputField('detailCapturedAt', '详情采集时间', {
+        description: '详情页补抓完成时间。',
+        valueType: 'datetime',
+        stability: 'platform',
+    }),
+    createOutputField('brand', '品牌', {
+        description: '从详情页同步回搜索记录的品牌字段。',
+        stability: 'platform',
+    }),
+    createOutputField('sellerName', '卖家', {
+        description: 'Amazon 卖家或 merchant 名称。',
+        stability: 'platform',
+    }),
+    createOutputField('availabilityText', '库存文本', {
+        description: '详情页可售状态、库存状态等文本。',
+        stability: 'platform',
+    }),
+    createOutputField('deliveryText', '配送文本', {
+        description: '配送承诺、到货时间等原始文本。',
+        stability: 'platform',
+    }),
+];
+
+const AMAZON_DETAIL_RECORD_FIELDS_EXTRA = [
+    createOutputField('asin', 'ASIN', {
+        description: 'Amazon 商品唯一标识。',
+        stability: 'platform',
+        examples: ['B0C1234567'],
+    }),
+    createOutputField('originalSourceUrl', '原始链接', {
+        description: '详情页跳转前的原始链接，必要时保留追踪参数。',
+        valueType: 'url',
+        stability: 'platform',
+    }),
+    createOutputField('sellerName', '卖家', {
+        description: '卖家或 merchant 名称。',
+        stability: 'platform',
+    }),
+    createOutputField('merchantInfoText', '商家信息文本', {
+        description: 'Amazon 商家说明、发货方说明等原始文本。',
+        stability: 'platform',
+    }),
+    createOutputField('deliveryText', '配送文本', {
+        description: '配送承诺、到货时间等原始文本。',
+        stability: 'platform',
+    }),
+    createOutputField('pageTitle', '页面标题', {
+        description: '浏览器页面 title，适合辅助判断页面是否跳流。',
+        stability: 'platform',
+    }),
+    createOutputField('bulletPointsText', '卖点摘要文本', {
+        description: 'bulletPoints 的拼接摘要，适合轻量分析和 AI 输入。',
+        valueType: 'text',
+        stability: 'platform',
+    }),
+    createOutputField('breadcrumbText', '类目路径文本', {
+        description: 'breadcrumb 的拼接摘要。',
+        stability: 'platform',
+    }),
+    createOutputField('specSummaryText', '规格摘要文本', {
+        description: 'specPairs 的拼接摘要。',
+        valueType: 'text',
+        stability: 'platform',
+    }),
+];
+
+const AMAZON_SUGGESTION_RECORD_FIELDS_EXTRA = [
+    createOutputField('sourceType', '来源类型', {
+        description: '当前记录属于搜索联想信号。',
+        stability: 'platform',
+        examples: ['keyword_suggestion'],
+    }),
+    createOutputField('signalType', '信号类型', {
+        description: '信号子类型，当前为 search_suggestion。',
+        stability: 'platform',
+        examples: ['search_suggestion'],
+    }),
+    createOutputField('marketplace', '站点代码', {
+        description: 'Amazon 站点代码，例如 US / UK / DE / JP。',
+        stability: 'platform',
+        examples: ['US'],
+    }),
+    createOutputField('marketplaceLabel', '站点名称', {
+        description: '站点的人类可读名称。',
+        stability: 'platform',
+        examples: ['美国'],
+    }),
+    createOutputField('suggestionSource', '建议来源', {
+        description: '来自 API 还是 UI 回退抓取。',
+        stability: 'platform',
+        examples: ['api'],
+    }),
+    createOutputField('strategyId', '策略 ID', {
+        description: 'Amazon 联想词接口返回的策略标识。',
+        stability: 'platform',
+    }),
+    createOutputField('candidateSources', '候选来源', {
+        description: '联想词候选来源标记。',
+        stability: 'platform',
+    }),
+    createOutputField('refTag', '引用标签', {
+        description: '联想词接口返回的 refTag 等来源上下文。',
+        stability: 'platform',
+    }),
+    createOutputField('prior', '优先级', {
+        description: '联想词优先级或排序权重。',
+        valueType: 'number',
+        stability: 'platform',
+    }),
+    createOutputField('uiSeen', '页面可见', {
+        description: '该联想词是否也在 UI 下拉中被看到。',
+        valueType: 'boolean',
+        stability: 'platform',
+    }),
+];
 
 function buildAmazonListingData(record = {}) {
     return {
@@ -1054,6 +1210,12 @@ const amazonPlatform = {
     capability: buildPlatformCapability({
         regions: ['global'],
         status: 'available',
+        access: {
+            login: 'optional',
+            captcha: 'possible',
+            antiBot: 'medium',
+            notes: ['Amazon 公开列表和详情通常可访问，但长时间运行、频繁翻页或切站点后可能进入登录或验证码流。'],
+        },
         overview:
             'Amazon 当前是首批优先平台，搜索、详情、店铺热门商品三类场景都已做过真实 DOM 调试。',
         notes: [
@@ -1071,6 +1233,13 @@ const amazonPlatform = {
             buildSearchSceneCapability({
                 verification: 'verified',
                 availability: 'available',
+                recordFieldsExtra: AMAZON_SEARCH_RECORD_FIELDS_EXTRA,
+                access: {
+                    login: 'optional',
+                    captcha: 'possible',
+                    antiBot: 'medium',
+                    notes: ['搜索场景较稳定，但批量翻页或高频请求时仍要保留 login/captcha 风险退出。'],
+                },
                 keywordPlaceholder: '例如：wireless earbuds',
                 keywordsPlaceholder: '一行一个关键词，可按细分类目拆分',
                 overview: '进入 Amazon 搜索页后先抓取商品卡片，再按商品链接逐个进入详情页补抓详情信息。',
@@ -1099,6 +1268,13 @@ const amazonPlatform = {
             buildSearchSuggestionsSceneCapability({
                 verification: 'verified',
                 availability: 'available',
+                recordFieldsExtra: AMAZON_SUGGESTION_RECORD_FIELDS_EXTRA,
+                access: {
+                    login: 'none',
+                    captcha: 'none',
+                    antiBot: 'low',
+                    notes: ['联想词优先走公开接口，适合作为低风险的趋势信号源。'],
+                },
                 keywordPlaceholder: '例如：wireless earbuds',
                 keywordsPlaceholder: '一行一个种子词，也支持逗号分隔',
                 extraFields: [
@@ -1134,6 +1310,13 @@ const amazonPlatform = {
             buildProductDetailSceneCapability({
                 verification: 'verified',
                 availability: 'available',
+                recordFieldsExtra: AMAZON_DETAIL_RECORD_FIELDS_EXTRA,
+                access: {
+                    login: 'optional',
+                    captcha: 'possible',
+                    antiBot: 'medium',
+                    notes: ['详情页通常可抓，但地区跳转、库存校验和登录提示仍可能打断执行。'],
+                },
                 targetUrlPlaceholder: '填写 Amazon 商品详情页链接',
                 overview: '打开商品详情页，尽量保真地提取标题、主图、描述等详情原始数据。',
                 notes: ['如果跳国家站点，优先补详情页 URL 规范化和地区选择逻辑。'],
@@ -1153,6 +1336,12 @@ const amazonPlatform = {
             buildShopHotProductsSceneCapability({
                 verification: 'verified',
                 availability: 'available',
+                access: {
+                    login: 'optional',
+                    captcha: 'possible',
+                    antiBot: 'medium',
+                    notes: ['榜单和店铺页对目标链接稳定性更敏感，仍建议保留异常页截图。'],
+                },
                 targetUrlPlaceholder: '填写 Amazon 店铺页、Best Sellers 或榜单页链接',
                 overview: '打开店铺热门商品页或榜单页，提取卡片原始数据。',
                 notes: ['店铺热门商品场景更依赖目标页链接的稳定性。'],

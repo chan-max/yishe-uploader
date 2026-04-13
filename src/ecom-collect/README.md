@@ -30,7 +30,7 @@
 
 3. 原始数据优先
    - 当前阶段以“尽量保真”的原始数据入库为主。
-   - 平台差异化字段优先保留在 `rawData / summaryData` 中，后续再做结构化分析。
+   - 平台差异化字段优先保留在 `collectData.records[] / collectData.summary` 中，后续再做分析层结构化。
 
 4. 风控优先退出
    - 遇到验证码、登录页、访问受限时尽快识别并返回。
@@ -83,12 +83,44 @@
 
 - `status`
   - 当前平台整体可用性，例如 `available / heuristic / blocked / unsupported`
+- `access`
+  - 平台或任务类型的访问限制和风控信息，例如 `login / captcha / antiBot / notes`
 - `docs`
   - 平台概述和补充说明
 - `maintenance`
   - 模块目录、选择器文件、README 路径
 - `scenes`
   - 每个场景自己的字段、说明、示例、可用性和验证状态
+
+## 字段维护方式
+
+当前字段采用“两层说明”：
+
+1. 静态预期字段
+   - 来自 capability schema 的 `docs.packageFields` 和 `docs.recordFields`
+   - 用于任务创建前说明“这个 taskType 设计上会返回哪些字段”
+   - 适合做跨平台字段目录、维护文档和前端展示
+
+2. 动态实际字段
+   - 来自真实运行结果 `collectData.records[]` 的自动扫描
+   - 用于查看“这个平台这次实际返回了哪些字段、覆盖率如何”
+   - 适合发现字段漂移、平台新增字段和未建档字段
+
+这两层配合使用，可以在不改数据库结构的前提下持续扩平台、扩字段、扩分析能力。
+
+如需导出当前 capability schema 中声明的字段目录，可执行：
+
+```bash
+npm run ecom:fields
+```
+
+常见用法：
+
+```bash
+npm run ecom:fields -- --platform amazon
+npm run ecom:fields -- --task-type amazon.search_suggestions
+npm run ecom:fields -- --json
+```
 
 ## 维护约定
 

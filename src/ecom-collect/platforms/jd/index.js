@@ -40,6 +40,12 @@ const jdPlatform = {
         regions: ['cn'],
         status: 'blocked',
         reason: '京东前台页面当前高频触发验证码，不建议进入默认可执行平台。',
+        access: {
+            login: 'required',
+            captcha: 'blocking',
+            antiBot: 'blocking',
+            notes: ['当前环境下命中登录页和验证页的概率都很高，默认应视为阻断平台而不是重试平台。'],
+        },
         overview:
             '京东平台保留独立目录和选择器实现，但默认标记为受限，避免把验证码平台加入常规调度。',
         notes: [
@@ -56,6 +62,12 @@ const jdPlatform = {
                 verification: 'blocked',
                 availability: 'blocked',
                 reason: '搜索页高频触发验证码。',
+                access: {
+                    login: 'required',
+                    captcha: 'blocking',
+                    antiBot: 'blocking',
+                    notes: ['搜索入口当前稳定识别为 login_required 或风险校验，默认不建议进入自动调度。'],
+                },
                 keywordPlaceholder: '例如：蓝牙音箱',
                 overview: '保留接口文档和参数定义，等待后续重新调试。',
                 examples: [
@@ -77,6 +89,12 @@ const jdPlatform = {
                 verification: 'blocked',
                 availability: 'blocked',
                 reason: '详情页访问过程容易命中验证码与风控。',
+                access: {
+                    login: 'required',
+                    captcha: 'blocking',
+                    antiBot: 'blocking',
+                    notes: ['详情页当前同样属于高风险入口，更适合保留文档而不是继续自动化重试。'],
+                },
                 targetUrlPlaceholder: '填写京东商品详情页链接',
                 overview: '默认不执行，仅保留参数与调用示例。',
                 examples: [
@@ -96,6 +114,12 @@ const jdPlatform = {
                 verification: 'blocked',
                 availability: 'blocked',
                 reason: '店铺页同样容易触发风险验证。',
+                access: {
+                    login: 'required',
+                    captcha: 'blocking',
+                    antiBot: 'blocking',
+                    notes: ['店铺页与列表页一样受风险策略影响，当前应视为不可自动执行。'],
+                },
                 targetUrlPlaceholder: '填写京东店铺页链接',
                 overview: '默认不执行，仅保留参数与调用示例。',
                 examples: [

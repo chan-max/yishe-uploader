@@ -2,6 +2,7 @@ import {
     buildPlatformCapability,
     buildSelectField,
     buildTrendKeywordsSceneCapability,
+    createOutputField,
 } from '../shared.js';
 
 const GOOGLE_TRENDS_DEFAULT_GEO = 'US';
@@ -20,6 +21,43 @@ const GOOGLE_TRENDS_GEO_OPTIONS = [
     { label: '日本', value: 'JP', description: '适合日本站点趋势观察。' },
     { label: '巴西', value: 'BR', description: '适合拉美市场趋势观察。' },
     { label: '印度', value: 'IN', description: '适合高流量英语市场趋势观察。' },
+];
+
+const GOOGLE_TRENDS_RECORD_FIELDS_EXTRA = [
+    createOutputField('sourceType', '来源类型', {
+        description: '当前记录属于趋势信号。',
+        stability: 'platform',
+        examples: ['trend_signal'],
+    }),
+    createOutputField('imageUrl', '趋势配图', {
+        description: '趋势条目或相关新闻首图。',
+        valueType: 'url',
+        stability: 'platform',
+    }),
+    createOutputField('imageUrls[]', '趋势图片列表', {
+        description: '趋势条目和相关新闻中提取到的图片列表。',
+        valueType: 'array',
+        stability: 'platform',
+    }),
+    createOutputField('pictureSource', '图片来源', {
+        description: '趋势图片来源站点。',
+        stability: 'platform',
+    }),
+    createOutputField('cardText', '卡片摘要文本', {
+        description: '为轻量搜索和 AI 输入准备的短文本摘要。',
+        valueType: 'text',
+        stability: 'platform',
+    }),
+    createOutputField('descriptionText', '描述文本', {
+        description: '趋势描述与相关新闻摘要拼接后的文本。',
+        valueType: 'text',
+        stability: 'platform',
+    }),
+    createOutputField('newsItems[]', '关联新闻对象', {
+        description: '相关新闻对象列表，通常含标题、来源、链接、摘要、图片。',
+        valueType: 'array',
+        stability: 'platform',
+    }),
 ];
 
 function decodeXmlEntities(value = '') {
@@ -310,6 +348,12 @@ const googleTrendsPlatform = {
     capability: buildPlatformCapability({
         regions: ['global'],
         status: 'available',
+        access: {
+            login: 'none',
+            captcha: 'none',
+            antiBot: 'low',
+            notes: ['当前优先走公开 RSS 源，适合作为低风险、可持续的趋势信号平台。'],
+        },
         overview:
             'Google Trends 通过公开 RSS 趋势源采集热搜词，并保留新闻线索、趋势排名和预估热度，适合作为选品前置信号。',
         notes: [
@@ -326,6 +370,13 @@ const googleTrendsPlatform = {
             buildTrendKeywordsSceneCapability({
                 verification: 'verified',
                 availability: 'available',
+                recordFieldsExtra: GOOGLE_TRENDS_RECORD_FIELDS_EXTRA,
+                access: {
+                    login: 'none',
+                    captcha: 'none',
+                    antiBot: 'low',
+                    notes: ['趋势词场景不依赖登录态，适合优先用于多平台对比前的需求信号采集。'],
+                },
                 extraFields: [
                     buildSelectField('geo', '地区', {
                         required: true,
