@@ -1730,8 +1730,11 @@ class ApiServer {
         try {
             const url = new URL(req.url, `http://${req.headers.host}`);
             const profileId = (url.searchParams.get('profileId') || '').trim() || undefined;
-            await checkAndReconnectBrowser({ reconnect: false, profileId });
-            const status = await getBrowserStatus({ profileId });
+            const status = await getBrowserStatus({
+                profileId,
+                lightweight: true,
+                includePages: false
+            });
             this.sendResponse(res, 200, { success: true, data: status });
         } catch (error) {
             this.sendResponse(res, 500, { success: false, message: error.message });

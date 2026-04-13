@@ -1181,10 +1181,31 @@ function buildInstanceSummary(profile, session, pages = []) {
   };
 }
 
+function isSessionConnectedLightweight(session) {
+  if (!session?.browserInstance || !session?.contextInstance) {
+    return false;
+  }
+
+  try {
+    if (
+      typeof session.browserInstance.isConnected === "function" &&
+      !session.browserInstance.isConnected()
+    ) {
+      return false;
+    }
+  } catch {
+    return false;
+  }
+
+  return !!session?.browserStatus?.isConnected || !!session?.connectPromise;
+}
+
 export async function getManagedProfileBrowserStatus(options = {}) {
   const profileState = listBrowserProfiles();
   const profiles = Array.isArray(profileState.items) ? profileState.items : [];
   const normalizedProfileId = String(options.profileId || "").trim();
+  const includePages = options.includePages === true;
+  const lightweight = options.lightweight === true || options.includePages === false;
 
   if (normalizedProfileId) {
     const profile = getBrowserProfile(normalizedProfileId);
@@ -1192,15 +1213,26 @@ export async function getManagedProfileBrowserStatus(options = {}) {
       throw new Error(`指定环境不存在: ${normalizedProfileId}`);
     }
     const session = getSession(normalizedProfileId);
+    const sessionAvailable = session
+      ? lightweight
+        ? isSessionConnectedLightweight(session)
+        : await isSessionAvailable(session)
+      : false;
+    if (session && !sessionAvailable) {
+      session.browserStatus.isConnected = false;
+      if (!session.connectPromise) {
+        session.browserStatus.pageCount = 0;
+      }
+    }
     const pages =
-      session && (await isSessionAvailable(session))
-        ? await getSessionPages(session)
-        : [];
+      includePages && session && sessionAvailable ? await getSessionPages(session) : [];
     const instance = buildInstanceSummary(profile, session, pages);
     return {
       ...instance,
       profiles,
       instances: [instance],
+      pages: includePages ? pages : [],
+      pageCount: Number(instance.pageCount || 0),
       timestamp: new Date().toISOString(),
     };
   }
@@ -1208,10 +1240,19 @@ export async function getManagedProfileBrowserStatus(options = {}) {
   const instanceEntries = [];
   for (const profile of profiles) {
     const session = getSession(profile.id);
+    const sessionAvailable = session
+      ? lightweight
+        ? isSessionConnectedLightweight(session)
+        : await isSessionAvailable(session)
+      : false;
+    if (session && !sessionAvailable) {
+      session.browserStatus.isConnected = false;
+      if (!session.connectPromise) {
+        session.browserStatus.pageCount = 0;
+      }
+    }
     const pages =
-      session && (await isSessionAvailable(session))
-        ? await getSessionPages(session)
-        : [];
+      includePages && session && sessionAvailable ? await getSessionPages(session) : [];
     instanceEntries.push(buildInstanceSummary(profile, session, pages));
   }
 
@@ -1222,6 +1263,10 @@ export async function getManagedProfileBrowserStatus(options = {}) {
     instanceEntries[0] ||
     null;
   const allPages = instanceEntries.flatMap((item) => item.pages || []);
+  const totalPageCount = instanceEntries.reduce(
+    (sum, item) => sum + Number(item?.pageCount || 0),
+    0,
+  );
   const lastActivity = instanceEntries
     .map((item) => item.lastActivity)
     .filter(Boolean)
@@ -1231,7 +1276,7 @@ export async function getManagedProfileBrowserStatus(options = {}) {
   return {
     hasInstance: instanceEntries.some((item) => item.hasInstance),
     isConnected: connectedInstances.length > 0,
-    pageCount: allPages.length,
+    pageCount: totalPageCount,
     lastActivity,
     lastError:
       instanceEntries.find((item) => item.lastError)?.lastError || null,
@@ -1247,7 +1292,7 @@ export async function getManagedProfileBrowserStatus(options = {}) {
       activeProfileId: profileState.activeProfileId || null,
       activeProfile: getActiveBrowserProfile() || null,
     },
-    pages: allPages,
+    pages: includePages ? allPages : [],
     profiles,
     instances: instanceEntries,
     timestamp: new Date().toISOString(),

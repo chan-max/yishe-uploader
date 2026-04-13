@@ -995,21 +995,42 @@ export async function getBrowserStatus(options = {}) {
         return await getManagedProfileBrowserStatus(options);
     }
 
+    const lightweight = options.lightweight === true || options.includePages === false;
+    const includePages = options.includePages === true;
     let pagesInfo = [];
-    const managedStatus = await getManagedProfileBrowserStatus().catch(() => null);
+    const managedStatus = await getManagedProfileBrowserStatus({
+        lightweight,
+        includePages
+    }).catch(() => null);
     currentBrowserVersion = resolveActiveBrowserVersion() || currentBrowserVersion;
     const profilesState = listBrowserProfiles();
     const activeProfile = currentManagedProfileId
         ? getBrowserProfile(currentManagedProfileId)
         : (profilesState.activeProfileId ? getBrowserProfile(profilesState.activeProfileId) : null);
-    try {
-        const visiblePages = await getVisiblePagesDetailed();
-        pagesInfo = visiblePages.map(item => ({ title: item.title || 'Unknown', url: item.url || 'Unknown' }));
-        browserStatus.pageCount = visiblePages.length;
-    } catch (e) {
-        logger.debug('获取页面信息失败（可能正在导航）:', e?.message);
-        pagesInfo = [];
-        browserStatus.pageCount = 0;
+    if (lightweight) {
+        try {
+            browserStatus.isConnected = !!(
+                contextInstance &&
+                browserInstance &&
+                (typeof browserInstance.isConnected !== 'function' || browserInstance.isConnected())
+            );
+        } catch {
+            browserStatus.isConnected = false;
+        }
+
+        if (!browserStatus.isConnected && !connectPromise) {
+            browserStatus.pageCount = 0;
+        }
+    } else {
+        try {
+            const visiblePages = await getVisiblePagesDetailed();
+            pagesInfo = visiblePages.map(item => ({ title: item.title || 'Unknown', url: item.url || 'Unknown' }));
+            browserStatus.pageCount = visiblePages.length;
+        } catch (e) {
+            logger.debug('获取页面信息失败（可能正在导航）:', e?.message);
+            pagesInfo = [];
+            browserStatus.pageCount = 0;
+        }
     }
 
     return {
@@ -1032,7 +1053,7 @@ export async function getBrowserStatus(options = {}) {
             detectedProfiles: currentUserDataDir ? tryListProfiles(currentUserDataDir) : [],
             activeProfile: activeProfile || managedStatus?.connection?.activeProfile || null,
         },
-        pages: pagesInfo,
+        pages: includePages ? pagesInfo : [],
         profiles: managedStatus?.profiles || profilesState.items,
         instances: managedStatus?.instances || [],
         managedConnection: managedStatus?.connection || null,
