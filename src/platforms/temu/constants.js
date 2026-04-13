@@ -18,23 +18,26 @@ export const TEMU_LOGGED_IN_SELECTORS = [
 ];
 
 export const TEMU_LOGIN_ACCOUNT_SELECTORS = [
-    'form input[type="text"]',
-    'input[type="text"]',
-    'form input[type="tel"]',
-    'input[type="tel"]',
+    // Prefer exact login-field placeholders first to avoid matching unrelated text inputs.
+    'form input[placeholder="请输入手机号"]',
+    'input[placeholder="请输入手机号"]',
+    'form input[placeholder="请输入手机号码"]',
+    'input[placeholder="请输入手机号码"]',
+    'form input[placeholder="请输入账号"]',
+    'input[placeholder="请输入账号"]',
+    'form input[placeholder="请输入用户名"]',
+    'input[placeholder="请输入用户名"]',
+    'form input[placeholder="请输入邮箱"]',
+    'input[placeholder="请输入邮箱"]',
+    'form input[placeholder="请输入登录账号"]',
+    'input[placeholder="请输入登录账号"]',
+    'form input[autocomplete="username"]',
     'input[autocomplete="username"]',
-    'input[type="email"]',
     'form input[name="username"]',
     'form input[name="account"]',
     'form input[name="phone"]',
     'form input[name="mobile"]',
-    'form input[name="email"]',
-    'input[placeholder*="手机号"]',
-    'input[placeholder*="手机号码"]',
-    'input[placeholder*="账号"]',
-    'input[placeholder*="用户名"]',
-    'input[placeholder*="邮箱"]',
-    'input[placeholder*="登录账号"]'
+    'form input[name="email"]'
 ];
 
 export const TEMU_LOGIN_PASSWORD_SELECTORS = [
