@@ -44,7 +44,7 @@ export async function publishToTemu(publishInfo = {}) {
         });
 
         const browser = await getOrCreateBrowser({ profileId: publishInfo?.profileId });
-        page = await browser.newPage();
+        page = await browser.newPage({ foreground: true });
         await pageOperator.setupAntiDetection(page);
 
         logger.info(`${PLATFORM_NAME}准备打开商品创建页: ${settings.createUrl}`);

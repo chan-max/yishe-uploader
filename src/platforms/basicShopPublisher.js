@@ -43,7 +43,7 @@ export class BasicShopPublisher {
             logger.info(`${this.platformName}目标发布页: ${targetUploadUrl}`);
 
             const browser = await getOrCreateBrowser({ profileId: publishInfo?.profileId });
-            page = await browser.newPage();
+            page = await browser.newPage({ foreground: true });
             await this.pageOperator.setupAntiDetection(page);
 
             await page.goto(targetUploadUrl, {
