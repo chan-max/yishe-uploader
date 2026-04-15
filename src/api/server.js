@@ -371,6 +371,8 @@ class ApiServer {
                     await this.handleListTasks(req, res, url);
                 } else if (reqPath === '/api/tasks/query-by-source' && method === 'POST') {
                     await this.handleQueryTasksBySource(req, res);
+                } else if (reqPath === '/api/tasks/cancel-by-source' && method === 'POST') {
+                    await this.handleCancelTasksBySource(req, res);
                 } else if (reqPath === '/api/tasks/logs/query-by-source' && method === 'POST') {
                     await this.handleQueryTaskLogsBySource(req, res);
                 } else if (reqPath.startsWith('/api/tasks/') && reqPath.endsWith('/logs') && method === 'GET') {
@@ -477,6 +479,7 @@ class ApiServer {
                 { method: 'GET', path: '/api/tasks/:taskId', description: '获取任务详情' },
                 { method: 'GET', path: '/api/tasks/:taskId/logs', description: '获取任务日志' },
                 { method: 'POST', path: '/api/tasks/query-by-source', description: '按 source 批量查询任务状态' },
+                { method: 'POST', path: '/api/tasks/cancel-by-source', description: '按 source 批量取消任务' },
                 { method: 'POST', path: '/api/tasks/logs/query-by-source', description: '按 source 批量查询任务日志' },
                 { method: 'POST', path: '/api/schedule', description: '创建定时发布' },
                 { method: 'GET', path: '/api/platforms', description: '支持的平台列表' },
@@ -1407,6 +1410,38 @@ class ApiServer {
             });
         } catch (error) {
             this.sendResponse(res, 500, { success: false, message: error.message || '按 source 查询任务失败' });
+        }
+    }
+
+    async handleCancelTasksBySource(req, res) {
+        try {
+            const body = await this.parseBody(req);
+            const sources = buildSourcesFromQueryBody(body);
+            const reason = String(body?.reason || '').trim() || '任务已取消';
+
+            if (sources.length === 0) {
+                this.sendResponse(res, 400, { success: false, message: '请传 sourceId/sourceIds 或 sources' });
+                return;
+            }
+
+            const data = sources.map((source) => {
+                const task = taskManager.cancelTaskBySource(source, reason);
+                return {
+                    source,
+                    exists: !!task,
+                    cancelled: !!task,
+                    task: task || null,
+                };
+            });
+
+            this.sendResponse(res, 200, {
+                success: true,
+                data,
+                total: data.length,
+                message: '取消指令已处理',
+            });
+        } catch (error) {
+            this.sendResponse(res, 500, { success: false, message: error.message || '按 source 取消任务失败' });
         }
     }
 

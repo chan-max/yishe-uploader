@@ -22,7 +22,8 @@ import {
     logger
 } from '../utils/logger.js';
 import {
-    patchContextNewPage
+    patchContextNewPage,
+    withDefaultActivatedPageOptions
 } from '../utils/playwrightPageFactory.js';
 import {
     getPlaywrightChromium
@@ -574,7 +575,8 @@ async function newPageWithReconnect(options = {}, pageOptions = {}) {
                 throw new Error('No browser context available');
             }
         }
-        const page = await contextInstance.newPage(pageOptions);
+        const finalPageOptions = withDefaultActivatedPageOptions(pageOptions);
+        const page = await contextInstance.newPage(finalPageOptions);
         await installFocusTrackerForPage(page);
         return page;
     } catch (err) {

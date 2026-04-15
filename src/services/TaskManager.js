@@ -196,6 +196,49 @@ export class TaskManager {
         return this.getTaskSummary(taskId);
     }
 
+    cancelTask(taskId, reason = '任务已取消') {
+        const task = this.tasks.get(taskId);
+        if (!task) {
+            return null;
+        }
+
+        const normalizedReason = String(reason || '').trim() || '任务已取消';
+        const terminalStatuses = new Set(['success', 'failed', 'cancelled']);
+        task.cancelRequested = true;
+        task.cancelReason = normalizedReason;
+
+        if (task.status === 'queued') {
+            this.queue = this.queue.filter((item) => item.taskId !== taskId);
+        }
+
+        if (!terminalStatuses.has(task.status)) {
+            this._setTaskState(taskId, {
+                status: 'cancelled',
+                step: 'cancelled',
+                error: {
+                    message: normalizedReason,
+                    cancelled: true,
+                },
+                finishedAt: toIsoString(),
+                progress: null,
+            });
+            this._appendLog(taskId, 'warn', '任务已取消', {
+                reason: normalizedReason,
+            });
+        }
+
+        return this.getTask(taskId);
+    }
+
+    cancelTaskBySource(source = {}, reason = '任务已取消') {
+        const task = this.findTaskBySource(source);
+        if (!task?.id) {
+            return null;
+        }
+
+        return this.cancelTask(task.id, reason);
+    }
+
     _findLatestTaskByLooseSource(source = {}) {
         const normalized = normalizeSource(source);
         if (!normalized.id) {
@@ -315,6 +358,15 @@ export class TaskManager {
                 this._appendLog(taskId, level, message, data);
             },
             getTask: () => this.getTask(taskId),
+            isCancelled: () => !!this.tasks.get(taskId)?.cancelRequested,
+            throwIfCancelled: () => {
+                const currentTask = this.tasks.get(taskId);
+                if (currentTask?.cancelRequested) {
+                    throw new Error(
+                        currentTask.cancelReason || '任务已取消'
+                    );
+                }
+            },
         };
 
         try {
@@ -329,6 +381,11 @@ export class TaskManager {
                     );
                 }
             }, () => executor(context));
+            const latestTask = this.tasks.get(taskId);
+            if (latestTask?.cancelRequested || latestTask?.status === 'cancelled') {
+                this._appendLog(taskId, 'warn', '任务取消后收到执行完成结果，已忽略');
+                return;
+            }
             this._setTaskState(taskId, {
                 status: 'success',
                 step: 'completed',
@@ -338,6 +395,13 @@ export class TaskManager {
             });
             this._appendLog(taskId, 'info', '任务执行完成', result);
         } catch (error) {
+            const latestTask = this.tasks.get(taskId);
+            if (latestTask?.cancelRequested || latestTask?.status === 'cancelled') {
+                this._appendLog(taskId, 'warn', '任务取消后收到执行异常，已忽略', {
+                    message: error?.message || '任务已取消',
+                });
+                return;
+            }
             const errorPayload = {
                 message: error?.message || '任务执行失败',
                 stack: error?.stack,

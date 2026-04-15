@@ -12,7 +12,10 @@ import {
   getDefaultChromeExecutablePath,
   initBundledPlaywrightEnv,
 } from "../utils/playwrightRuntime.js";
-import { patchContextNewPage } from "../utils/playwrightPageFactory.js";
+import {
+  patchContextNewPage,
+  withDefaultActivatedPageOptions,
+} from "../utils/playwrightPageFactory.js";
 import { spawn, exec } from "child_process";
 import http from "http";
 import https from "https";
@@ -1119,7 +1122,8 @@ export async function createProfileBrowserPage(profileId, pageOptions = {}) {
   if (!session?.contextInstance) {
     throw new Error("浏览器上下文不可用");
   }
-  const page = await session.contextInstance.newPage(pageOptions);
+  const finalPageOptions = withDefaultActivatedPageOptions(pageOptions);
+  const page = await session.contextInstance.newPage(finalPageOptions);
   await installFocusTrackerForPage(page);
   await installProfileBadgeForPage(page, targetProfile);
   session.browserStatus.lastActivity = Date.now();
