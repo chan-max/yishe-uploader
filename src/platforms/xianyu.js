@@ -42,7 +42,7 @@ class XianyuPublisher {
 
       // 1. 获取浏览器和页面
       const browser = await getOrCreateBrowser({ profileId: publishInfo?.profileId })
-      page = await browser.newPage()
+      page = await browser.newPage({ foreground: true })
       logger.info('新页面创建成功')
 
       // 2. 导航到发布页面

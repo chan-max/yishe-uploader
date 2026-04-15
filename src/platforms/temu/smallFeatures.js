@@ -159,7 +159,7 @@ export async function runTemuLoginSmallFeature(input = {}, runtimeOptions = {}) 
 
         if (managePage) {
             const browser = await getOrCreateBrowser({ profileId });
-            page = await browser.newPage();
+            page = await browser.newPage({ foreground: true });
             await pageOperator.setupAntiDetection(page);
             pushTrace(executionTrace, 'open_page', 'success', {
                 reusedCurrentPage: false,
@@ -293,7 +293,7 @@ export async function runTemuSessionCollectSmallFeature(input = {}, runtimeOptio
 
         if (managePage) {
             const browser = await getOrCreateBrowser({ profileId });
-            page = await browser.newPage();
+            page = await browser.newPage({ foreground: true });
             await pageOperator.setupAntiDetection(page);
             pushTrace(executionTrace, 'open_page', 'success', {
                 reusedCurrentPage: false,
@@ -453,7 +453,7 @@ export async function runTemuSessionAcquireSmallFeature(input = {}, runtimeOptio
 
         if (managePage) {
             const browser = await getOrCreateBrowser({ profileId });
-            page = await browser.newPage();
+            page = await browser.newPage({ foreground: true });
             await pageOperator.setupAntiDetection(page);
             pushTrace(executionTrace, 'open_page', 'success', {
                 reusedCurrentPage: false,

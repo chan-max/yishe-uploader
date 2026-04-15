@@ -79,6 +79,14 @@ function buildCookieHeader(cookies = {}) {
         .join('; ');
 }
 
+function normalizeTemuRegionKey(value = '') {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (normalized === 'us' || normalized === 'eu') {
+        return normalized;
+    }
+    return 'global';
+}
+
 function getFallbackOriginFromUrl(pageUrl) {
     try {
         const url = new URL(String(pageUrl || '').trim() || TEMU_SELLER_HOME_URL);
@@ -133,6 +141,177 @@ function summarizeCookieDomains(cookieEntries = []) {
     ));
 
     return domains.sort();
+}
+
+function collectTemuCookieMaps(cookieEntries = [], options = {}) {
+    const includeRegionalCookies = options.includeRegionalCookies !== false;
+    const cookiesGlobal = normalizeCookieEntries(
+        cookieEntries,
+        TEMU_REGION_COOKIE_DOMAINS.global
+    );
+    const cookiesUs = includeRegionalCookies
+        ? normalizeCookieEntries(cookieEntries, TEMU_REGION_COOKIE_DOMAINS.us)
+        : {};
+    const cookiesEu = includeRegionalCookies
+        ? normalizeCookieEntries(cookieEntries, TEMU_REGION_COOKIE_DOMAINS.eu)
+        : {};
+
+    return {
+        cookies: cookiesGlobal,
+        cookies_global: cookiesGlobal,
+        cookies_us: cookiesUs,
+        cookies_eu: cookiesEu
+    };
+}
+
+async function resolveTemuCurrentUserAgent(page, fallbackValue = '') {
+    const fallback = String(fallbackValue || '').trim();
+    if (!page) {
+        return fallback;
+    }
+
+    try {
+        const userAgent = await page.evaluate(() => navigator.userAgent || '');
+        return String(userAgent || '').trim() || fallback;
+    } catch {
+        return fallback;
+    }
+}
+
+export async function getTemuCurrentSessionContext(page, options = {}) {
+    if (!page || typeof page.context !== 'function') {
+        return {
+            success: false,
+            requestedRegion: normalizeTemuRegionKey(options?.region),
+            effectiveRegion: 'global',
+            message: '缺少可用页面，无法获取当前 Temu 会话'
+        };
+    }
+
+    try {
+        const context = page.context();
+        const currentUrl = String(page.url() || '').trim();
+        const allCookies = await context.cookies();
+        const cookieMaps = collectTemuCookieMaps(allCookies, options);
+        const requestedRegion = normalizeTemuRegionKey(options?.region);
+        const preferredCookies =
+            requestedRegion === 'us'
+                ? cookieMaps.cookies_us
+                : requestedRegion === 'eu'
+                    ? cookieMaps.cookies_eu
+                    : cookieMaps.cookies_global;
+        const preferredCookieCount = Object.keys(preferredCookies).length;
+        const effectiveRegion =
+            preferredCookieCount > 0 || requestedRegion === 'global'
+                ? requestedRegion
+                : 'global';
+        const activeCookies =
+            effectiveRegion === 'us'
+                ? cookieMaps.cookies_us
+                : effectiveRegion === 'eu'
+                    ? cookieMaps.cookies_eu
+                    : cookieMaps.cookies_global;
+        const userAgent = await resolveTemuCurrentUserAgent(
+            page,
+            options?.headersTemplate?.['user-agent']
+        );
+        const origin = String(
+            options?.headersTemplate?.origin || options?.origin || getFallbackOriginFromUrl(currentUrl)
+        ).trim();
+        const referer = String(
+            options?.headersTemplate?.referer || options?.referer || currentUrl || `${origin}/`
+        ).trim();
+        const mallId = String(
+            options?.mallId
+            || cookieMaps.cookies_global.mallid
+            || cookieMaps.cookies_us.mallid
+            || cookieMaps.cookies_eu.mallid
+            || options?.headersTemplate?.mallid
+            || ''
+        ).trim();
+        const antiContent = String(
+            options?.antiContent || options?.headersTemplate?.['anti-content'] || ''
+        ).trim();
+        const sessionInfo = {
+            userAgent,
+            antiContent,
+            mallId
+        };
+        const headersTemplate = {
+            ...buildRegionHeaders('global', sessionInfo),
+            ...(options?.headersTemplate && typeof options.headersTemplate === 'object'
+                ? options.headersTemplate
+                : {})
+        };
+        if (mallId) {
+            headersTemplate.mallid = mallId;
+        }
+
+        const regionHeaders = {
+            global: {
+                ...buildRegionHeaders('global', sessionInfo),
+                ...(effectiveRegion === 'global' ? headersTemplate : {})
+            },
+            us: buildRegionHeaders('us', sessionInfo),
+            eu: buildRegionHeaders('eu', sessionInfo)
+        };
+        const activeHeaders =
+            effectiveRegion === 'us'
+                ? regionHeaders.us
+                : effectiveRegion === 'eu'
+                    ? regionHeaders.eu
+                    : regionHeaders.global;
+        const temuCookieEntries = filterCookieEntries(
+            allCookies,
+            Array.from(new Set([
+                ...TEMU_REGION_COOKIE_DOMAINS.global,
+                ...TEMU_REGION_COOKIE_DOMAINS.us,
+                ...TEMU_REGION_COOKIE_DOMAINS.eu
+            ]))
+        );
+        const warnings = [];
+        if (requestedRegion !== effectiveRegion) {
+            warnings.push(`${requestedRegion.toUpperCase()} 区域当前未拿到独立 cookies，已回退使用 GLOBAL`);
+        }
+
+        return {
+            success: true,
+            requestedRegion,
+            effectiveRegion,
+            currentUrl,
+            userAgent,
+            mallId,
+            antiContent,
+            headers: activeHeaders,
+            headersTemplate,
+            regionHeaders,
+            cookies: activeCookies,
+            cookies_global: cookieMaps.cookies_global,
+            cookies_us: cookieMaps.cookies_us,
+            cookies_eu: cookieMaps.cookies_eu,
+            cookieHeader: buildCookieHeader(activeCookies),
+            cookieHeaders: {
+                global: buildCookieHeader(cookieMaps.cookies_global),
+                us: buildCookieHeader(cookieMaps.cookies_us),
+                eu: buildCookieHeader(cookieMaps.cookies_eu)
+            },
+            cookieCount: Object.keys(activeCookies).length,
+            cookieCounts: {
+                global: Object.keys(cookieMaps.cookies_global).length,
+                us: Object.keys(cookieMaps.cookies_us).length,
+                eu: Object.keys(cookieMaps.cookies_eu).length
+            },
+            cookieDomains: summarizeCookieDomains(temuCookieEntries),
+            warnings
+        };
+    } catch (error) {
+        return {
+            success: false,
+            requestedRegion: normalizeTemuRegionKey(options?.region),
+            effectiveRegion: 'global',
+            message: error?.message || String(error)
+        };
+    }
 }
 
 function createTemuRequestCapture(context) {
@@ -687,5 +866,6 @@ export async function collectTemuSessionBundle(page, options = {}) {
 }
 
 export default {
-    collectTemuSessionBundle
+    collectTemuSessionBundle,
+    getTemuCurrentSessionContext
 };

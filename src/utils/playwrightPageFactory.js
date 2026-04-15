@@ -112,6 +112,80 @@ async function activatePageIfNeeded(context, page, options = {}) {
     return page;
 }
 
+function shouldActivateForegroundPage(options = {}) {
+    if (options.headless === true) {
+        return false;
+    }
+
+    return options.activate === true || options.foreground === true;
+}
+
+async function getPageWindowSession(page) {
+    const context = typeof page?.context === 'function' ? page.context() : null;
+    if (!context || typeof context.newCDPSession !== 'function') {
+        return null;
+    }
+
+    try {
+        const cdp = await context.newCDPSession(page);
+        const response = await cdp.send('Browser.getWindowForTarget').catch(() => null);
+        return {
+            cdp,
+            windowId: response?.windowId ?? null,
+            windowState: String(response?.bounds?.windowState || '').trim() || null
+        };
+    } catch (error) {
+        logger.debug(`读取页面窗口状态失败，将仅尝试激活标签页: ${error?.message || error}`);
+        return null;
+    }
+}
+
+async function activatePageTab(page, options = {}) {
+    if (!page || typeof page.bringToFront !== 'function') {
+        return page;
+    }
+
+    const windowSession = await getPageWindowSession(page);
+    const shouldRestoreWindow = options.restoreWindow === true;
+    const shouldFocusWindow = options.focusWindow === true;
+
+    try {
+        if (
+            shouldRestoreWindow
+            && windowSession?.cdp
+            && windowSession?.windowId
+            && (windowSession.windowState === 'minimized' || windowSession.windowState === 'hidden')
+        ) {
+            await windowSession.cdp.send('Browser.setWindowBounds', {
+                windowId: windowSession.windowId,
+                bounds: { windowState: 'normal' }
+            }).catch(() => null);
+        }
+
+        await page.bringToFront().catch((error) => {
+            logger.debug(`激活任务标签页失败: ${error?.message || error}`);
+        });
+
+        if (
+            shouldFocusWindow
+            && windowSession?.windowState !== 'minimized'
+            && windowSession?.windowState !== 'hidden'
+        ) {
+            await page.evaluate(() => {
+                try {
+                    window.focus();
+                } catch {
+                    // ignore
+                }
+            }).catch(() => { });
+        }
+    } finally {
+        await windowSession?.cdp?.detach?.().catch(() => { });
+    }
+
+    return page;
+}
+
 async function tryCreateBackgroundPage(context, options = {}) {
     if (!shouldCreateBackgroundPage(options)) {
         return null;
@@ -168,12 +242,14 @@ async function tryCreateBackgroundPage(context, options = {}) {
 export async function createContextPage(context, options = {}) {
     const finalOptions = mergePageOptions({}, options);
     const backgroundPage = await tryCreateBackgroundPage(context, finalOptions);
-    if (backgroundPage) {
-        return await activatePageIfNeeded(context, backgroundPage, finalOptions);
+    const page = backgroundPage || await getOriginalNewPage(context)();
+    if (shouldActivateForegroundPage(finalOptions)) {
+        await activatePageTab(page, {
+            restoreWindow: finalOptions.restoreWindow === true,
+            focusWindow: finalOptions.focusWindow === true
+        });
     }
-
-    const page = await getOriginalNewPage(context)();
-    return await activatePageIfNeeded(context, page, finalOptions);
+    return page;
 }
 
 export function patchContextNewPage(context, defaultOptions = {}) {

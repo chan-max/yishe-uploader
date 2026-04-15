@@ -4,12 +4,16 @@ export const TEMU_CREATE_URL = 'https://agentseller.temu.com/goods/create/catego
 export const TEMU_LOGIN_URL = 'https://seller.kuajingmaihuo.com/login';
 export const TEMU_SELLER_HOME_URL = 'https://agentseller.temu.com/';
 export const TEMU_USERINFO_API_URL = 'https://agentseller.temu.com/api/seller/auth/userInfo';
+export const TEMU_IMAGE_UPLOAD_SIGNATURE_URL = 'https://agentseller.temu.com/ms/bg-flux-ms/compliance_property/signature';
+export const TEMU_STORE_IMAGE_URL = 'https://agentseller.temu.com/api/galerie/v3/store_image?sdk_version=js-0.0.40&tag_name=product-material-tag';
+export const TEMU_IMAGE_UPLOAD_SIGNATURE_TAG = 'product-material-tag';
 export const TEMU_EDIT_URL_KEYWORD = '/goods/edit';
 export const TEMU_CATEGORY_URL_KEYWORD = '/goods/create/category';
 export const TEMU_LOGIN_URL_KEYWORDS = ['login', 'passport', 'auth'];
 export const TEMU_LOGIN_SUCCESS_TIMEOUT = 45_000;
 export const TEMU_CATEGORY_SELECT_TIMEOUT = 30_000;
 export const TEMU_SELLER_HOST_KEYWORDS = ['seller.kuajingmaihuo.com', 'agentseller.temu.com'];
+export const TEMU_DEFAULT_UPLOAD_REFERER = TEMU_SELLER_HOME_URL;
 
 export const TEMU_LOGGED_IN_SELECTORS = [
     '[class*="account-info_accountInfo"]',

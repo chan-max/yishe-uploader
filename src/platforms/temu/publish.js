@@ -22,11 +22,24 @@ import {
 import {
     runTemuLoginSmallFeature
 } from './smallFeatures.js';
+import {
+    bindTemuUploadedImagesToEditPage,
+    createTemuLiveRequestCapture,
+    uploadTemuPublishImages
+} from './imageUpload.js';
+import {
+    fillTemuPublishBasicInfo
+} from './editForm.js';
 
 export async function publishToTemu(publishInfo = {}) {
     const pageOperator = new PageOperator();
     const settings = normalizeTemuSettings(publishInfo);
     let page = null;
+    let shouldKeepPageOpen = settings.keepPageOpen;
+    let requestCapture = null;
+    let publishImageUploadResult = null;
+    let publishImageBindResult = null;
+    let publishBasicInfoResult = null;
     const executionTrace = [];
 
     try {
@@ -44,7 +57,8 @@ export async function publishToTemu(publishInfo = {}) {
         });
 
         const browser = await getOrCreateBrowser({ profileId: publishInfo?.profileId });
-        page = await browser.newPage();
+        page = await browser.newPage({ foreground: true });
+        requestCapture = createTemuLiveRequestCapture(page.context());
         await pageOperator.setupAntiDetection(page);
 
         logger.info(`${PLATFORM_NAME}准备打开商品创建页: ${settings.createUrl}`);
@@ -96,7 +110,7 @@ export async function publishToTemu(publishInfo = {}) {
                             bodyPreview: loginResult.data?.bodyPreview || snapshot.bodyPreview,
                             loginFeatureResult: loginResult.data || null,
                             executionTrace,
-                            pageKeptOpen: settings.keepPageOpen
+                            pageKeptOpen: shouldKeepPageOpen
                         }
                     };
                 }
@@ -122,7 +136,7 @@ export async function publishToTemu(publishInfo = {}) {
                         detectedButtons: snapshot.buttons,
                         detectedInputs: snapshot.inputs,
                         executionTrace,
-                        pageKeptOpen: settings.keepPageOpen
+                        pageKeptOpen: shouldKeepPageOpen
                     }
                 };
             }
@@ -160,7 +174,7 @@ export async function publishToTemu(publishInfo = {}) {
                     detectedButtons: snapshot.buttons,
                     detectedInputs: snapshot.inputs,
                     executionTrace,
-                    pageKeptOpen: settings.keepPageOpen
+                    pageKeptOpen: shouldKeepPageOpen
                 }
             };
         }
@@ -180,6 +194,112 @@ export async function publishToTemu(publishInfo = {}) {
 
         const snapshot = await collectTemuFrameworkSnapshot(page);
         const frameworkStage = resolveTemuFrameworkStage(page.url());
+        if (frameworkStage === 'edit_page_ready') {
+            shouldKeepPageOpen = true;
+            pushTrace(executionTrace, 'wait_edit_page_loaded', 'success', {
+                currentUrl: page.url()
+            });
+
+            publishImageUploadResult = await uploadTemuPublishImages(page, publishInfo, {
+                requestCaptureState: requestCapture?.state || {}
+            });
+            if (!publishImageUploadResult.success) {
+                pushTrace(executionTrace, 'upload_publish_images', 'failed', {
+                    requestedImageCount: publishImageUploadResult.requestedImageCount || 0,
+                    uploadedCount: publishImageUploadResult.uploadedCount || 0,
+                    failedImageCount: Array.isArray(publishImageUploadResult.failedImages)
+                        ? publishImageUploadResult.failedImages.length
+                        : 0,
+                    message: publishImageUploadResult.message || ''
+                });
+
+                return {
+                    success: false,
+                    message: publishImageUploadResult.message || `${PLATFORM_NAME}商品图片上传失败`,
+                    data: {
+                        frameworkReady: true,
+                        frameworkStage,
+                        loginRequired: !loginState.loggedIn,
+                        autoLoginAttempted: settings.needLogin,
+                        autoLoginSuccess: settings.needLogin ? loginState.loggedIn : null,
+                        categorySelectionCompleted: !categoryResult.skipped,
+                        editPageReady: true,
+                        editPageLoaded: true,
+                        categoryIntent: categoryResult.categoryIntent || resolveTemuCategoryIntent(publishInfo),
+                        categorySearchResult: categoryResult.searchResult || null,
+                        clickedCategoryItems: categoryResult.clickedItems || [],
+                        currentUrl: page.url(),
+                        pageTitle: snapshot.title,
+                        detectedButtons: snapshot.buttons,
+                        detectedInputs: snapshot.inputs,
+                        uploadedPublishImages: publishImageUploadResult.uploadedImages || [],
+                        publishImageUploadCompleted: false,
+                        publishImageUploadRequestedCount:
+                            publishImageUploadResult.requestedImageCount || 0,
+                        publishImageUploadUploadedCount:
+                            publishImageUploadResult.uploadedCount || 0,
+                        publishImageUploadFailedImages:
+                            publishImageUploadResult.failedImages || [],
+                        executionTrace,
+                        pageKeptOpen: shouldKeepPageOpen
+                    }
+                };
+            }
+
+            publishInfo.temuUploadedImages = publishImageUploadResult.uploadedImages || [];
+            publishInfo.temuImageUploadSession = publishImageUploadResult.sessionContext || null;
+            publishImageBindResult = await bindTemuUploadedImagesToEditPage(
+                page,
+                publishImageUploadResult.uploadedImages || []
+            );
+            publishInfo.temuImageBindResult = publishImageBindResult;
+
+            pushTrace(
+                executionTrace,
+                'bind_publish_images_to_page',
+                publishImageBindResult?.skipped
+                    ? 'pending'
+                    : publishImageBindResult?.success
+                        ? 'success'
+                        : 'failed',
+                {
+                    selectedCount: publishImageBindResult?.selectedCount || 0,
+                    matchedCount: publishImageBindResult?.matchedCount || 0,
+                    message: publishImageBindResult?.message || '',
+                    reason: publishImageBindResult?.reason || ''
+                }
+            );
+
+            pushTrace(
+                executionTrace,
+                'upload_publish_images',
+                publishImageUploadResult.skipped ? 'pending' : 'success',
+                {
+                    requestedImageCount: publishImageUploadResult.requestedImageCount || 0,
+                    uploadedCount: publishImageUploadResult.uploadedCount || 0,
+                    skipped: !!publishImageUploadResult.skipped
+                }
+            );
+
+            publishBasicInfoResult = await fillTemuPublishBasicInfo(page, publishInfo);
+            publishInfo.temuBasicInfoFillResult = publishBasicInfoResult;
+
+            pushTrace(
+                executionTrace,
+                'fill_publish_basic_info',
+                publishBasicInfoResult?.skipped
+                    ? 'pending'
+                    : publishBasicInfoResult?.success
+                        ? 'success'
+                        : 'failed',
+                {
+                    titleFilled: !!publishBasicInfoResult?.titleFilled,
+                    descriptionFilled: !!publishBasicInfoResult?.descriptionFilled,
+                    availableFieldCount: publishBasicInfoResult?.availableFieldCount || 0,
+                    message: publishBasicInfoResult?.message || ''
+                }
+            );
+        }
         const editStructure = frameworkStage === 'edit_page_ready'
             ? await collectTemuEditPageStructure(page)
             : null;
@@ -213,7 +333,17 @@ export async function publishToTemu(publishInfo = {}) {
         return {
             success: true,
             message: frameworkStage === 'edit_page_ready'
-                ? `${PLATFORM_NAME}基础链路已打通，当前已进入商品编辑页`
+                ? publishImageUploadResult?.skipped
+                    ? publishBasicInfoResult?.success && !publishBasicInfoResult?.skipped
+                        ? `${PLATFORM_NAME}基础链路已打通，当前已进入商品编辑页并完成基础信息填写`
+                        : `${PLATFORM_NAME}基础链路已打通，当前已进入商品编辑页`
+                    : publishBasicInfoResult?.success && !publishBasicInfoResult?.skipped
+                        ? publishImageBindResult?.success
+                            ? `${PLATFORM_NAME}基础链路已打通，当前已进入商品编辑页并完成图片上传、回填与基础信息填写`
+                            : `${PLATFORM_NAME}基础链路已打通，当前已进入商品编辑页并完成图片上传与基础信息填写`
+                        : publishImageBindResult?.success
+                            ? `${PLATFORM_NAME}基础链路已打通，当前已进入商品编辑页并完成图片上传与回填`
+                            : `${PLATFORM_NAME}基础链路已打通，当前已进入商品编辑页并完成图片上传`
                 : categoryResult.reason === 'missing_category_keyword'
                     ? `${PLATFORM_NAME}已完成页面进入与登录检测，当前停留在类目选择页，等待类目数据接入`
                     : `${PLATFORM_NAME}基础链路已打通，当前已到类目选择页`,
@@ -233,13 +363,36 @@ export async function publishToTemu(publishInfo = {}) {
                 detectedButtons: snapshot.buttons,
                 detectedInputs: snapshot.inputs,
                 editPageStructure: editStructure,
+                editPageLoaded: frameworkStage === 'edit_page_ready',
+                uploadedPublishImages: publishImageUploadResult?.uploadedImages || [],
+                publishImageUploadCompleted:
+                    frameworkStage === 'edit_page_ready' && !publishImageUploadResult?.skipped,
+                publishImageUploadSkipped: !!publishImageUploadResult?.skipped,
+                publishImageUploadRequestedCount: publishImageUploadResult?.requestedImageCount || 0,
+                publishImageUploadUploadedCount: publishImageUploadResult?.uploadedCount || 0,
+                publishImageUploadFailedImages: publishImageUploadResult?.failedImages || [],
+                publishImageBindCompleted:
+                    !!publishImageBindResult?.success && !publishImageBindResult?.skipped,
+                publishImageBindSkipped: !!publishImageBindResult?.skipped,
+                publishImageBindSelectedCount: publishImageBindResult?.selectedCount || 0,
+                publishImageBindMatchedCount: publishImageBindResult?.matchedCount || 0,
+                publishImageBindUsedFallback: !!publishImageBindResult?.usedFallback,
+                publishImageBindCandidate: publishImageBindResult?.candidate || null,
+                publishImageBindAttempts: publishImageBindResult?.attemptResults || [],
+                publishBasicInfoFilled:
+                    !!publishBasicInfoResult?.success && !publishBasicInfoResult?.skipped,
+                publishBasicInfoSkipped: !!publishBasicInfoResult?.skipped,
+                publishTitleFilled: !!publishBasicInfoResult?.titleFilled,
+                publishDescriptionFilled: !!publishBasicInfoResult?.descriptionFilled,
+                publishBasicInfoResult,
                 pendingCapabilities: [
-                    'publish_info_preparation',
+                    'advanced_field_mapping',
+                    'sku_and_attributes',
                     'publish_data_mapping',
                     'final_publish_submission'
                 ],
                 executionTrace,
-                pageKeptOpen: settings.keepPageOpen
+                pageKeptOpen: shouldKeepPageOpen
             }
         };
     } catch (error) {
@@ -254,19 +407,20 @@ export async function publishToTemu(publishInfo = {}) {
                 frameworkReady: false,
                 currentUrl: page?.url?.() || '',
                 executionTrace,
-                pageKeptOpen: settings.keepPageOpen
+                pageKeptOpen: shouldKeepPageOpen
             }
         };
     } finally {
-        if (page && !settings.keepPageOpen) {
+        if (page && !shouldKeepPageOpen) {
             try {
                 await page.close();
             } catch (closeError) {
                 logger.warn(`${PLATFORM_NAME}关闭页面失败: ${closeError?.message || closeError}`);
             }
-        } else if (page && settings.keepPageOpen) {
+        } else if (page && shouldKeepPageOpen) {
             logger.info(`${PLATFORM_NAME}调试模式：保留页面，不自动关闭 tab`);
         }
+        requestCapture?.dispose?.();
     }
 }
 

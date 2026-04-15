@@ -1449,12 +1449,22 @@ class ApiServer {
         try {
             const body = await this.parseBody(req);
             const sources = buildSourcesFromQueryBody(body);
+            const afterIds = body?.afterIds && typeof body.afterIds === 'object'
+                ? body.afterIds
+                : {};
             const data = sources.map((source) => {
-                const logs = taskManager.findTaskLogsBySource(source);
+                const sourceId = String(source?.id || '').trim();
+                const afterId = sourceId
+                    ? String(afterIds[sourceId] || '').trim() || undefined
+                    : undefined;
+                const task = taskManager.findTaskSummaryBySource(source);
+                const logs = taskManager.findTaskLogsBySource(source, { afterId });
                 return {
                     source,
-                    exists: !!logs,
+                    exists: !!task,
                     logs: logs || [],
+                    total: Number(task?.logInfo?.count) || 0,
+                    lastLogId: task?.logInfo?.last?.id || null,
                 };
             });
             this.sendResponse(res, 200, {

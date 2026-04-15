@@ -1006,7 +1006,7 @@ export async function publishToDoudian(publishInfo = {}) {
 
         const browser = await getOrCreateBrowser({ profileId: publishInfo?.profileId });
         logger.info('抖店已获取浏览器实例，准备创建新页面');
-        page = await browser.newPage();
+        page = await browser.newPage({ foreground: true });
         logger.info('抖店新页面创建成功');
         await pageOperator.setupAntiDetection(page);
         logger.info('抖店页面反检测设置完成');

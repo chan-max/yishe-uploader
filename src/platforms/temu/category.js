@@ -404,14 +404,94 @@ async function clickTemuNextStep(page) {
 
 async function waitForTemuEditPage(page, timeoutMs = TEMU_CATEGORY_SELECT_TIMEOUT) {
     const deadline = Date.now() + timeoutMs;
+    let stableRounds = 0;
+    let lastSignature = '';
+
     while (Date.now() < deadline) {
         const currentUrl = String(page.url() || '');
-        if (currentUrl.includes(TEMU_EDIT_URL_KEYWORD)) return { success: true, currentUrl };
+        if (currentUrl.includes(TEMU_EDIT_URL_KEYWORD)) {
+            await page.waitForLoadState('domcontentloaded', { timeout: 2_000 }).catch(() => {});
+            await page.waitForLoadState('load', { timeout: 2_000 }).catch(() => {});
+
+            const editHint = await findFirstVisibleSelector(page, TEMU_EDIT_HINT_SELECTORS);
+            const structureState = await page.evaluate((hintSelectors) => {
+                const normalize = (value) => String(value || '').replace(/\s+/g, ' ').trim();
+                const isVisible = (element) => {
+                    if (!(element instanceof HTMLElement)) return false;
+                    const style = window.getComputedStyle(element);
+                    const rect = element.getBoundingClientRect();
+                    return style.display !== 'none'
+                        && style.visibility !== 'hidden'
+                        && rect.width > 0
+                        && rect.height > 0;
+                };
+
+                const visibleInputs = Array.from(
+                    document.querySelectorAll('input,textarea,select,[contenteditable="true"]')
+                ).filter(isVisible);
+                const visibleButtons = Array.from(
+                    document.querySelectorAll('button,[role="button"]')
+                ).filter(isVisible);
+                const visibleForms = Array.from(document.querySelectorAll('form')).filter(isVisible);
+                const matchedHintSelector = hintSelectors.find((selector) => {
+                    try {
+                        return Array.from(document.querySelectorAll(selector)).some(isVisible);
+                    } catch {
+                        return false;
+                    }
+                }) || '';
+
+                return {
+                    title: normalize(document.title),
+                    matchedHintSelector,
+                    visibleInputCount: visibleInputs.length,
+                    visibleButtonCount: visibleButtons.length,
+                    visibleFormCount: visibleForms.length
+                };
+            }, TEMU_EDIT_HINT_SELECTORS).catch(() => ({
+                title: '',
+                matchedHintSelector: '',
+                visibleInputCount: 0,
+                visibleButtonCount: 0,
+                visibleFormCount: 0
+            }));
+
+            const ready = !!editHint
+                || !!structureState.matchedHintSelector
+                || structureState.visibleInputCount > 0
+                || structureState.visibleFormCount > 0;
+
+            if (ready) {
+                const signature = [
+                    currentUrl,
+                    structureState.title,
+                    structureState.visibleInputCount,
+                    structureState.visibleButtonCount,
+                    structureState.visibleFormCount
+                ].join('::');
+
+                stableRounds = signature === lastSignature ? stableRounds + 1 : 1;
+                lastSignature = signature;
+
+                if (stableRounds >= 2) {
+                    return {
+                        success: true,
+                        currentUrl,
+                        matchedSelector: editHint?.selector || structureState.matchedHintSelector || '',
+                        visibleInputCount: structureState.visibleInputCount,
+                        visibleButtonCount: structureState.visibleButtonCount,
+                        visibleFormCount: structureState.visibleFormCount,
+                        stableRounds
+                    };
+                }
+            }
+        }
+
         const editHint = await findFirstVisibleSelector(page, TEMU_EDIT_HINT_SELECTORS);
         if (editHint && !currentUrl.includes(TEMU_CATEGORY_URL_KEYWORD)) {
             return { success: true, currentUrl, matchedSelector: editHint.selector };
         }
-        await page.waitForTimeout(1000);
+        await page.waitForTimeout(800);
     }
     return { success: false, currentUrl: page.url() };
 }
