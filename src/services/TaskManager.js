@@ -161,9 +161,22 @@ export class TaskManager {
         return task ? this._toTaskDetail(task) : null;
     }
 
-    getTaskLogs(taskId) {
+    getTaskLogs(taskId, options = {}) {
         const task = this.tasks.get(taskId);
-        return task ? task.logs.map((item) => ({ ...item })) : null;
+        if (!task) return null;
+
+        const logs = task.logs.map((item) => ({ ...item }));
+        const afterId = String(options?.afterId || '').trim();
+        if (!afterId) {
+            return logs;
+        }
+
+        const cursorIndex = logs.findIndex((item) => String(item?.id || '').trim() === afterId);
+        if (cursorIndex < 0) {
+            return logs;
+        }
+
+        return logs.slice(cursorIndex + 1);
     }
 
     findTaskBySource(source = {}) {
@@ -176,14 +189,14 @@ export class TaskManager {
         return this.getTask(taskId);
     }
 
-    findTaskLogsBySource(source = {}) {
+    findTaskLogsBySource(source = {}, options = {}) {
         const sourceKey = buildSourceKey(source);
         const taskId = this.taskIdsBySourceKey.get(sourceKey);
         if (!taskId) {
             const fallbackTask = this._findLatestTaskByLooseSource(source);
-            return fallbackTask ? this.getTaskLogs(fallbackTask.id) : null;
+            return fallbackTask ? this.getTaskLogs(fallbackTask.id, options) : null;
         }
-        return this.getTaskLogs(taskId);
+        return this.getTaskLogs(taskId, options);
     }
 
     findTaskSummaryBySource(source = {}) {
