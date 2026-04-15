@@ -29,6 +29,27 @@ const TEMU_REGION_CLICK_INDEX = {
     eu: 2
 };
 const TEMU_REGION_CARD_SELECTOR = 'a.index-module__drItem___kEdZY';
+const TEMU_CAPTURE_HEADER_KEYS = [
+    'accept',
+    'accept-language',
+    'anti-content',
+    'cache-control',
+    'content-type',
+    'mallid',
+    'origin',
+    'priority',
+    'referer',
+    'sec-ch-ua',
+    'sec-ch-ua-mobile',
+    'sec-ch-ua-platform',
+    'sec-fetch-dest',
+    'sec-fetch-mode',
+    'sec-fetch-site',
+    'user-agent'
+];
+const TEMU_CAPTURE_WARMUP_URLS = [
+    'https://agentseller.temu.com/newon/product-select'
+];
 
 function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
@@ -77,6 +98,18 @@ function buildCookieHeader(cookies = {}) {
         .filter(([name, value]) => String(name || '').trim() && value !== undefined && value !== null)
         .map(([name, value]) => `${name}=${value}`)
         .join('; ');
+}
+
+function extractTemuCaptureHeaders(headers = {}) {
+    return TEMU_CAPTURE_HEADER_KEYS.reduce((result, key) => {
+        const value = String(headers?.[key] || '').trim();
+        if (!value || value === 'undefined') {
+            return result;
+        }
+
+        result[key] = value;
+        return result;
+    }, {});
 }
 
 function normalizeTemuRegionKey(value = '') {
@@ -322,6 +355,7 @@ function createTemuRequestCapture(context) {
         origin: '',
         referer: '',
         userAgent: '',
+        capturedHeaders: {},
         lastRequestUrl: '',
         requestSamples: []
     };
@@ -341,24 +375,31 @@ function createTemuRequestCapture(context) {
             const normalizedHeaders = Object.fromEntries(
                 Object.entries(headers || {}).map(([key, value]) => [String(key || '').toLowerCase(), String(value || '').trim()])
             );
+            const capturedHeaders = extractTemuCaptureHeaders(normalizedHeaders);
 
             state.requestCount += 1;
             state.lastRequestUrl = url;
+            if (Object.keys(capturedHeaders).length) {
+                state.capturedHeaders = {
+                    ...state.capturedHeaders,
+                    ...capturedHeaders
+                };
+            }
 
-            if (normalizedHeaders['anti-content']) {
-                state.antiContent = normalizedHeaders['anti-content'];
+            if (state.capturedHeaders['anti-content']) {
+                state.antiContent = state.capturedHeaders['anti-content'];
             }
-            if (normalizedHeaders.mallid && normalizedHeaders.mallid !== 'undefined') {
-                state.mallId = normalizedHeaders.mallid;
+            if (state.capturedHeaders.mallid) {
+                state.mallId = state.capturedHeaders.mallid;
             }
-            if (normalizedHeaders.origin) {
-                state.origin = normalizedHeaders.origin;
+            if (state.capturedHeaders.origin) {
+                state.origin = state.capturedHeaders.origin;
             }
-            if (normalizedHeaders.referer) {
-                state.referer = normalizedHeaders.referer;
+            if (state.capturedHeaders.referer) {
+                state.referer = state.capturedHeaders.referer;
             }
-            if (normalizedHeaders['user-agent']) {
-                state.userAgent = normalizedHeaders['user-agent'];
+            if (state.capturedHeaders['user-agent']) {
+                state.userAgent = state.capturedHeaders['user-agent'];
             }
 
             if (state.requestSamples.length < 8) {
@@ -395,6 +436,37 @@ async function waitForCaptureWarmup(captureState, timeoutMs = 8_000) {
         await sleep(400);
     }
     return captureState.requestCount > 0;
+}
+
+async function warmupTemuTrafficCapture(page, captureState) {
+    for (const warmupUrl of TEMU_CAPTURE_WARMUP_URLS) {
+        try {
+            await page.goto(warmupUrl, {
+                waitUntil: 'domcontentloaded',
+                timeout: 45_000
+            });
+            await page.waitForTimeout(2_500);
+            await waitForCaptureWarmup(captureState, 2_500);
+
+            if (captureState.antiContent || captureState.mallId) {
+                return {
+                    success: true,
+                    url: warmupUrl
+                };
+            }
+        } catch (error) {
+            return {
+                success: false,
+                url: warmupUrl,
+                message: error?.message || String(error)
+            };
+        }
+    }
+
+    return {
+        success: false,
+        url: ''
+    };
 }
 
 async function postJsonWithTimeout(url, options = {}, timeoutMs = 15_000) {
@@ -702,7 +774,15 @@ export async function collectTemuSessionBundle(page, options = {}) {
             };
         }
 
-        const captureReady = await waitForCaptureWarmup(trafficCapture.state, 8_000);
+        let captureReady = await waitForCaptureWarmup(trafficCapture.state, 8_000);
+        if (!captureReady || !trafficCapture.state.antiContent) {
+            const warmupResult = await warmupTemuTrafficCapture(page, trafficCapture.state);
+            if (warmupResult.success) {
+                captureReady = true;
+            } else if (warmupResult.message) {
+                warnings.push(`预热 Temu 请求失败: ${warmupResult.message}`);
+            }
+        }
         if (!captureReady) {
             warnings.push('未捕获到明显的 Temu XHR/fetch 请求，anti-content 可能为空');
         }
@@ -723,15 +803,18 @@ export async function collectTemuSessionBundle(page, options = {}) {
             };
         }
 
+        const capturedHeaders = extractTemuCaptureHeaders(trafficCapture.state.capturedHeaders);
         const userAgent = trafficCapture.state.userAgent
+            || capturedHeaders['user-agent']
             || await page.evaluate(() => navigator.userAgent).catch(() => '');
-        const origin = trafficCapture.state.origin || getFallbackOriginFromUrl(page.url());
-        const referer = trafficCapture.state.referer || `${origin}/`;
+        const origin = trafficCapture.state.origin || capturedHeaders.origin || getFallbackOriginFromUrl(page.url());
+        const referer = trafficCapture.state.referer || capturedHeaders.referer || `${origin}/`;
         const initialMallId = String(trafficCapture.state.mallId || '').trim();
 
         const headersTemplate = {
-            accept: TEMU_DEFAULT_ACCEPT,
-            'content-type': 'application/json',
+            ...capturedHeaders,
+            accept: capturedHeaders.accept || TEMU_DEFAULT_ACCEPT,
+            'content-type': capturedHeaders['content-type'] || 'application/json',
             origin,
             referer,
             'user-agent': userAgent
@@ -808,11 +891,9 @@ export async function collectTemuSessionBundle(page, options = {}) {
                 userAgent,
                 headersTemplate,
                 regionHeaders: {
-                    global: buildRegionHeaders('global', {
-                        userAgent,
-                        antiContent: trafficCapture.state.antiContent,
-                        mallId
-                    }),
+                    global: {
+                        ...headersTemplate
+                    },
                     us: buildRegionHeaders('us', {
                         userAgent,
                         antiContent: trafficCapture.state.antiContent,
@@ -833,6 +914,7 @@ export async function collectTemuSessionBundle(page, options = {}) {
                     requestCount: trafficCapture.state.requestCount,
                     lastRequestUrl: trafficCapture.state.lastRequestUrl,
                     mallIdFromTraffic: initialMallId,
+                    capturedHeaders,
                     requestSamples: trafficCapture.state.requestSamples
                 },
                 regionCollection: {

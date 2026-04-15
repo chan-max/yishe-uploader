@@ -1,7 +1,8 @@
 import {
     runTemuSessionAcquireSmallFeature,
     runTemuLoginSmallFeature,
-    runTemuSessionCollectSmallFeature
+    runTemuSessionCollectSmallFeature,
+    runTemuPublishDetailRequestCaptureSmallFeature
 } from '../platforms/temu/smallFeatures.js';
 
 const SMALL_FEATURE_REGISTRY = {
@@ -76,6 +77,29 @@ const SMALL_FEATURE_REGISTRY = {
             }
         ],
         handler: runTemuSessionAcquireSmallFeature
+    },
+    'temu-publish-detail-request-capture': {
+        key: 'temu-publish-detail-request-capture',
+        name: '根据商品spuId 获取 商品发布模板',
+        platform: 'temu',
+        category: 'inspect',
+        visibility: 'public',
+        description: '根据商品 spuId 打开 Temu 发布详情页，自动点击“提交”按钮，并获取商品发布模板请求参数。',
+        tips: [
+            '只需要输入 spuId，其余流程固定为打开页面后点击“提交”。',
+            '工具会固定侦听 `https://agentseller.temu.com/visage-agent-seller/product/edit` 这个请求。',
+            '返回结果里会带上 query、headers、postData、postDataJson 和 postDataForm。'
+        ],
+        fields: [
+            {
+                key: 'spuId',
+                label: 'SPU ID',
+                type: 'text',
+                required: true,
+                placeholder: '请输入 spuId'
+            }
+        ],
+        handler: runTemuPublishDetailRequestCaptureSmallFeature
     },
     'temu-login': {
         key: 'temu-login',
