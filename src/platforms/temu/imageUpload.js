@@ -48,6 +48,21 @@ function dedupeStrings(values = []) {
     return Array.from(new Set(values.map((item) => normalizeText(item)).filter(Boolean)));
 }
 
+function summarizeImageSourceForLog(value = '') {
+    const normalized = normalizeText(value);
+    if (!normalized) {
+        return '';
+    }
+
+    try {
+        const url = new URL(normalized);
+        const fileName = normalizeText(url.pathname.split('/').pop() || '');
+        return fileName || normalized.slice(0, 160);
+    } catch {
+        return basename(normalized) || normalized.slice(0, 160);
+    }
+}
+
 function escapeForHasText(value = '') {
     return String(value || '').replace(/(["\\])/g, '\\$1');
 }
@@ -108,6 +123,18 @@ function flattenImageSources(input) {
     return [];
 }
 
+function collectImageSources(input) {
+    if (Array.isArray(input)) {
+        return input.flatMap((item) => collectImageSources(item));
+    }
+
+    return flattenImageSources(input);
+}
+
+export function normalizeTemuImageSources(input = []) {
+    return dedupeStrings(collectImageSources(input));
+}
+
 export function resolveTemuPublishImageSources(publishInfo = {}) {
     const candidateLists = [
         publishInfo.images,
@@ -122,7 +149,7 @@ export function resolveTemuPublishImageSources(publishInfo = {}) {
         publishInfo.metadata?.images
     ];
 
-    return dedupeStrings(candidateLists.flatMap((item) => flattenImageSources(item)));
+    return normalizeTemuImageSources(candidateLists);
 }
 
 function inferMimeType(filePath = '') {
@@ -263,6 +290,47 @@ function buildTemuUploadHeaderCandidates(sessionContext = {}, requestCaptureStat
         headerCandidates: headerCandidates.filter((headers, index, list) => {
             return list.findIndex((item) => JSON.stringify(item) === JSON.stringify(headers)) === index;
         })
+    };
+}
+
+function normalizeTemuUploadSessionContext(sessionContext = {}) {
+    if (!sessionContext || typeof sessionContext !== 'object') {
+        return null;
+    }
+
+    if (sessionContext.success) {
+        return sessionContext;
+    }
+
+    const cookies = sessionContext.cookies && typeof sessionContext.cookies === 'object'
+        ? sessionContext.cookies
+        : {};
+    const headers = sessionContext.headers && typeof sessionContext.headers === 'object'
+        ? sessionContext.headers
+        : (sessionContext.headersTemplate && typeof sessionContext.headersTemplate === 'object'
+            ? sessionContext.headersTemplate
+            : {});
+    const cookieHeader = normalizeText(
+        sessionContext.cookieHeader || buildCookieHeader(cookies)
+    );
+    const cookieCount = Number(sessionContext.cookieCount);
+
+    return {
+        success: !!cookieHeader,
+        message: cookieHeader ? '' : '当前 Temu 会话缺少 cookies',
+        currentUrl: normalizeText(
+            sessionContext.currentUrl || headers.referer || headers.origin || ''
+        ),
+        cookies,
+        cookieHeader,
+        headers,
+        userAgent: normalizeText(sessionContext.userAgent || headers['user-agent'] || ''),
+        mallId: normalizeText(sessionContext.mallId || headers.mallid || ''),
+        antiContent: normalizeText(sessionContext.antiContent || headers['anti-content'] || ''),
+        cookieCount: Number.isFinite(cookieCount) && cookieCount > 0
+            ? cookieCount
+            : Object.keys(cookies).length,
+        effectiveRegion: normalizeText(sessionContext.effectiveRegion || 'global') || 'global'
     };
 }
 
@@ -869,41 +937,68 @@ export async function bindTemuUploadedImagesToEditPage(page, uploadedImages = []
 }
 
 export async function uploadTemuPublishImages(page, publishInfo = {}, options = {}) {
-    const imageSources = resolveTemuPublishImageSources(publishInfo);
-    if (!imageSources.length) {
+    return await uploadTemuImagesToCloud(
+        page,
+        resolveTemuPublishImageSources(publishInfo),
+        {
+            ...options,
+            resourceLabel: options.resourceLabel || '商品图片',
+            emptyMessage: options.emptyMessage || `${PLATFORM_NAME}发布数据未提供图片，跳过图片上传`
+        }
+    );
+}
+
+export async function uploadTemuImagesToCloud(page, imageSources = [], options = {}) {
+    const normalizedImageSources = normalizeTemuImageSources(imageSources);
+    const resourceLabel = normalizeText(options.resourceLabel || '图片');
+    const emptyMessage = normalizeText(options.emptyMessage || '')
+        || `${PLATFORM_NAME}未提供需要上传的${resourceLabel}，跳过上传`;
+
+    if (!normalizedImageSources.length) {
+        logger.info(`${PLATFORM_NAME}未检测到需要上传到Temu云的${resourceLabel}`, {
+            resourceLabel,
+            requestedImageCount: 0
+        });
         return {
             success: true,
             skipped: true,
-            message: `${PLATFORM_NAME}发布数据未提供图片，跳过图片上传`,
+            message: emptyMessage,
             requestedImageCount: 0,
+            requestedSourceCount: 0,
             uploadedCount: 0,
             uploadedImages: [],
             failedImages: []
         };
     }
 
-    const sessionContext = await getTemuCurrentSessionContext(page, {
-        region: 'global',
-        headersTemplate: {
-            origin: options.requestCaptureState?.origin || 'https://agentseller.temu.com',
-            referer:
-                options.requestCaptureState?.referer
-                || normalizeText(page?.url?.())
-                || TEMU_DEFAULT_UPLOAD_REFERER,
-            'user-agent': options.requestCaptureState?.userAgent || '',
-            'anti-content': options.requestCaptureState?.antiContent || '',
-            mallid: options.requestCaptureState?.mallId || ''
-        }
-    });
+    const sessionContext = normalizeTemuUploadSessionContext(options.sessionContext)
+        || await getTemuCurrentSessionContext(page, {
+            region: 'global',
+            headersTemplate: {
+                origin: options.requestCaptureState?.origin || 'https://agentseller.temu.com',
+                referer:
+                    options.requestCaptureState?.referer
+                    || normalizeText(page?.url?.())
+                    || TEMU_DEFAULT_UPLOAD_REFERER,
+                'user-agent': options.requestCaptureState?.userAgent || '',
+                'anti-content': options.requestCaptureState?.antiContent || '',
+                mallid: options.requestCaptureState?.mallId || ''
+            }
+        });
 
     if (!sessionContext?.success) {
+        logger.error(`${PLATFORM_NAME}${resourceLabel}上传前获取会话失败`, {
+            requestedImageCount: normalizedImageSources.length,
+            message: sessionContext?.message || 'session_context_unavailable'
+        });
         return {
             success: false,
-            message: sessionContext?.message || '获取当前 Temu 会话失败，无法上传图片',
-            requestedImageCount: imageSources.length,
+            message: sessionContext?.message || `获取当前 Temu 会话失败，无法上传${resourceLabel}`,
+            requestedImageCount: normalizedImageSources.length,
+            requestedSourceCount: normalizedImageSources.length,
             uploadedCount: 0,
             uploadedImages: [],
-            failedImages: imageSources.map((source) => ({
+            failedImages: normalizedImageSources.map((source) => ({
                 source,
                 error: 'session_context_unavailable'
             }))
@@ -916,28 +1011,47 @@ export async function uploadTemuPublishImages(page, publishInfo = {}, options = 
     );
 
     if (!cookieHeader || !headerCandidates.length) {
+        logger.error(`${PLATFORM_NAME}${resourceLabel}上传前未获得可用会话头`, {
+            requestedImageCount: normalizedImageSources.length,
+            cookieCount: sessionContext.cookieCount || 0,
+            mallId: sessionContext.mallId || '',
+            antiContentReady: !!sessionContext.antiContent
+        });
         return {
             success: false,
-            message: '当前 Temu 页面未获取到可用 cookies，无法上传图片',
-            requestedImageCount: imageSources.length,
+            message: `当前 Temu 页面未获取到可用 cookies，无法上传${resourceLabel}`,
+            requestedImageCount: normalizedImageSources.length,
+            requestedSourceCount: normalizedImageSources.length,
             uploadedCount: 0,
             uploadedImages: [],
-            failedImages: imageSources.map((source) => ({
+            failedImages: normalizedImageSources.map((source) => ({
                 source,
                 error: 'cookies_missing'
             }))
         };
     }
 
-    const preparedResult = await prepareTemuImageFiles(imageSources);
+    logger.info(`${PLATFORM_NAME}开始上传${resourceLabel}到Temu云文件`, {
+        requestedImageCount: normalizedImageSources.length,
+        mallId: sessionContext.mallId || '',
+        cookieCount: sessionContext.cookieCount || 0,
+        antiContentReady: !!sessionContext.antiContent
+    });
+
+    const preparedResult = await prepareTemuImageFiles(normalizedImageSources);
     if (!preparedResult.success) {
+        logger.error(`${PLATFORM_NAME}${resourceLabel}上传前文件准备失败`, {
+            requestedImageCount: normalizedImageSources.length,
+            message: preparedResult.message || 'prepare_failed'
+        });
         return {
             success: false,
-            message: preparedResult.message || '准备 Temu 图片文件失败',
-            requestedImageCount: imageSources.length,
+            message: preparedResult.message || `准备 Temu ${resourceLabel}文件失败`,
+            requestedImageCount: normalizedImageSources.length,
+            requestedSourceCount: normalizedImageSources.length,
             uploadedCount: 0,
             uploadedImages: [],
-            failedImages: imageSources.map((source) => ({
+            failedImages: normalizedImageSources.map((source) => ({
                 source,
                 error: 'prepare_failed'
             }))
@@ -948,10 +1062,21 @@ export async function uploadTemuPublishImages(page, publishInfo = {}, options = 
     const failedImages = [];
 
     try {
-        for (const fileEntry of preparedResult.fileEntries) {
-            logger.info(`${PLATFORM_NAME}准备上传商品图片`, {
+        logger.info(`${PLATFORM_NAME}${resourceLabel}本地文件准备完成`, {
+            preparedCount: preparedResult.fileEntries.length,
+            requestedImageCount: normalizedImageSources.length
+        });
+
+        for (let index = 0; index < preparedResult.fileEntries.length; index += 1) {
+            const fileEntry = preparedResult.fileEntries[index];
+            const current = index + 1;
+            const total = preparedResult.fileEntries.length;
+            logger.info(`${PLATFORM_NAME}开始上传${resourceLabel}到Temu云文件 ${current}/${total}`, {
                 source: fileEntry.source,
-                fileName: fileEntry.fileName
+                sourceName: summarizeImageSourceForLog(fileEntry.source),
+                fileName: fileEntry.fileName,
+                current,
+                total
             });
 
             const uploadResult = await uploadSingleTemuImage(fileEntry, headerCandidates);
@@ -961,29 +1086,53 @@ export async function uploadTemuPublishImages(page, publishInfo = {}, options = 
                     fileName: fileEntry.fileName,
                     error: uploadResult.message || 'upload_failed'
                 });
-                logger.error(`${PLATFORM_NAME}商品图片上传失败`, {
+                logger.error(`${PLATFORM_NAME}${resourceLabel}上传到Temu云文件失败 ${current}/${total}`, {
                     source: fileEntry.source,
+                    sourceName: summarizeImageSourceForLog(fileEntry.source),
                     fileName: fileEntry.fileName,
+                    current,
+                    total,
                     message: uploadResult.message || 'upload_failed'
                 });
                 continue;
             }
 
             uploadedImages.push(uploadResult.uploadedImage);
-            logger.info(`${PLATFORM_NAME}商品图片上传成功`, {
+            logger.info(`${PLATFORM_NAME}${resourceLabel}上传到Temu云文件成功 ${current}/${total}`, {
                 source: fileEntry.source,
-                url: uploadResult.uploadedImage.url
+                sourceName: summarizeImageSourceForLog(fileEntry.source),
+                fileName: fileEntry.fileName,
+                current,
+                total,
+                url: uploadResult.uploadedImage.url,
+                width: uploadResult.uploadedImage.width,
+                height: uploadResult.uploadedImage.height
             });
         }
     } finally {
         preparedResult.cleanup();
     }
 
-    const success = failedImages.length === 0 && uploadedImages.length === imageSources.length;
+    const success = failedImages.length === 0 && uploadedImages.length === normalizedImageSources.length;
+    const summaryPayload = {
+        requestedImageCount: normalizedImageSources.length,
+        uploadedCount: uploadedImages.length,
+        failedCount: failedImages.length,
+        mallId: sessionContext.mallId || ''
+    };
+    if (success) {
+        logger.info(`${PLATFORM_NAME}${resourceLabel}上传到Temu云文件完成`, summaryPayload);
+    } else {
+        logger.warn(`${PLATFORM_NAME}${resourceLabel}上传到Temu云文件未全部成功`, {
+            ...summaryPayload,
+            failedImages
+        });
+    }
     return {
         success,
-        message: success ? `${PLATFORM_NAME}商品图片上传完成` : `${PLATFORM_NAME}商品图片上传未完成`,
-        requestedImageCount: imageSources.length,
+        message: success ? `${PLATFORM_NAME}${resourceLabel}上传完成` : `${PLATFORM_NAME}${resourceLabel}上传未完成`,
+        requestedImageCount: normalizedImageSources.length,
+        requestedSourceCount: normalizedImageSources.length,
         uploadedCount: uploadedImages.length,
         uploadedImages,
         failedImages,

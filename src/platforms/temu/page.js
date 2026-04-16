@@ -143,6 +143,112 @@ export async function clickClickableByText(page, texts = [], options = {}) {
     }).catch(() => null);
 }
 
+export async function clickButtonByText(page, texts = [], options = {}) {
+    const candidates = Array.from(new Set(
+        texts
+            .map((item) => String(item || '').replace(/\s+/g, ' ').trim())
+            .filter(Boolean)
+    ));
+    if (!candidates.length) {
+        return null;
+    }
+
+    const selectors = Array.isArray(options.selectors) && options.selectors.length
+        ? options.selectors
+        : ['button', '[role="button"]'];
+    const exact = options.exact !== false;
+
+    const normalize = (value) => String(value || '').replace(/\s+/g, ' ').trim();
+    const isDisabled = async (locator) => {
+        try {
+            return await locator.evaluate((element) => {
+                const normalizeClass = (value) => String(value || '').replace(/\s+/g, ' ').trim();
+                const className = normalizeClass(element.className);
+                return element.hasAttribute('disabled')
+                    || element.getAttribute('aria-disabled') === 'true'
+                    || className.includes('disabled')
+                    || className.includes('loading');
+            });
+        } catch {
+            return false;
+        }
+    };
+
+    for (const targetText of candidates) {
+        const normalizedTargetText = normalize(targetText);
+        for (const selector of selectors) {
+            let count = 0;
+            try {
+                count = await page.locator(selector).count();
+            } catch {
+                count = 0;
+            }
+
+            for (let index = 0; index < count; index += 1) {
+                const locator = page.locator(selector).nth(index);
+                const visible = await locator.isVisible().catch(() => false);
+                if (!visible) {
+                    continue;
+                }
+                if (await isDisabled(locator)) {
+                    continue;
+                }
+
+                const text = normalize(
+                    await locator.innerText().catch(async () =>
+                        await locator.textContent().catch(() => '')
+                    )
+                );
+                if (!text) {
+                    continue;
+                }
+
+                const matched = exact
+                    ? text === normalizedTargetText
+                    : text.includes(normalizedTargetText);
+                if (!matched) {
+                    continue;
+                }
+
+                try {
+                    await locator.scrollIntoViewIfNeeded().catch(() => undefined);
+                    await locator.click(options.clickOptions || {});
+                    return {
+                        text,
+                        selector,
+                        index,
+                        exactMatch: exact
+                    };
+                } catch (error) {
+                    logger.warn(`${PLATFORM_NAME}点击按钮文字失败，准备降级点击`, {
+                        selector,
+                        index,
+                        text,
+                        message: error?.message || String(error)
+                    });
+                }
+
+                const fallbackClicked = await locator.evaluate((element) => {
+                    element.click();
+                    return true;
+                }).catch(() => false);
+
+                if (fallbackClicked) {
+                    return {
+                        text,
+                        selector,
+                        index,
+                        exactMatch: exact,
+                        fallback: true
+                    };
+                }
+            }
+        }
+    }
+
+    return null;
+}
+
 export function resolveTemuFrameworkStage(pageUrl) {
     const currentUrl = String(pageUrl || '');
     if (currentUrl.includes(TEMU_EDIT_URL_KEYWORD)) {

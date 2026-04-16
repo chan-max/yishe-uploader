@@ -2,6 +2,7 @@ import {
     runTemuSessionAcquireSmallFeature,
     runTemuLoginSmallFeature,
     runTemuSessionCollectSmallFeature,
+    runTemuSessionRestoreSmallFeature,
     runTemuPublishDetailRequestCaptureSmallFeature
 } from '../platforms/temu/smallFeatures.js';
 
@@ -84,11 +85,11 @@ const SMALL_FEATURE_REGISTRY = {
         platform: 'temu',
         category: 'inspect',
         visibility: 'public',
-        description: '根据商品 spuId 打开 Temu 发布详情页，自动点击“提交”按钮，并获取商品发布模板请求参数。',
+        description: '根据商品 spuId 打开 Temu 发布详情页，自动点击“提交”按钮，并获取商品发布模板请求里的 POST 参数。',
         tips: [
             '只需要输入 spuId，其余流程固定为打开页面后点击“提交”。',
             '工具会固定侦听 `https://agentseller.temu.com/visage-agent-seller/product/edit` 这个请求。',
-            '返回结果里会带上 query、headers、postData、postDataJson 和 postDataForm。'
+            '返回结果只保留 postData、postDataJson 和 postDataForm。'
         ],
         fields: [
             {
@@ -181,6 +182,43 @@ const SMALL_FEATURE_REGISTRY = {
             }
         ],
         handler: runTemuSessionCollectSmallFeature
+    },
+    'temu-session-restore': {
+        key: 'temu-session-restore',
+        name: 'Temu 会话恢复',
+        platform: 'temu',
+        category: 'session',
+        visibility: 'internal',
+        description: '把已存储的 Temu 会话 Cookie 写回当前浏览器环境，并尝试打开卖家首页确认登录态。',
+        tips: [
+            '默认会使用当前活动环境；传 profileId 时会优先作用到指定环境。',
+            '这个功能主要用于把数据库里已存储的 Temu Cookie 回灌到当前浏览器环境。',
+            '如果写入后仍未识别为登录，通常说明会话已经过期，需要重新采集。'
+        ],
+        fields: [
+            {
+                key: 'profileId',
+                label: '环境编号',
+                type: 'text',
+                required: false,
+                placeholder: '可选，留空时使用当前活动环境'
+            },
+            {
+                key: 'session',
+                label: '会话对象',
+                type: 'json',
+                required: true,
+                placeholder: '包含 global/us/eu 的 session 对象'
+            },
+            {
+                key: 'keepPageOpen',
+                label: '保留页面',
+                type: 'boolean',
+                required: false,
+                defaultValue: true
+            }
+        ],
+        handler: runTemuSessionRestoreSmallFeature
     }
 };
 

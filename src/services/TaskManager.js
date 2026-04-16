@@ -27,6 +27,10 @@ function isPlainObject(value) {
     return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
+function isExplicitFailureResult(result) {
+    return isPlainObject(result) && result.success === false;
+}
+
 function normalizeSource(source = {}) {
     const normalized = {
         system: String(source.system || 'unknown').trim() || 'unknown',
@@ -327,6 +331,33 @@ export class TaskManager {
         return task;
     }
 
+    _buildTaskFailurePayload(result) {
+        if (!isPlainObject(result)) {
+            return {
+                message: '任务执行失败',
+            };
+        }
+
+        const message = String(
+            result.message
+            || result.error?.message
+            || (typeof result.failedCount === 'number' && result.failedCount > 0
+                ? `任务执行失败，失败平台数: ${result.failedCount}`
+                : '')
+            || '任务执行失败'
+        ).trim();
+
+        return {
+            message,
+            action: result.action,
+            platform: result.platform,
+            total: Number.isFinite(Number(result.total)) ? Number(result.total) : undefined,
+            successCount: Number.isFinite(Number(result.successCount)) ? Number(result.successCount) : undefined,
+            failedCount: Number.isFinite(Number(result.failedCount)) ? Number(result.failedCount) : undefined,
+            timestamp: result.timestamp,
+        };
+    }
+
     async _processQueue() {
         while (this.runningCount < this.concurrency && this.queue.length > 0) {
             const next = this.queue.shift();
@@ -397,6 +428,19 @@ export class TaskManager {
             const latestTask = this.tasks.get(taskId);
             if (latestTask?.cancelRequested || latestTask?.status === 'cancelled') {
                 this._appendLog(taskId, 'warn', '任务取消后收到执行完成结果，已忽略');
+                return;
+            }
+            if (isExplicitFailureResult(result)) {
+                const errorPayload = this._buildTaskFailurePayload(result);
+                this._setTaskState(taskId, {
+                    status: 'failed',
+                    step: 'failed',
+                    result: cloneJsonSafe(result),
+                    error: errorPayload,
+                    finishedAt: toIsoString(),
+                    progress: null,
+                });
+                this._appendLog(taskId, 'error', '任务执行失败', errorPayload);
                 return;
             }
             this._setTaskState(taskId, {

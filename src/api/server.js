@@ -320,10 +320,12 @@ class ApiServer {
                 }
             );
 
-            taskContext.setStep('completed', {
+            taskContext.setStep(result?.success ? 'completed' : 'failed', {
                 current: platforms.length,
                 total: platforms.length,
-                message: result?.success ? '任务执行完成' : '任务执行结束（含失败）',
+                message: result?.success
+                    ? '任务执行完成'
+                    : '任务执行结束，存在失败平台',
             });
             taskContext.log(result?.success ? 'info' : 'warn', '任务执行返回结果', result);
             return result;
@@ -2116,7 +2118,7 @@ class ApiServer {
             }
 
             const browser = await getOrCreateBrowser({ profileId });
-            const page = await browser.newPage();
+            const page = await browser.newPage({ foreground: true });
             await page.goto(config.uploadUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
             this.sendResponse(res, 200, { success: true, data: { platform, name: config.name, url: config.uploadUrl } });
         } catch (error) {
@@ -2162,7 +2164,7 @@ class ApiServer {
             }
 
             const browser = await getOrCreateBrowser({ profileId });
-            const page = await browser.newPage();
+            const page = await browser.newPage({ foreground: true });
             await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
             this.sendResponse(res, 200, {

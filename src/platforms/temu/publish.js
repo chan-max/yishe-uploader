@@ -30,6 +30,10 @@ import {
 import {
     fillTemuPublishBasicInfo
 } from './editForm.js';
+import {
+    hasTemuProductTemplate,
+    publishTemuByProductTemplate
+} from './templatePublish.js';
 
 export async function publishToTemu(publishInfo = {}) {
     const pageOperator = new PageOperator();
@@ -58,8 +62,20 @@ export async function publishToTemu(publishInfo = {}) {
 
         const browser = await getOrCreateBrowser({ profileId: publishInfo?.profileId });
         page = await browser.newPage({ foreground: true });
-        requestCapture = createTemuLiveRequestCapture(page.context());
         await pageOperator.setupAntiDetection(page);
+
+        if (hasTemuProductTemplate(publishInfo)) {
+            pushTrace(executionTrace, 'detect_product_template_publish', 'success', {
+                mode: 'template_api_publish'
+            });
+
+            return await publishTemuByProductTemplate(page, publishInfo, {
+                executionTrace,
+                shouldKeepPageOpen
+            });
+        }
+
+        requestCapture = createTemuLiveRequestCapture(page.context());
 
         logger.info(`${PLATFORM_NAME}准备打开商品创建页: ${settings.createUrl}`);
         await page.goto(settings.createUrl, {

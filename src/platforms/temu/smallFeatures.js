@@ -1,7 +1,7 @@
 import { getOrCreateBrowser } from '../../services/BrowserService.js';
 import { PageOperator } from '../../services/PageOperator.js';
 import { logger } from '../../utils/logger.js';
-import { PLATFORM_NAME } from './constants.js';
+import { PLATFORM_NAME, TEMU_SELLER_HOME_URL } from './constants.js';
 import {
     normalizeBoolean,
     normalizeTemuSettings,
@@ -13,6 +13,7 @@ import {
     resolveTemuLoginState
 } from './login.js';
 import {
+    clickButtonByText,
     clickClickableByText,
     clickVisibleSelector,
     collectTemuEditPageStructure,
@@ -34,9 +35,48 @@ const TEMU_PUBLISH_DETAIL_REQUEST_URL = 'https://agentseller.temu.com/visage-age
 const TEMU_PUBLISH_DETAIL_TRIGGER_BUTTON_TEXT = '提交';
 const TEMU_REQUEST_CAPTURE_CLICK_TIMEOUT = 15_000;
 const TEMU_REQUEST_CAPTURE_RESOURCE_TYPES = ['xhr', 'fetch'];
+const TEMU_SESSION_RESTORE_REGION_TARGETS = {
+    global: {
+        key: 'global',
+        label: '全球',
+        url: TEMU_SELLER_HOME_URL,
+        domain: 'agentseller.temu.com'
+    },
+    us: {
+        key: 'us',
+        label: '美国',
+        url: 'https://agentseller-us.temu.com/',
+        domain: 'agentseller-us.temu.com'
+    },
+    eu: {
+        key: 'eu',
+        label: '欧区',
+        url: 'https://agentseller-eu.temu.com/',
+        domain: 'agentseller-eu.temu.com'
+    }
+};
+const TEMU_SESSION_HTTP_ONLY_PATTERNS = [
+    /^api_uid$/i,
+    /^passToken$/i,
+    /^merchantSessionKey$/i,
+    /^passport_/i,
+    /^SUB_PASS_ID$/i,
+    /^ttwid$/i,
+    /^sid_tt$/i,
+    /^sessionid(?:_ss)?$/i,
+    /^sid_guard$/i,
+    /^session_tlb_tag$/i,
+    /^sid_ucp_v1$/i,
+    /^ssid_ucp_v1$/i,
+    /^PHPSESSID(?:_SS)?$/i
+];
 
 function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isPlainObject(value) {
+    return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
 function normalizeKeepPageOpen(value) {
@@ -58,6 +98,83 @@ function normalizeIncludeDebugInfo(value) {
         return false;
     }
     return normalizeBoolean(value);
+}
+
+function isTemuHttpOnlyCookie(name = '') {
+    const normalized = String(name || '').trim();
+    if (!normalized) {
+        return false;
+    }
+
+    return TEMU_SESSION_HTTP_ONLY_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+
+function normalizeTemuSessionRestoreRegion(value, fallbackCookies = {}) {
+    const record = isPlainObject(value) ? value : {};
+    const cookies = isPlainObject(record.cookies)
+        ? record.cookies
+        : (isPlainObject(fallbackCookies) ? fallbackCookies : {});
+
+    return {
+        cookies,
+        headers: isPlainObject(record.headers) ? record.headers : {},
+        updatedAt: String(record.updatedAt || '').trim()
+    };
+}
+
+function buildTemuSessionRestoreSettings(input = {}) {
+    const inputSession = isPlainObject(input?.session) ? input.session : {};
+
+    return {
+        keepPageOpen: normalizeKeepPageOpen(input?.keepPageOpen),
+        includeDebugInfo: normalizeIncludeDebugInfo(input?.includeDebugInfo),
+        mallId: String(input?.mallId || '').trim(),
+        mallName: String(input?.mallName || '').trim(),
+        session: {
+            global: normalizeTemuSessionRestoreRegion(
+                inputSession.global,
+                input?.cookies_global || input?.cookies
+            ),
+            us: normalizeTemuSessionRestoreRegion(inputSession.us, input?.cookies_us),
+            eu: normalizeTemuSessionRestoreRegion(inputSession.eu, input?.cookies_eu)
+        }
+    };
+}
+
+function buildTemuSessionRestoreCookiePlan(settings) {
+    const cookies = [];
+    const regionStats = [];
+
+    for (const [regionKey, target] of Object.entries(TEMU_SESSION_RESTORE_REGION_TARGETS)) {
+        const regionRecord = normalizeTemuSessionRestoreRegion(settings?.session?.[regionKey]);
+        const cookieEntries = Object.entries(regionRecord.cookies)
+            .filter(([name, value]) => String(name || '').trim() && value !== undefined && value !== null)
+            .map(([name, value]) => ({
+                name: String(name || '').trim(),
+                value: String(value),
+                domain: target.domain,
+                path: '/',
+                httpOnly: isTemuHttpOnlyCookie(name),
+                secure: true,
+                sameSite: 'Lax'
+            }));
+
+        cookies.push(...cookieEntries);
+        regionStats.push({
+            regionKey,
+            label: target.label,
+            domain: target.domain,
+            targetUrl: target.url,
+            cookieCount: cookieEntries.length,
+            updatedAt: regionRecord.updatedAt || null
+        });
+    }
+
+    return {
+        cookies,
+        regionStats,
+        totalCookieCount: cookies.length
+    };
 }
 
 function normalizeTemuSessionAcquireMode(value) {
@@ -207,13 +324,24 @@ function normalizeRequestBody(rawBody = '') {
 
 function buildTemuCapturedRequest(request, matchedKeyword = '') {
     const requestUrl = String(request?.url?.() || '').trim();
-    const rawPostData = String(request?.postData?.() || '').trim();
+    let rawPostData = String(request?.postData?.() || '').trim();
     let postDataJson = null;
+    let postDataBuffer = null;
 
     try {
         postDataJson = request?.postDataJSON?.() ?? null;
     } catch {
         postDataJson = null;
+    }
+
+    try {
+        postDataBuffer = request?.postDataBuffer?.() ?? null;
+    } catch {
+        postDataBuffer = null;
+    }
+
+    if (!rawPostData && postDataBuffer && Buffer.isBuffer(postDataBuffer) && postDataBuffer.length) {
+        rawPostData = String(postDataBuffer.toString('utf8') || '').trim();
     }
 
     const normalizedBody = normalizeRequestBody(rawPostData);
@@ -228,11 +356,40 @@ function buildTemuCapturedRequest(request, matchedKeyword = '') {
         query: extractUrlQueryParams(requestUrl),
         postData: normalizedBody.postData,
         postDataJson: postDataJson ?? normalizedBody.postDataJson,
-        postDataForm: normalizedBody.postDataForm
+        postDataForm: normalizedBody.postDataForm,
+        source: 'playwright'
     };
 }
 
-function createTemuMatchedRequestCapture(context, options = {}) {
+function buildTemuCapturedRequestFromCdp(event = {}, matchedKeyword = '', resolvedPostData = '') {
+    const request = isPlainObject(event?.request) ? event.request : {};
+    const requestUrl = String(request?.url || '').trim();
+    const rawPostData = String(resolvedPostData || request?.postData || '').trim();
+    const normalizedBody = normalizeRequestBody(rawPostData);
+
+    return {
+        capturedAt: new Date().toISOString(),
+        matchedKeyword,
+        url: requestUrl,
+        method: String(request?.method || '').trim().toUpperCase() || 'GET',
+        resourceType: String(event?.type || '').trim().toLowerCase(),
+        frameUrl: '',
+        headers: normalizeTemuRequestHeaders(request?.headers || {}),
+        query: extractUrlQueryParams(requestUrl),
+        postData: normalizedBody.postData,
+        postDataJson: normalizedBody.postDataJson,
+        postDataForm: normalizedBody.postDataForm,
+        source: 'cdp'
+    };
+}
+
+async function createTemuMatchedRequestCapture(pageOrContext, options = {}) {
+    const page = pageOrContext && typeof pageOrContext?.context === 'function'
+        ? pageOrContext
+        : null;
+    const context = page
+        ? page.context()
+        : pageOrContext;
     const requestKeywords = normalizeStringList(options?.requestKeywords || options?.requestKeyword);
     const normalizedKeywords = requestKeywords.map((item) => ({
         raw: item,
@@ -245,6 +402,37 @@ function createTemuMatchedRequestCapture(context, options = {}) {
         lastObservedRequestUrl: '',
         lastMatchedRequest: null,
         matchedRequests: []
+    };
+    let cdpSession = null;
+
+    const pushMatchedRequest = (matchedRequest) => {
+        if (!matchedRequest || typeof matchedRequest !== 'object') {
+            return;
+        }
+
+        const existingIndex = state.matchedRequests.findIndex((item) => {
+            return String(item?.method || '').trim().toUpperCase() === String(matchedRequest?.method || '').trim().toUpperCase()
+                && String(item?.url || '').trim() === String(matchedRequest?.url || '').trim();
+        });
+
+        if (existingIndex >= 0) {
+            const existingRequest = state.matchedRequests[existingIndex];
+            if (
+                (!isTemuBodyRequest(existingRequest) && isTemuBodyRequest(matchedRequest))
+                || (!isTemuMutationRequest(existingRequest) && isTemuMutationRequest(matchedRequest))
+            ) {
+                state.matchedRequests[existingIndex] = matchedRequest;
+                state.lastMatchedRequest = matchedRequest;
+            }
+            return;
+        }
+
+        state.matchedRequestCount += 1;
+        state.lastMatchedRequest = matchedRequest;
+
+        if (state.matchedRequests.length < 12) {
+            state.matchedRequests.push(matchedRequest);
+        }
     };
 
     const onRequest = (request) => {
@@ -269,18 +457,68 @@ function createTemuMatchedRequestCapture(context, options = {}) {
             }
 
             const matchedRequest = buildTemuCapturedRequest(request, matchedKeyword.raw);
-            state.matchedRequestCount += 1;
-            state.lastMatchedRequest = matchedRequest;
-
-            if (state.matchedRequests.length < 12) {
-                state.matchedRequests.push(matchedRequest);
-            }
+            pushMatchedRequest(matchedRequest);
         } catch {
             // ignore request capture errors
         }
     };
 
     context.on('request', onRequest);
+
+    const onCdpRequestWillBeSent = async (event) => {
+        try {
+            const request = isPlainObject(event?.request) ? event.request : {};
+            const url = String(request?.url || '').trim();
+            const resourceType = String(event?.type || '').trim().toLowerCase();
+            if (!url || !/temu\.com|kuajingmaihuo\.com/i.test(url)) {
+                return;
+            }
+            if (resourceType && !TEMU_REQUEST_CAPTURE_RESOURCE_TYPES.includes(resourceType)) {
+                return;
+            }
+
+            state.observedRequestCount += 1;
+            state.lastObservedRequestUrl = url;
+
+            const matchedKeyword = normalizedKeywords.find((keyword) => {
+                return url.toLowerCase().includes(keyword.normalized);
+            });
+            if (!matchedKeyword) {
+                return;
+            }
+
+            let resolvedPostData = String(request?.postData || '').trim();
+            if (!resolvedPostData && request?.hasPostData && cdpSession && event?.requestId) {
+                try {
+                    const postDataResponse = await cdpSession.send('Network.getRequestPostData', {
+                        requestId: event.requestId
+                    });
+                    resolvedPostData = String(postDataResponse?.postData || '').trim();
+                } catch {
+                    resolvedPostData = '';
+                }
+            }
+
+            const matchedRequest = buildTemuCapturedRequestFromCdp(
+                event,
+                matchedKeyword.raw,
+                resolvedPostData
+            );
+            pushMatchedRequest(matchedRequest);
+        } catch {
+            // ignore cdp request capture errors
+        }
+    };
+
+    if (page && typeof context?.newCDPSession === 'function') {
+        try {
+            cdpSession = await context.newCDPSession(page);
+            await cdpSession.send('Network.enable').catch(() => undefined);
+            cdpSession.on('Network.requestWillBeSent', onCdpRequestWillBeSent);
+        } catch {
+            cdpSession = null;
+        }
+    }
 
     return {
         state,
@@ -293,28 +531,93 @@ function createTemuMatchedRequestCapture(context, options = {}) {
         },
         dispose() {
             context.off('request', onRequest);
+            if (cdpSession) {
+                cdpSession.off?.('Network.requestWillBeSent', onCdpRequestWillBeSent);
+                void cdpSession.detach?.().catch(() => undefined);
+            }
         }
     };
 }
 
+function isTemuBodyRequest(request = null) {
+    if (!request || typeof request !== 'object') {
+        return false;
+    }
+
+    if (String(request.postData || '').trim()) {
+        return true;
+    }
+
+    if (request.postDataJson && typeof request.postDataJson === 'object') {
+        return Object.keys(request.postDataJson).length > 0;
+    }
+
+    if (request.postDataForm && typeof request.postDataForm === 'object') {
+        return Object.keys(request.postDataForm).length > 0;
+    }
+
+    return false;
+}
+
+function isTemuMutationRequest(request = null) {
+    const method = String(request?.method || '').trim().toUpperCase();
+    return ['POST', 'PUT', 'PATCH'].includes(method);
+}
+
+function pickPreferredTemuMatchedRequest(matchedRequests = []) {
+    const normalizedRequests = Array.isArray(matchedRequests) ? matchedRequests : [];
+    if (!normalizedRequests.length) {
+        return null;
+    }
+
+    return normalizedRequests.find((item) => isTemuMutationRequest(item) && isTemuBodyRequest(item))
+        || normalizedRequests.find((item) => isTemuBodyRequest(item))
+        || normalizedRequests.find((item) => isTemuMutationRequest(item))
+        || normalizedRequests[0]
+        || null;
+}
+
 async function waitForTemuMatchedRequest(captureState, timeoutMs = 60_000) {
     const deadline = Date.now() + timeoutMs;
+    let fallbackMatchedRequest = null;
 
     while (Date.now() < deadline) {
         const matchedRequests = Array.isArray(captureState?.matchedRequests)
             ? captureState.matchedRequests
             : [];
         if (matchedRequests.length) {
-            return {
-                success: true,
-                matchedRequest: matchedRequests[0],
-                observedRequestCount: captureState.observedRequestCount || 0,
-                matchedRequestCount: captureState.matchedRequestCount || 0,
-                matchedRequests
-            };
+            const preferredMatchedRequest = pickPreferredTemuMatchedRequest(matchedRequests);
+            if (preferredMatchedRequest) {
+                fallbackMatchedRequest = preferredMatchedRequest;
+            }
+
+            if (preferredMatchedRequest && (isTemuBodyRequest(preferredMatchedRequest) || isTemuMutationRequest(preferredMatchedRequest))) {
+                return {
+                    success: true,
+                    matchedRequest: preferredMatchedRequest,
+                    observedRequestCount: captureState.observedRequestCount || 0,
+                    matchedRequestCount: captureState.matchedRequestCount || 0,
+                    matchedRequests
+                };
+            }
+
+            await sleep(250);
+            continue;
         }
 
         await sleep(250);
+    }
+
+    if (fallbackMatchedRequest) {
+        return {
+            success: true,
+            matchedRequest: fallbackMatchedRequest,
+            observedRequestCount: captureState.observedRequestCount || 0,
+            matchedRequestCount: captureState.matchedRequestCount || 0,
+            matchedRequests: Array.isArray(captureState?.matchedRequests)
+                ? captureState.matchedRequests
+                : []
+        };
     }
 
     return {
@@ -333,14 +636,51 @@ async function clickTemuTriggerByText(page, texts = [], timeoutMs = TEMU_REQUEST
     const candidates = normalizeStringList(texts);
 
     while (Date.now() < deadline) {
+        const buttonClicked = await clickButtonByText(page, candidates, {
+            exact: true,
+            selectors: ['button', '[role="button"]'],
+            clickOptions: {
+                timeout: 3_000
+            }
+        });
+        if (buttonClicked) {
+            return {
+                success: true,
+                detail: {
+                    ...buttonClicked,
+                    strategy: 'button_exact_text'
+                }
+            };
+        }
+
+        const fallbackButtonClicked = await clickButtonByText(page, candidates, {
+            exact: false,
+            selectors: ['button', '[role="button"]'],
+            clickOptions: {
+                timeout: 3_000
+            }
+        });
+        if (fallbackButtonClicked) {
+            return {
+                success: true,
+                detail: {
+                    ...fallbackButtonClicked,
+                    strategy: 'button_partial_text'
+                }
+            };
+        }
+
         const clicked = await clickClickableByText(page, candidates, {
-            selector: 'button,[role="button"],a,span,div',
+            selector: 'button,[role="button"]',
             exact: false
         });
         if (clicked) {
             return {
                 success: true,
-                detail: clicked
+                detail: {
+                    ...clicked,
+                    strategy: 'legacy_clickable_text'
+                }
             };
         }
 
@@ -967,6 +1307,147 @@ export async function runTemuSessionAcquireSmallFeature(input = {}, runtimeOptio
     }
 }
 
+export async function runTemuSessionRestoreSmallFeature(input = {}, runtimeOptions = {}) {
+    const featureKey = 'temu-session-restore';
+    const profileId = String(input?.profileId || '').trim() || undefined;
+    const settings = buildTemuSessionRestoreSettings(input);
+    const pageOperator = runtimeOptions?.pageOperator || new PageOperator();
+    const executionTrace = [];
+    const managePage = !runtimeOptions?.page;
+    let page = runtimeOptions?.page || null;
+
+    try {
+        const cookiePlan = buildTemuSessionRestoreCookiePlan(settings);
+        if (!cookiePlan.totalCookieCount) {
+            return {
+                success: false,
+                message: '当前存储会话没有可写入的 Cookie',
+                data: {
+                    featureKey,
+                    profileId: profileId || null,
+                    executionTrace,
+                    pageKeptOpen: settings.keepPageOpen,
+                    restoredRegions: cookiePlan.regionStats
+                }
+            };
+        }
+
+        logger.info(`${PLATFORM_NAME}工具开始恢复已存储会话`, {
+            profileId: profileId || 'default',
+            keepPageOpen: settings.keepPageOpen,
+            includeDebugInfo: settings.includeDebugInfo,
+            totalCookieCount: cookiePlan.totalCookieCount,
+            reusePage: !managePage
+        });
+        pushTrace(executionTrace, 'start', 'success', {
+            profileId: profileId || null,
+            keepPageOpen: settings.keepPageOpen,
+            includeDebugInfo: settings.includeDebugInfo,
+            totalCookieCount: cookiePlan.totalCookieCount,
+            reusePage: !managePage
+        });
+
+        if (managePage) {
+            const browser = await getOrCreateBrowser({ profileId });
+            page = await browser.newPage({ foreground: true });
+            await pageOperator.setupAntiDetection(page);
+            pushTrace(executionTrace, 'open_page', 'success', {
+                reusedCurrentPage: false,
+                currentUrl: page.url()
+            });
+        } else {
+            pushTrace(executionTrace, 'open_page', 'success', {
+                reusedCurrentPage: true,
+                currentUrl: page.url()
+            });
+        }
+
+        await page.context().addCookies(cookiePlan.cookies);
+        pushTrace(executionTrace, 'inject_cookies', 'success', {
+            totalCookieCount: cookiePlan.totalCookieCount,
+            restoredRegions: cookiePlan.regionStats
+        });
+
+        await page.goto(TEMU_SELLER_HOME_URL, {
+            waitUntil: 'domcontentloaded',
+            timeout: 60_000
+        });
+        await sleep(1_500);
+        pushTrace(executionTrace, 'open_seller_home', 'success', {
+            currentUrl: page.url()
+        });
+
+        const loginState = await resolveTemuLoginState(page);
+        pushTrace(executionTrace, 'check_login_state_after_restore', loginState.loggedIn ? 'success' : 'pending', loginState);
+
+        const responseData = {
+            featureKey,
+            profileId: profileId || null,
+            currentUrl: page.url(),
+            loginState,
+            restoredAt: new Date().toISOString(),
+            restoredRegions: cookiePlan.regionStats,
+            restoredCookieCount: cookiePlan.totalCookieCount,
+            mallId: settings.mallId || null,
+            mallName: settings.mallName || null,
+            pageKeptOpen: settings.keepPageOpen
+        };
+
+        if (!settings.includeDebugInfo) {
+            return {
+                success: !!loginState.loggedIn,
+                message: loginState.loggedIn
+                    ? `${PLATFORM_NAME}已将存储会话写入当前环境`
+                    : `${PLATFORM_NAME}Cookie 已写入当前环境，但当前仍未识别为已登录`,
+                data: responseData
+            };
+        }
+
+        const snapshot = await collectTemuFrameworkSnapshot(page);
+        return {
+            success: !!loginState.loggedIn,
+            message: loginState.loggedIn
+                ? `${PLATFORM_NAME}已将存储会话写入当前环境`
+                : `${PLATFORM_NAME}Cookie 已写入当前环境，但当前仍未识别为已登录`,
+            data: {
+                ...responseData,
+                pageTitle: snapshot.title,
+                detectedButtons: snapshot.buttons,
+                detectedInputs: snapshot.inputs,
+                bodyPreview: snapshot.bodyPreview,
+                executionTrace
+            }
+        };
+    } catch (error) {
+        logger.error(`${PLATFORM_NAME}恢复存储会话失败:`, error);
+        pushTrace(executionTrace, 'fatal_error', 'failed', {
+            message: error?.message || String(error)
+        });
+
+        return {
+            success: false,
+            message: error?.message || `${PLATFORM_NAME}恢复存储会话失败`,
+            data: {
+                featureKey,
+                profileId: profileId || null,
+                currentUrl: page?.url?.() || '',
+                executionTrace,
+                pageKeptOpen: settings.keepPageOpen
+            }
+        };
+    } finally {
+        if (managePage && page && !settings.keepPageOpen) {
+            try {
+                await page.close();
+            } catch (closeError) {
+                logger.warn(`${PLATFORM_NAME}工具关闭页面失败: ${closeError?.message || closeError}`);
+            }
+        } else if (managePage && page && settings.keepPageOpen) {
+            logger.info(`${PLATFORM_NAME}工具保留页面，方便继续调试`);
+        }
+    }
+}
+
 export async function runTemuPublishDetailRequestCaptureSmallFeature(input = {}, runtimeOptions = {}) {
     const featureKey = 'temu-publish-detail-request-capture';
     const profileId = String(input?.profileId || '').trim() || undefined;
@@ -1076,7 +1557,7 @@ export async function runTemuPublishDetailRequestCaptureSmallFeature(input = {},
             });
         }
 
-        requestCapture = createTemuMatchedRequestCapture(page.context(), {
+        requestCapture = await createTemuMatchedRequestCapture(page, {
             requestKeywords: settings.requestKeywords
         });
         pushTrace(executionTrace, 'start_request_capture', 'success', {
@@ -1220,13 +1701,6 @@ export async function runTemuPublishDetailRequestCaptureSmallFeature(input = {},
             url: captureResult.matchedRequest?.url || ''
         });
 
-        const snapshot = settings.includeDebugInfo
-            ? await collectTemuFrameworkSnapshot(page)
-            : null;
-        const pageStructure = settings.includeDebugInfo
-            ? await collectTemuEditPageStructure(page)
-            : undefined;
-
         return {
             success: true,
             message: `${PLATFORM_NAME}商品编辑请求已捕获`,
@@ -1234,31 +1708,10 @@ export async function runTemuPublishDetailRequestCaptureSmallFeature(input = {},
                 featureKey,
                 profileId: profileId || null,
                 spuId: settings.spuId,
-                targetUrl,
-                requestUrl: TEMU_PUBLISH_DETAIL_REQUEST_URL,
-                currentUrl: page.url(),
-                loginState,
-                triggerMode: settings.triggerMode,
-                requestKeywords: settings.requestKeywords,
-                triggerResult,
-                requestParams: {
-                    url: captureResult.matchedRequest?.url || '',
-                    method: captureResult.matchedRequest?.method || '',
-                    query: captureResult.matchedRequest?.query || {},
-                    headers: captureResult.matchedRequest?.headers || {},
-                    postData: captureResult.matchedRequest?.postData || '',
-                    postDataJson: captureResult.matchedRequest?.postDataJson || null,
-                    postDataForm: captureResult.matchedRequest?.postDataForm || {}
-                },
-                capturedRequest: captureResult.matchedRequest,
-                requestCapture: {
-                    observedRequestCount: captureResult.observedRequestCount,
-                    matchedRequestCount: captureResult.matchedRequestCount,
-                    matchedRequests: captureResult.matchedRequests
-                },
-                pageTitle: snapshot?.title || '',
-                pageStructure,
-                executionTrace,
+                postData: captureResult.matchedRequest?.postData || '',
+                postDataJson: captureResult.matchedRequest?.postDataJson || null,
+                postDataForm: captureResult.matchedRequest?.postDataForm || {},
+                capturedAt: captureResult.matchedRequest?.capturedAt || new Date().toISOString(),
                 pageKeptOpen: settings.keepPageOpen
             }
         };
