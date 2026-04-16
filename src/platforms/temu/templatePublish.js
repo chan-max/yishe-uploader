@@ -292,10 +292,69 @@ function assignTemplateImages(payload = {}, uploadedImageUrls = []) {
     return nextPayload;
 }
 
+function syncSuggestedPricesFromSupplierFields(payload = {}) {
+    const nextPayload = isPlainObject(payload) ? { ...payload } : {};
+    if (!Array.isArray(nextPayload.productSkcReqs)) {
+        return nextPayload;
+    }
+
+    nextPayload.productSkcReqs = nextPayload.productSkcReqs.map((skc) => {
+        const nextSkc = isPlainObject(skc) ? { ...skc } : {};
+        const skuList = Array.isArray(nextSkc.productSkuReqs) ? nextSkc.productSkuReqs : [];
+
+        nextSkc.productSkuReqs = skuList.map((sku) => {
+            const nextSku = isPlainObject(sku) ? { ...sku } : {};
+            const suggestedPriceReq = isPlainObject(nextSku.productSkuSuggestedPriceReq)
+                ? { ...nextSku.productSkuSuggestedPriceReq }
+                : null;
+
+            if (!suggestedPriceReq) {
+                return nextSku;
+            }
+
+            if (Object.prototype.hasOwnProperty.call(suggestedPriceReq, 'suggestedPrice')) {
+                const supplierPrice = Number(nextSku.supplierPrice);
+                if (Number.isFinite(supplierPrice)) {
+                    suggestedPriceReq.suggestedPrice = supplierPrice;
+                }
+            }
+
+            if (
+                Object.prototype.hasOwnProperty.call(
+                    suggestedPriceReq,
+                    'suggestedPriceCurrencyType'
+                )
+            ) {
+                const currencyType = normalizeText(
+                    nextSku.currencyType || suggestedPriceReq.suggestedPriceCurrencyType
+                );
+                if (currencyType) {
+                    suggestedPriceReq.suggestedPriceCurrencyType = currencyType;
+                }
+            }
+
+            nextSku.productSkuSuggestedPriceReq = suggestedPriceReq;
+            return nextSku;
+        });
+
+        return nextSkc;
+    });
+
+    return nextPayload;
+}
+
+function stripTemuTemplateSubmissionFields(payload = {}) {
+    const nextPayload = isPlainObject(payload) ? { ...payload } : {};
+    delete nextPayload.productDraftId;
+    return nextPayload;
+}
+
 function buildTemuTemplatePublishPayload(productTemplate = {}, options = {}) {
     const templatePayload = cloneSerializable(productTemplate) || {};
     const titleAppliedPayload = fillTemplateTitle(templatePayload, options.title);
-    return assignTemplateImages(titleAppliedPayload, options.uploadedImageUrls || []);
+    const imageAppliedPayload = assignTemplateImages(titleAppliedPayload, options.uploadedImageUrls || []);
+    const priceSyncedPayload = syncSuggestedPricesFromSupplierFields(imageAppliedPayload);
+    return stripTemuTemplateSubmissionFields(priceSyncedPayload);
 }
 
 async function submitTemuTemplatePayload(payload = {}, sessionBundle = {}, options = {}) {
