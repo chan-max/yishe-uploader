@@ -1,3 +1,6 @@
+
+// 这个是 手动上传的 数据 可与用来参考 
+
 const data = {
     "cat1Id": 2542,
     "cat2Id": 3715,
@@ -10,7 +13,13 @@ const data = {
     "cat9Id": 0,
     "cat10Id": 0,
     "materialMultiLanguages": [],
-    "productName": "Hydrangea Floral Blue Garden Round Mouse Pad Small Desk Mat with Non-Slip Rubber Base for Office and Home Mouse Mat for Computer Laptop Gift for Friends Size7.8*7.8inch",
+    "productName": "Starry Night Clover Mouse Pad Round Cosmic Design Golden Luck Decor for Office Desk",
+    "productI18nReqs": [
+        {
+            "productName": "cat sweet mousepad",
+            "language": "en"
+        }
+    ],
     "productPropertyReqs": [
         {
             "valueUnit": "",
@@ -59,15 +68,27 @@ const data = {
             "pid": 2108,
             "templatePid": 1486169,
             "valueExtendInfo": ""
+        },
+        {
+            "valueUnit": "",
+            "propValue": "橡胶",
+            "propName": "背面材料",
+            "refPid": 7440,
+            "vid": 276827,
+            "numberInputValue": "",
+            "controlType": 1,
+            "pid": 477,
+            "templatePid": 1486170,
+            "valueExtendInfo": ""
         }
     ],
     "productSkcReqs": [
         {
             "previewImgUrls": [
-                "https://img.kwcdn.com/product/fancy/c4dfaefe-1970-4952-9487-27dbad445cd9.jpg"
+                "https://img.kwcdn.com/product/fancy/3f01b459-b600-438c-9400-123484733870.jpg"
             ],
             "productSkcCarouselImageI18nReqs": [],
-            "extCode": "",
+            "extCode": "sku-0",
             "mainProductSkuSpecReqs": [
                 {
                     "parentSpecId": 0,
@@ -78,10 +99,10 @@ const data = {
             ],
             "productSkuReqs": [
                 {
-                    "thumbUrl": "https://img.kwcdn.com/product/fancy/15471a70-1248-4da9-bffe-3dd2bd4c9f9b.jpg",
+                    "thumbUrl": "https://img.kwcdn.com/product/fancy/ece22a84-a568-4278-9014-23b138de0e8b.jpg",
                     "productSkuThumbUrlI18nReqs": [],
-                    "extCode": "",
-                    "supplierPrice": 1599,
+                    "extCode": "sku-1",
+                    "supplierPrice": 1200,
                     "currencyType": "CNY",
                     "productSkuSpecReqs": [
                         {
@@ -94,18 +115,165 @@ const data = {
                     ],
                     "productSkuId": 0,
                     "productSkuSuggestedPriceReq": {
-                        "suggestedPrice": 1500,
+                        "suggestedPrice": 1200,
                         "suggestedPriceCurrencyType": "CNY"
                     },
                     "productSkuUsSuggestedPriceReq": {},
                     "productSkuWhExtAttrReq": {
                         "productSkuVolumeReq": {
-                            "len": 315,
-                            "width": 60,
-                            "height": 60
+                            "len": 300,
+                            "width": 300,
+                            "height": 10
                         },
                         "productSkuWeightReq": {
-                            "value": 270000
+                            "value": 50000
+                        },
+                        "productSkuBarCodeReqs": [],
+                        "productSkuSensitiveAttrReq": {
+                            "isSensitive": 0,
+                            "sensitiveList": []
+                        },
+                        "productSkuSensitiveLimitReq": {}
+                    },
+                    "productSkuMultiPackReq": {
+                        "skuClassification": 1,
+                        "numberOfPieces": 1,
+                        "pieceUnitCode": 1,
+                        "productSkuNetContentReq": {},
+                        "totalNetContent": {}
+                    },
+                    "productSkuAccessoriesReq": {
+                        "productSkuAccessories": []
+                    },
+                    "productSkuNonAuditExtAttrReq": {}
+                },
+                {
+                    "thumbUrl": "https://img.kwcdn.com/product/fancy/8d73df0c-d4bf-4112-b3a3-f46d2fe56923.jpg",
+                    "productSkuThumbUrlI18nReqs": [],
+                    "extCode": "sku-2",
+                    "supplierPrice": 1400,
+                    "currencyType": "CNY",
+                    "productSkuSpecReqs": [
+                        {
+                            "parentSpecId": 1001,
+                            "parentSpecName": "颜色",
+                            "specId": 302101572,
+                            "specName": "8.66*8.66inches(22*22cm)",
+                            "specLangSimpleList": []
+                        }
+                    ],
+                    "productSkuId": 0,
+                    "productSkuSuggestedPriceReq": {
+                        "suggestedPrice": 1400,
+                        "suggestedPriceCurrencyType": "CNY"
+                    },
+                    "productSkuUsSuggestedPriceReq": {},
+                    "productSkuWhExtAttrReq": {
+                        "productSkuVolumeReq": {
+                            "len": 300,
+                            "width": 300,
+                            "height": 10
+                        },
+                        "productSkuWeightReq": {
+                            "value": 50000
+                        },
+                        "productSkuBarCodeReqs": [],
+                        "productSkuSensitiveAttrReq": {
+                            "isSensitive": 0,
+                            "sensitiveList": []
+                        },
+                        "productSkuSensitiveLimitReq": {}
+                    },
+                    "productSkuMultiPackReq": {
+                        "skuClassification": 1,
+                        "numberOfPieces": 1,
+                        "pieceUnitCode": 1,
+                        "productSkuNetContentReq": {},
+                        "totalNetContent": {}
+                    },
+                    "productSkuAccessoriesReq": {
+                        "productSkuAccessories": []
+                    },
+                    "productSkuNonAuditExtAttrReq": {}
+                },
+                {
+                    "thumbUrl": "https://img.kwcdn.com/product/fancy/8dbeb5a3-9628-45dc-95ad-45b79443dbec.jpg",
+                    "productSkuThumbUrlI18nReqs": [],
+                    "extCode": "sku-3",
+                    "supplierPrice": 1600,
+                    "currencyType": "CNY",
+                    "productSkuSpecReqs": [
+                        {
+                            "parentSpecId": 1001,
+                            "parentSpecName": "颜色",
+                            "specId": 302071622,
+                            "specName": "9.84*9.84inches(25*25cm)",
+                            "specLangSimpleList": []
+                        }
+                    ],
+                    "productSkuId": 0,
+                    "productSkuSuggestedPriceReq": {
+                        "suggestedPrice": 1600,
+                        "suggestedPriceCurrencyType": "CNY"
+                    },
+                    "productSkuUsSuggestedPriceReq": {},
+                    "productSkuWhExtAttrReq": {
+                        "productSkuVolumeReq": {
+                            "len": 300,
+                            "width": 300,
+                            "height": 10
+                        },
+                        "productSkuWeightReq": {
+                            "value": 50000
+                        },
+                        "productSkuBarCodeReqs": [],
+                        "productSkuSensitiveAttrReq": {
+                            "isSensitive": 0,
+                            "sensitiveList": []
+                        },
+                        "productSkuSensitiveLimitReq": {}
+                    },
+                    "productSkuMultiPackReq": {
+                        "skuClassification": 1,
+                        "numberOfPieces": 1,
+                        "pieceUnitCode": 1,
+                        "productSkuNetContentReq": {},
+                        "totalNetContent": {}
+                    },
+                    "productSkuAccessoriesReq": {
+                        "productSkuAccessories": []
+                    },
+                    "productSkuNonAuditExtAttrReq": {}
+                },
+                {
+                    "thumbUrl": "https://img.kwcdn.com/product/fancy/e5adfa9e-ab25-4b96-8d55-9c83405546cd.jpg",
+                    "productSkuThumbUrlI18nReqs": [],
+                    "extCode": "sku-4",
+                    "supplierPrice": 1800,
+                    "currencyType": "CNY",
+                    "productSkuSpecReqs": [
+                        {
+                            "parentSpecId": 1001,
+                            "parentSpecName": "颜色",
+                            "specId": 302061761,
+                            "specName": "11.81*11.81inches(30*30cm)",
+                            "specLangSimpleList": []
+                        }
+                    ],
+                    "productSkuId": 0,
+                    "productSkuSuggestedPriceReq": {
+                        "suggestedPrice": 1800,
+                        "suggestedPriceCurrencyType": "CNY"
+                    },
+                    "productSkuUsSuggestedPriceReq": {},
+                    "productSkuWhExtAttrReq": {
+                        "productSkuVolumeReq": {
+                            "len": 300,
+                            "width": 300,
+                            "height": 10
+                        },
+                        "productSkuWeightReq": {
+                            "value": 50000
                         },
                         "productSkuBarCodeReqs": [],
                         "productSkuSensitiveAttrReq": {
@@ -148,18 +316,70 @@ const data = {
             "valueGroupId": 0,
             "valueGroupName": "",
             "valueExtendInfo": ""
+        },
+        {
+            "parentSpecId": 1001,
+            "parentSpecName": "颜色",
+            "specId": 302101572,
+            "specName": "8.66*8.66inches(22*22cm)",
+            "vid": 0,
+            "specLangSimpleList": [],
+            "refPid": 0,
+            "pid": 0,
+            "templatePid": 0,
+            "propName": "颜色",
+            "propValue": "8.66*8.66inches(22*22cm)",
+            "valueUnit": "",
+            "valueGroupId": 0,
+            "valueGroupName": "",
+            "valueExtendInfo": ""
+        },
+        {
+            "parentSpecId": 1001,
+            "parentSpecName": "颜色",
+            "specId": 302071622,
+            "specName": "9.84*9.84inches(25*25cm)",
+            "vid": 0,
+            "specLangSimpleList": [],
+            "refPid": 0,
+            "pid": 0,
+            "templatePid": 0,
+            "propName": "颜色",
+            "propValue": "9.84*9.84inches(25*25cm)",
+            "valueUnit": "",
+            "valueGroupId": 0,
+            "valueGroupName": "",
+            "valueExtendInfo": ""
+        },
+        {
+            "parentSpecId": 1001,
+            "parentSpecName": "颜色",
+            "specId": 302061761,
+            "specName": "11.81*11.81inches(30*30cm)",
+            "vid": 0,
+            "specLangSimpleList": [],
+            "refPid": 0,
+            "pid": 0,
+            "templatePid": 0,
+            "propName": "颜色",
+            "propValue": "11.81*11.81inches(30*30cm)",
+            "valueUnit": "",
+            "valueGroupId": 0,
+            "valueGroupName": "",
+            "valueExtendInfo": ""
         }
     ],
     "carouselImageUrls": [
-        "https://img.kwcdn.com/product/fancy/c4dfaefe-1970-4952-9487-27dbad445cd9.jpg",
-        "https://img.kwcdn.com/product/fancy/40f2beda-57dc-43e8-ba7e-de9f2762ffab.jpg",
-        "https://img.kwcdn.com/product/fancy/2b4f6be1-0d44-41b9-b368-d638aecab1f4.jpg",
-        "https://img.kwcdn.com/product/fancy/e49453bf-3be4-41a5-a733-06bff742aec4.jpg",
-        "https://img.kwcdn.com/product/fancy/2c75f6a9-ba1e-4776-ae91-e1e88c750438.jpg",
-        "https://img.kwcdn.com/product/fancy/15471a70-1248-4da9-bffe-3dd2bd4c9f9b.jpg"
+        "https://img.kwcdn.com/product/fancy/3f01b459-b600-438c-9400-123484733870.jpg",
+        "https://img.kwcdn.com/product/fancy/6f5640ec-0828-42eb-82d0-183449897c74.jpg",
+        "https://img.kwcdn.com/product/fancy/8dbeb5a3-9628-45dc-95ad-45b79443dbec.jpg",
+        "https://img.kwcdn.com/product/fancy/e5adfa9e-ab25-4b96-8d55-9c83405546cd.jpg",
+        "https://img.kwcdn.com/product/fancy/8d73df0c-d4bf-4112-b3a3-f46d2fe56923.jpg",
+        "https://img.kwcdn.com/product/fancy/ece22a84-a568-4278-9014-23b138de0e8b.jpg",
+        "https://img.kwcdn.com/product/fancy/2c75f6a9-ba1e-4776-ae91-e1e88c750438.jpg"
     ],
     "carouselImageI18nReqs": [],
-    "materialImgUrl": "https://img.kwcdn.com/product/fancy/c4dfaefe-1970-4952-9487-27dbad445cd9.jpg",
+    "materialImgUrl": "https://img.kwcdn.com/product/fancy/3f01b459-b600-438c-9400-123484733870.jpg",
     "goodsLayerDecorationReqs": [],
     "goodsLayerDecorationCustomizeI18nReqs": [],
     "sizeTemplateIds": [],
@@ -177,7 +397,7 @@ const data = {
     "productDetailVideoReqList": [],
     "productOuterPackageImageReqs": [
         {
-            "imageUrl": "https://pfs.file.temu.com/product-material-private-tag/21140d60000/0c84f24d-d58d-44ec-8924-1e734ea63a8f_1080x1302.jpeg"
+            "imageUrl": "https://pfs.file.temu.com/product-material-private-tag/21140d60000/2a708e2f-2ee0-4f72-af86-da8eca57ac5e_1080x1302.jpeg"
         }
     ],
     "productOuterPackageReq": {
@@ -198,5 +418,5 @@ const data = {
         "protocolUrl": "https://dl.kwcdn.com/seller-public-file-us-tag/2079f603b6/56888d17d8166a6700c9f3e82972e813.html"
     },
     "productOriginCertFileReqs": [],
-    "productDraftId": 5213590394
+    "productDraftId": 7138958332
 }

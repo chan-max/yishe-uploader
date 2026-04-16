@@ -1,3 +1,4 @@
+import { runInNewContext } from 'node:vm';
 import { logger } from '../../utils/logger.js';
 import { PLATFORM_KEY, PLATFORM_NAME } from './constants.js';
 import { resolveTemuPublishBasicInfo } from './editForm.js';
@@ -38,6 +39,17 @@ function cloneSerializable(value) {
     }
 }
 
+function parseJsObjectLiteral(raw) {
+    try {
+        const parsed = runInNewContext(`(${raw})`, Object.create(null), {
+            timeout: 100
+        });
+        return isPlainObject(parsed) ? cloneSerializable(parsed) : null;
+    } catch {
+        return null;
+    }
+}
+
 function parseTemplateCandidate(value) {
     if (isPlainObject(value)) {
         return cloneSerializable(value);
@@ -56,7 +68,7 @@ function parseTemplateCandidate(value) {
         const parsed = JSON.parse(raw);
         return isPlainObject(parsed) ? cloneSerializable(parsed) : null;
     } catch {
-        return null;
+        return parseJsObjectLiteral(raw);
     }
 }
 
